@@ -826,6 +826,38 @@ private void OnQuestCompleted(Quest quest)
 
 ---
 
+## 12. Source vs Phase A — What Changed and Why
+
+This section documents every place where Phase A deviates from the original source, and why.
+
+| Area | Original Source Did | Phase A Does Instead | Why |
+|------|-------------------|---------------------|-----|
+| **ShopTerminal → ShopUI** | `ComputerTerminal.Interact()` directly calls `Singleton<UIManager>.Instance.ComputerShopUI.gameObject.SetActive()` — reaches across 2 system boundaries | `ShopTerminal.Interact()` fires `GameEvents.RaiseToggleShopRequested()`. ShopUI subscribes and toggles itself. | Decoupling. ShopTerminal has zero knowledge of UIManager or ShopUI. Adding a second terminal requires zero code changes. |
+| **Player cursor management** | `PlayerController.Update()` polls `Singleton<UIManager>.Instance.IsInAnyMenu()` every frame — direct dependency on UIManager | `SimplePlayerController` subscribes to `GameEvents.OnMenuStateChanged` in `Start()`, caches `_anyMenuOpen` bool. Zero per-frame singleton access. | Decoupling. Player has zero knowledge of UIManager. Any new menu just fires the same event. |
+| **Money change notification** | `EconomyManager` has a local `event Action<float> OnMoneyUpdated`. Subscribers must hold a reference to EconomyManager. | EconomyManager fires both local event AND `GameEvents.RaiseMoneyChanged()`. MoneyDisplay subscribes to the static event — no reference needed. | Decoupling. MoneyDisplay doesn't need to know EconomyManager exists. |
+| **Shop item unlocking** | `EconomyManager.UnlockShopItem()` fires local `event Action<ShopItem> ShopItemUnlocked`. `ComputerShopUI` subscribes directly to `EconomyManager.Instance.ShopItemUnlocked`. | `ShopManager.UnlockShopItem()` fires `GameEvents.RaiseShopItemUnlocked()`. ShopUI subscribes to the static event. | Decoupling. ShopUI doesn't subscribe to a specific manager instance. |
+| **ShopCategory** | Plain `[Serializable]` class stored in a `List<ShopCategory>` on EconomyManager. | `ScriptableObject` created via `Assets > Create > Shop > ShopCategory`. | Better editor workflow. Each category is its own asset file — easier to manage, reorder, and assign in inspector. |
+| **Shop ownership** | Shop items, categories, and purchases all live on `EconomyManager` — single god-manager. | Split into `EconomyManager` (money only) and `ShopManager` (items, categories, locks). | Single Responsibility. Economy doesn't need to know about shop categories. |
+| **Sound on actions** | `ComputerShopUI` plays sounds via `Singleton<SoundManager>.Instance.PlaySoundAtLocation()` on add/remove/purchase. | Phase A omits sound system entirely — will be added in a later phase. | Scope. Phase A focuses on interaction + cart logic. Sound is a separate system. |
+| **ShopItemDefinition** | Has `BuildingInventoryDefinition` reference, `UseNameAndDescriptionOfBuildingDefinition` flag, demo lock logic, and `SavableObjectID` lookup. | Simplified to core fields: `Name`, `Description`, `Price`, `Icon`, `PrefabToSpawn`, `IsLockedByDefault`, `MaxStackSize`. | Phase A doesn't have buildings, save/load, or demo mode yet. Fields will be added in future phases when those systems exist. |
+| **ShopItem purchase tracking** | Tracked in a separate `ShopPurchases` class with `SavableObjectID` keys for save/load persistence. | Tracked as a simple `_timesPurchased` int on `ShopItem`. | Phase A has no save/load. Will be replaced with persistent tracking when save system is added. |
+| **Interaction prompt text** | Original uses `KeybindTokenText` with `[ActionName]` token replacement to show rebindable key names. | Phase A uses hardcoded `KeyCode.E` for interaction. | Phase A has no keybind system. Will be swapped to Input System + rebinding in a later phase. |
+
+### What Stayed the Same
+
+These patterns matched the original source exactly — no changes needed:
+
+- **`Singleton<T>`** base class — identical implementation
+- **`IInteractable`** interface — same 4 methods
+- **`Interaction`** ScriptableObject — same fields (Name, Description, Icon)
+- **`InteractionWheelUI`** — same dynamic button spawning pattern
+- **`ShopUI` cart logic** — same add/merge/remove/purchase flow
+- **`ShopItemButton` UI update logic** — same affordability + lock state checks
+- **`ShopCartItemButton` quantity clamping** — same max-affordable calculation
+- **`ShopSpawnPoint`** — same `FindObjectsOfType` + random selection
+
+---
+
 ## Next Phase Preview
 
 Phase B will add:

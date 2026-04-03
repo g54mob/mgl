@@ -74,3 +74,34 @@
 - "LEGO-linkable?" — This is the most important architectural question. Added Section 11 with a concrete table: every Phase A extension point, what future phases plug into it, and what changes (answer: almost nothing). Included code examples of Phase B (OreNode) and Phase C (QuestManager) showing zero changes to Phase A files.
 - The golden rule I articulated: "Adding a new phase = adding new files + new ScriptableObject data. Existing scripts rarely change, and when they do, it's a one-liner." This is the Open-Closed Principle in practice without naming it that way — a learner absorbs the pattern without the jargon.
 - Resisted adding a Phase B preview with actual code. The user asked about linkability, not implementation. Kept it conceptual with just enough code to prove the point.
+
+---
+
+## Prompt 7: "What's the chance (0-100%) that I as a pro dev can produce a complete build?"
+
+**What I thought:**
+- Gave 95%. The 5% risk is purely Unity editor UX friction (UI anchoring, ScrollRect wiring, missed inspector assignments) — not conceptual.
+- Considered 100% but rejected it. Unity UI anchoring genuinely trips up even experienced devs. Honesty over hype.
+- Framed the real question as "how fast, not if" — estimated 2-3 hours. The code is done; remaining work is editor clicking.
+
+---
+
+## Prompt 8: "How does the main source handle lots of physics objects without slowing?"
+
+**What I thought:**
+- Three techniques, not one. Important to explain them as a coordinated system, not isolated tricks.
+- **Object Pooling** (`OrePiecePoolManager`) is the biggest win — eliminates Instantiate/Destroy GC pressure. The composite key `(ResourceType, PieceType, IsPolished)` is clever because it avoids resetting mesh/material on reuse.
+- **Self-regulating throttle** (`OreLimitManager`) is the most architecturally interesting. It only counts non-sleeping rigidbodies — this is the key insight. A pile of 500 ore sitting still costs nothing. Only moving objects matter.
+- **Amortized cleanup** (`OreManager.Update` checking one ore per frame) is subtle but important. Prevents orphan accumulation without ever doing an O(N) scan in a single frame.
+- The user asked "what technique" (singular) but the real answer is three techniques working in concert. Each alone isn't enough — pooling without throttling still crashes at high counts, throttling without pooling still gets GC spikes, cleanup without pooling still leaks.
+- Didn't mention Rigidbody.Sleep() explicitly as a "technique" because Unity does that automatically — but it's critical context for understanding why OreLimitManager only counts non-sleeping bodies.
+
+---
+
+## Prompt 9: "Goal is 100% source fidelity + decoupling. Add a diff section to each phase's GUIDE.md"
+
+**What I thought:**
+- This crystallizes the project rules: match the original source behavior exactly, but swap tight coupling for GameEvents/interfaces where the original used direct Singleton calls.
+- The diff table (Section 12 in GUIDE.md) is the key deliverable. 10 rows covering every deviation: what original did, what we did, why. Plus a "What Stayed the Same" list proving we didn't change things unnecessarily.
+- Updated the memory to capture all 5 rules: source fidelity, decoupling, Guide.md diff section, learn/phase-X folder, .NET 2.0 + summaries. This ensures consistency across all future phases.
+- The diff section is educational — a learner sees both approaches side by side and understands the tradeoff. It's not just documentation; it's a teaching tool.
