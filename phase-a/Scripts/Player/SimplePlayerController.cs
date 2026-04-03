@@ -33,17 +33,17 @@ public class SimplePlayerController : MonoBehaviour
         _characterController = GetComponent<CharacterController>();
         Cursor.lockState = CursorLockMode.Locked;
         Cursor.visible = false;
-        GameEvents.OnMenuStateChanged += OnMenuStateChanged;
+        GameEvents.OnMenuStateChanged += HandleMenuStateChanged;
     }
 
     /// <summary>Unsubscribes from menu events on destroy.</summary>
     private void OnDestroy()
     {
-        GameEvents.OnMenuStateChanged -= OnMenuStateChanged;
+        GameEvents.OnMenuStateChanged -= HandleMenuStateChanged;
     }
 
     /// <summary>Caches menu state from the global event instead of polling UIManager.</summary>
-    private void OnMenuStateChanged(bool anyMenuOpen)
+    private void HandleMenuStateChanged(bool anyMenuOpen)
     {
         _anyMenuOpen = anyMenuOpen;
     }

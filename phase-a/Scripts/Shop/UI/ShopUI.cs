@@ -60,7 +60,7 @@ public class ShopUI : MonoBehaviour
             SetupCategories();
         }
         RefreshCurrency();
-        GameEvents.OnShopItemUnlocked += OnShopItemUnlocked;
+        GameEvents.OnShopItemUnlocked += RefreshOnItemUnlocked;
         GameEvents.RaiseMenuStateChanged(true);
     }
 
@@ -68,24 +68,24 @@ public class ShopUI : MonoBehaviour
     private void Start()
     {
         ClearCart();
-        GameEvents.OnToggleShopRequested += OnToggleShopRequested;
+        GameEvents.OnToggleShopRequested += ToggleShop;
     }
 
     /// <summary>Unsubscribes from events on disable.</summary>
     private void OnDisable()
     {
-        GameEvents.OnShopItemUnlocked -= OnShopItemUnlocked;
+        GameEvents.OnShopItemUnlocked -= RefreshOnItemUnlocked;
         GameEvents.RaiseMenuStateChanged(false);
     }
 
     /// <summary>Unsubscribes from the toggle event when destroyed.</summary>
     private void OnDestroy()
     {
-        GameEvents.OnToggleShopRequested -= OnToggleShopRequested;
+        GameEvents.OnToggleShopRequested -= ToggleShop;
     }
 
     /// <summary>Toggles this panel on or off in response to the global event.</summary>
-    private void OnToggleShopRequested()
+    private void ToggleShop()
     {
         gameObject.SetActive(!gameObject.activeSelf);
     }
@@ -102,7 +102,7 @@ public class ShopUI : MonoBehaviour
     }
 
     /// <summary>Refreshes the item list when a shop item is unlocked.</summary>
-    private void OnShopItemUnlocked(ShopItem item)
+    private void RefreshOnItemUnlocked(ShopItem item)
     {
         RepopulateItemList();
     }

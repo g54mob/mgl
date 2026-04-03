@@ -13,18 +13,18 @@ public class MoneyDisplay : MonoBehaviour
     /// <summary>Subscribes to the money changed event on enable.</summary>
     private void OnEnable()
     {
-        GameEvents.OnMoneyChanged += OnMoneyChanged;
+        GameEvents.OnMoneyChanged += HandleMoneyChanged;
         RefreshDisplay();
     }
 
     /// <summary>Unsubscribes from the money changed event on disable.</summary>
     private void OnDisable()
     {
-        GameEvents.OnMoneyChanged -= OnMoneyChanged;
+        GameEvents.OnMoneyChanged -= HandleMoneyChanged;
     }
 
-    /// <summary>Callback that refreshes the display when money changes.</summary>
-    private void OnMoneyChanged(float newAmount)
+    /// <summary>Refreshes the display when money changes via GameEvents.</summary>
+    private void HandleMoneyChanged(float newAmount)
     {
         RefreshDisplay();
     }

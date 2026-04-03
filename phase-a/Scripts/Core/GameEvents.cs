@@ -21,6 +21,15 @@ public static class GameEvents
     /// <summary>Fired when something requests the shop UI to toggle open/closed.</summary>
     public static event Action OnToggleShopRequested;
 
+    /// <summary>Fired when the starting elevator reaches the bottom.</summary>
+    public static event Action OnElevatorLanded;
+
+    /// <summary>Fired when the game is paused.</summary>
+    public static event Action OnGamePaused;
+
+    /// <summary>Fired when the game is unpaused.</summary>
+    public static event Action OnGameUnpaused;
+
     /// <summary>Broadcasts a money change to all listeners.</summary>
     public static void RaiseMoneyChanged(float newAmount)
     {
@@ -63,6 +72,33 @@ public static class GameEvents
         if (OnToggleShopRequested != null)
         {
             OnToggleShopRequested.Invoke();
+        }
+    }
+
+    /// <summary>Broadcasts that the starting elevator has reached the bottom.</summary>
+    public static void RaiseElevatorLanded()
+    {
+        if (OnElevatorLanded != null)
+        {
+            OnElevatorLanded.Invoke();
+        }
+    }
+
+    /// <summary>Broadcasts that the game was paused.</summary>
+    public static void RaiseGamePaused()
+    {
+        if (OnGamePaused != null)
+        {
+            OnGamePaused.Invoke();
+        }
+    }
+
+    /// <summary>Broadcasts that the game was unpaused.</summary>
+    public static void RaiseGameUnpaused()
+    {
+        if (OnGameUnpaused != null)
+        {
+            OnGameUnpaused.Invoke();
         }
     }
 }

@@ -29,14 +29,14 @@ learn/phase-a/
     │   └── GameEvents.cs             — Static event bus for decoupled messaging
     ├── Interaction/
     │   ├── IInteractable.cs          — Interface for interactable world objects
-    │   ├── Interaction.cs            — ScriptableObject: interaction option data
+    │   ├── SO_Interaction.cs         — ScriptableObject: interaction option data
     │   ├── InteractionSystem.cs      — Raycast-based interaction detection
     │   └── InteractionWheelUI.cs     — Radial menu for multi-option interactions
     ├── Economy/
     │   └── EconomyManager.cs         — Singleton: player money management
     ├── Shop/
-    │   ├── ShopItemDefinition.cs     — ScriptableObject: purchasable item data
-    │   ├── ShopCategory.cs           — ScriptableObject: category grouping
+    │   ├── SO_ShopItemDefinition.cs  — ScriptableObject: purchasable item data
+    │   ├── SO_ShopCategory.cs        — ScriptableObject: category grouping
     │   ├── ShopItem.cs               — Runtime item wrapper (lock/purchase state)
     │   ├── ShopManager.cs            — Singleton: shop state and item registry
     │   ├── ShopTerminal.cs           — In-world interactable that opens shop UI
@@ -128,16 +128,16 @@ learn/phase-a/
 | ------------------------------------------------- | ------------------------------------------------------------- |
 | **Purpose**                                 | Interface for any world object the player can interact with   |
 | **Method: `ShouldUseInteractionWheel()`** | Return true to show radial menu, false for direct interaction |
-| **Method: `GetInteractions()`**           | Returns list of available Interaction options                 |
+| **Method: `GetInteractions()`**           | Returns list of available SO_Interaction options              |
 | **Method: `GetObjectName()`**             | Display name for the interaction prompt                       |
-| **Method: `Interact(Interaction)`**       | Executes the chosen interaction                               |
+| **Method: `Interact(SO_Interaction)`**    | Executes the chosen interaction                               |
 
-### Interaction/Interaction.cs
+### Interaction/SO_Interaction.cs
 
 | Item              | Detail                                                |
 | ----------------- | ----------------------------------------------------- |
 | **Purpose** | ScriptableObject defining a single interaction option |
-| **Create**  | Assets > Create > Interactions > Interaction          |
+| **Create**  | Assets > Create > Interactions > SO_Interaction          |
 | **Fields**  | `Name`, `Description`, `Icon` (Sprite)          |
 
 ### Interaction/InteractionSystem.cs
@@ -174,20 +174,20 @@ learn/phase-a/
 | **Method: `CanAfford(float)`**   | Returns true if player has enough           |
 | **Method: `FormatMoney(float)`** | Static — formats as "$1,234.56"            |
 
-### Shop/ShopItemDefinition.cs
+### Shop/SO_ShopItemDefinition.cs
 
 | Item              | Detail                                                                                                                    |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | **Purpose** | ScriptableObject defining a purchasable item                                                                              |
-| **Create**  | Assets > Create > Shop > ShopItemDefinition                                                                               |
+| **Create**  | Assets > Create > Shop > SO_ShopItemDefinition                                                                               |
 | **Fields**  | `Name`, `Description`, `Price` (int), `Icon` (Sprite), `PrefabToSpawn`, `IsLockedByDefault`, `MaxStackSize` |
 
-### Shop/ShopCategory.cs
+### Shop/SO_ShopCategory.cs
 
 | Item              | Detail                                                                |
 | ----------------- | --------------------------------------------------------------------- |
 | **Purpose** | ScriptableObject grouping items into a category tab                   |
-| **Create**  | Assets > Create > Shop > ShopCategory                                 |
+| **Create**  | Assets > Create > Shop > SO_ShopCategory                                 |
 | **Fields**  | `CategoryName`, `ShopItemDefinitions` (list), `HideIfAllLocked` |
 | **Runtime** | `ShopItems` list populated by ShopManager on Start                  |
 
@@ -195,7 +195,7 @@ learn/phase-a/
 
 | Item                                    | Detail                                                             |
 | --------------------------------------- | ------------------------------------------------------------------ |
-| **Purpose**                       | Runtime wrapper around ShopItemDefinition with lock/purchase state |
+| **Purpose**                       | Runtime wrapper around SO_ShopItemDefinition with lock/purchase state |
 | **Created by**                    | ShopManager during Start()                                         |
 | **Method: `GetPrice()`**        | Returns price from definition                                      |
 | **Method: `IsNewlyUnlocked()`** | True if was locked, now unlocked, and never purchased              |
@@ -207,7 +207,7 @@ learn/phase-a/
 | ---------------------------------------------- | --------------------------------------------------------- |
 | **Purpose**                              | Singleton managing all shop categories and items          |
 | **Attach to**                            | Empty GameObject named `[ShopManager]`                  |
-| **Inspector**                            | Assign `_allShopCategories` list of ShopCategory assets |
+| **Inspector**                            | Assign `_allShopCategories` list of SO_ShopCategory assets |
 | **Method: `GetAvailableCategories()`** | Returns all categories                                    |
 | **Method: `FindItemByDefinition()`**   | Finds runtime ShopItem by definition                      |
 | **Method: `UnlockShopItem()`**         | Unlocks a specific item by definition                     |
@@ -218,7 +218,7 @@ learn/phase-a/
 | -------------------------------- | ----------------------------------------------------------- |
 | **Purpose**                | In-world IInteractable that opens the shop UI               |
 | **Attach to**              | 3D object with a Collider (on Interactable layer)           |
-| **Inspector**              | Assign an Interaction ScriptableObject to `_interactions` |
+| **Inspector**              | Assign an SO_Interaction ScriptableObject to `_interactions` |
 | **Method: `Interact()`** | Toggles the ShopUI active state                             |
 
 ### Shop/ShopSpawnPoint.cs
@@ -522,19 +522,19 @@ Select `Player` → InteractionSystem component:
 
 ### Create Interaction Assets
 
-1. **Assets > Create > Interactions > Interaction**
+1. **Assets > Create > Interactions > SO_Interaction**
    - Name: `UseComputer`, field Name: "Use"
 
 ### Create Shop Item Definitions
 
-1. **Assets > Create > Shop > ShopItemDefinition**
+1. **Assets > Create > Shop > SO_ShopItemDefinition**
    - Example: `Pickaxe` — Name: "Pickaxe", Price: 50, Icon: any sprite, PrefabToSpawn: a cube prefab
    - Example: `Lantern` — Name: "Lantern", Price: 30, Icon: any sprite, PrefabToSpawn: a sphere prefab
    - Example: `Dynamite` — Name: "Dynamite", Price: 100, Icon: any sprite, IsLockedByDefault: true
 
 ### Create Shop Categories
 
-1. **Assets > Create > Shop > ShopCategory**
+1. **Assets > Create > Shop > SO_ShopCategory**
    - Example: `Tools` — CategoryName: "Tools", add Pickaxe + Lantern definitions
    - Example: `Explosives` — CategoryName: "Explosives", add Dynamite, HideIfAllLocked: true
 
@@ -543,12 +543,12 @@ Select `Player` → InteractionSystem component:
 1. Create simple 3D objects (Cube, Sphere, Cylinder)
 2. Add a Rigidbody to each
 3. Save as prefabs in `Assets/Prefabs/`
-4. Assign them to the ShopItemDefinition's `PrefabToSpawn` field
+4. Assign them to the SO_ShopItemDefinition's `PrefabToSpawn` field
 
 ### Wire Categories to ShopManager
 
 1. Select `[ShopManager]`
-2. Add your ShopCategory assets to `_allShopCategories` list
+2. Add your SO_ShopCategory assets to `_allShopCategories` list
 
 ---
 
@@ -783,7 +783,7 @@ Phase A is designed so future phases snap on without modifying existing code. He
 | **`Singleton<T>`**                     | New managers:`SavingLoadingManager`, `QuestManager`, `BuildingManager`             | Nothing. They just inherit from Singleton.                        |
 | **`EconomyManager`**                   | Quest rewards call `AddMoney()`, selling ore calls `AddMoney()`                      | Nothing. Already has the API.                                     |
 | **`ShopManager.UnlockShopItem()`**     | Quest system calls it when player completes a quest                                      | Nothing. Already wired to fire `GameEvents.OnShopItemUnlocked`. |
-| **`ShopItemDefinition.PrefabToSpawn`** | Point it at a BuildingCrate prefab instead of a plain cube                               | Just change the ScriptableObject data — zero code changes.       |
+| **`SO_ShopItemDefinition.PrefabToSpawn`** | Point it at a BuildingCrate prefab instead of a plain cube                            | Just change the ScriptableObject data — zero code changes.       |
 | **`InteractionSystem`**                | Works for machines, ore nodes, terminals, anything with a collider on Interactable layer | Nothing. Already generic.                                         |
 | **`UIManager.IsInAnyMenu()`**          | Add new panels: PauseMenu, QuestTree, Inventory. Just check them in `IsInAnyMenu()`.   | Add one `if` check per new panel.                               |
 | **`GameEvents.OnMenuStateChanged`**    | New menus fire it on enable/disable, player cursor auto-responds                         | Nothing. Player already subscribes.                               |
@@ -836,12 +836,13 @@ This section documents every place where Phase A deviates from the original sour
 | **Player cursor management** | `PlayerController.Update()` polls `Singleton<UIManager>.Instance.IsInAnyMenu()` every frame — direct dependency on UIManager | `SimplePlayerController` subscribes to `GameEvents.OnMenuStateChanged` in `Start()`, caches `_anyMenuOpen` bool. Zero per-frame singleton access. | Decoupling. Player has zero knowledge of UIManager. Any new menu just fires the same event. |
 | **Money change notification** | `EconomyManager` has a local `event Action<float> OnMoneyUpdated`. Subscribers must hold a reference to EconomyManager. | EconomyManager fires both local event AND `GameEvents.RaiseMoneyChanged()`. MoneyDisplay subscribes to the static event — no reference needed. | Decoupling. MoneyDisplay doesn't need to know EconomyManager exists. |
 | **Shop item unlocking** | `EconomyManager.UnlockShopItem()` fires local `event Action<ShopItem> ShopItemUnlocked`. `ComputerShopUI` subscribes directly to `EconomyManager.Instance.ShopItemUnlocked`. | `ShopManager.UnlockShopItem()` fires `GameEvents.RaiseShopItemUnlocked()`. ShopUI subscribes to the static event. | Decoupling. ShopUI doesn't subscribe to a specific manager instance. |
-| **ShopCategory** | Plain `[Serializable]` class stored in a `List<ShopCategory>` on EconomyManager. | `ScriptableObject` created via `Assets > Create > Shop > ShopCategory`. | Better editor workflow. Each category is its own asset file — easier to manage, reorder, and assign in inspector. |
+| **SO_ShopCategory** | Plain `[Serializable]` class stored in a `List<ShopCategory>` on EconomyManager. | `ScriptableObject` (`SO_ShopCategory`) created via `Assets > Create > Shop > SO_ShopCategory`. | Better editor workflow. Each category is its own asset file — easier to manage, reorder, and assign in inspector. |
 | **Shop ownership** | Shop items, categories, and purchases all live on `EconomyManager` — single god-manager. | Split into `EconomyManager` (money only) and `ShopManager` (items, categories, locks). | Single Responsibility. Economy doesn't need to know about shop categories. |
 | **Sound on actions** | `ComputerShopUI` plays sounds via `Singleton<SoundManager>.Instance.PlaySoundAtLocation()` on add/remove/purchase. | Phase A omits sound system entirely — will be added in a later phase. | Scope. Phase A focuses on interaction + cart logic. Sound is a separate system. |
-| **ShopItemDefinition** | Has `BuildingInventoryDefinition` reference, `UseNameAndDescriptionOfBuildingDefinition` flag, demo lock logic, and `SavableObjectID` lookup. | Simplified to core fields: `Name`, `Description`, `Price`, `Icon`, `PrefabToSpawn`, `IsLockedByDefault`, `MaxStackSize`. | Phase A doesn't have buildings, save/load, or demo mode yet. Fields will be added in future phases when those systems exist. |
+| **SO_ShopItemDefinition** | Original `ShopItemDefinition` has `BuildingInventoryDefinition` reference, `UseNameAndDescriptionOfBuildingDefinition` flag, demo lock logic, and `SavableObjectID` lookup. | Simplified to core fields: `Name`, `Description`, `Price`, `Icon`, `PrefabToSpawn`, `IsLockedByDefault`, `MaxStackSize`. Renamed to `SO_ShopItemDefinition`. | Phase A doesn't have buildings, save/load, or demo mode yet. Fields will be added in future phases when those systems exist. |
 | **ShopItem purchase tracking** | Tracked in a separate `ShopPurchases` class with `SavableObjectID` keys for save/load persistence. | Tracked as a simple `_timesPurchased` int on `ShopItem`. | Phase A has no save/load. Will be replaced with persistent tracking when save system is added. |
 | **Interaction prompt text** | Original uses `KeybindTokenText` with `[ActionName]` token replacement to show rebindable key names. | Phase A uses hardcoded `KeyCode.E` for interaction. | Phase A has no keybind system. Will be swapped to Input System + rebinding in a later phase. |
+| **SO_ naming convention** | Original source uses plain names: `Interaction`, `ShopItemDefinition`, `ShopCategory` for ScriptableObject classes. | All ScriptableObject classes prefixed with `SO_`: `SO_Interaction`, `SO_ShopItemDefinition`, `SO_ShopCategory`. | Convention makes it instantly clear which classes are data-only ScriptableObjects vs runtime MonoBehaviours. Prevents naming confusion in larger projects. |
 
 ### What Stayed the Same
 
@@ -849,7 +850,7 @@ These patterns matched the original source exactly — no changes needed:
 
 - **`Singleton<T>`** base class — identical implementation
 - **`IInteractable`** interface — same 4 methods
-- **`Interaction`** ScriptableObject — same fields (Name, Description, Icon)
+- **`SO_Interaction`** ScriptableObject — same fields (Name, Description, Icon)
 - **`InteractionWheelUI`** — same dynamic button spawning pattern
 - **`ShopUI` cart logic** — same add/merge/remove/purchase flow
 - **`ShopItemButton` UI update logic** — same affordability + lock state checks
