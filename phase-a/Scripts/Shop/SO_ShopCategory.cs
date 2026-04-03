@@ -7,11 +7,11 @@ using UnityEngine;
 /// Create via Assets > Create > Shop > ShopCategory.
 /// </summary>
 [CreateAssetMenu(fileName = "New ShopCategory", menuName = "Shop/ShopCategory")]
-public class ShopCategory : ScriptableObject
+public class SO_ShopCategory : ScriptableObject
 {
     public string CategoryName;
 
-    public List<ShopItemDefinition> ShopItemDefinitions = new List<ShopItemDefinition>();
+    public List<SO_ShopItemDefinition> ShopItemDefinitions = new List<SO_ShopItemDefinition>();
 
     [NonSerialized]
     public List<ShopItem> ShopItems = new List<ShopItem>();

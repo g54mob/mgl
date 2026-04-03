@@ -10,11 +10,11 @@ public interface IInteractable
     bool ShouldUseInteractionWheel();
 
     /// <summary>Returns the list of available interactions for this object.</summary>
-    List<Interaction> GetInteractions();
+    List<SO_Interaction> GetInteractions();
 
     /// <summary>Returns the display name shown in the interaction UI.</summary>
     string GetObjectName();
 
     /// <summary>Executes the chosen interaction on this object.</summary>
-    void Interact(Interaction selectedInteraction);
+    void Interact(SO_Interaction selectedInteraction);
 }

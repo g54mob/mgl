@@ -31,7 +31,7 @@ public class InteractionWheelUI : MonoBehaviour
             _objectNameText.text = interactable.GetObjectName();
         }
 
-        List<Interaction> interactions = interactable.GetInteractions();
+        List<SO_Interaction> interactions = interactable.GetInteractions();
         if (interactions == null)
         {
             return;
@@ -39,7 +39,7 @@ public class InteractionWheelUI : MonoBehaviour
 
         for (int i = 0; i < interactions.Count; i++)
         {
-            Interaction interaction = interactions[i];
+            SO_Interaction interaction = interactions[i];
             GameObject buttonObj = Object.Instantiate(_interactionButtonPrefab, _contentTransform);
 
             Text buttonText = buttonObj.GetComponentInChildren<Text>();
@@ -53,7 +53,7 @@ public class InteractionWheelUI : MonoBehaviour
             Button button = buttonObj.GetComponent<Button>();
             if (button != null)
             {
-                Interaction capturedInteraction = interaction;
+                SO_Interaction capturedInteraction = interaction;
                 IInteractable capturedInteractable = interactable;
                 button.onClick.AddListener(delegate
                 {
@@ -87,7 +87,7 @@ public class InteractionWheelUI : MonoBehaviour
     }
 
     /// <summary>Executes the selected interaction and closes the wheel.</summary>
-    private void SelectInteraction(Interaction selectedInteraction, IInteractable interactable)
+    private void SelectInteraction(SO_Interaction selectedInteraction, IInteractable interactable)
     {
         if (interactable != null)
         {

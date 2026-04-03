@@ -5,7 +5,7 @@ using UnityEngine;
 /// Create via Assets > Create > Interactions > Interaction.
 /// </summary>
 [CreateAssetMenu(fileName = "New Interaction", menuName = "Interactions/Interaction")]
-public class Interaction : ScriptableObject
+public class SO_Interaction : ScriptableObject
 {
     public string Name;
 

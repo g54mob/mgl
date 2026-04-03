@@ -45,7 +45,7 @@ public class ShopUI : MonoBehaviour
     public Color CanAffordColor = Color.green;
     public Color CantAffordColor = Color.red;
 
-    private ShopCategory _selectedCategory;
+    private SO_ShopCategory _selectedCategory;
     private List<ShopCategoryButton> _categoryButtons = new List<ShopCategoryButton>();
     private List<ShopCartItemButton> _cartItems = new List<ShopCartItemButton>();
 
@@ -127,10 +127,10 @@ public class ShopUI : MonoBehaviour
             return;
         }
 
-        List<ShopCategory> categories = Singleton<ShopManager>.Instance.GetAvailableCategories();
+        List<SO_ShopCategory> categories = Singleton<ShopManager>.Instance.GetAvailableCategories();
         for (int i = 0; i < categories.Count; i++)
         {
-            ShopCategory category = categories[i];
+            SO_ShopCategory category = categories[i];
             GameObject buttonObj = Object.Instantiate(_categoryButtonPrefab, _categoryButtonsContainer);
             ShopCategoryButton categoryBtn = buttonObj.GetComponent<ShopCategoryButton>();
             if (categoryBtn != null)
@@ -153,7 +153,7 @@ public class ShopUI : MonoBehaviour
     }
 
     /// <summary>Switches the displayed items to the selected category.</summary>
-    public void OpenCategory(ShopCategory category)
+    public void OpenCategory(SO_ShopCategory category)
     {
         _selectedCategory = category;
 
@@ -264,7 +264,7 @@ public class ShopUI : MonoBehaviour
     }
 
     /// <summary>Spawns the purchased item prefab at a random ShopSpawnPoint.</summary>
-    private bool TrySpawnItem(ShopItemDefinition definition, int quantity)
+    private bool TrySpawnItem(SO_ShopItemDefinition definition, int quantity)
     {
         if (definition.PrefabToSpawn == null)
         {
@@ -358,7 +358,7 @@ public class ShopUI : MonoBehaviour
     }
 
     /// <summary>Returns true if every item in the category is locked.</summary>
-    private bool AreAllItemsLocked(ShopCategory category)
+    private bool AreAllItemsLocked(SO_ShopCategory category)
     {
         for (int i = 0; i < category.ShopItems.Count; i++)
         {

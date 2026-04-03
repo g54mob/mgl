@@ -7,12 +7,12 @@ using System;
 [Serializable]
 public class ShopItem
 {
-    public ShopItemDefinition Definition;
+    public SO_ShopItemDefinition Definition;
     public bool IsLocked;
     private int _timesPurchased;
 
     /// <summary>Creates a runtime shop item from a definition, applying default lock state.</summary>
-    public ShopItem(ShopItemDefinition definition)
+    public ShopItem(SO_ShopItemDefinition definition)
     {
         Definition = definition;
         IsLocked = definition.IsLockedByDefault;

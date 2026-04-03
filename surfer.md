@@ -105,3 +105,14 @@
 - The diff table (Section 12 in GUIDE.md) is the key deliverable. 10 rows covering every deviation: what original did, what we did, why. Plus a "What Stayed the Same" list proving we didn't change things unnecessarily.
 - Updated the memory to capture all 5 rules: source fidelity, decoupling, Guide.md diff section, learn/phase-X folder, .NET 2.0 + summaries. This ensures consistency across all future phases.
 - The diff section is educational — a learner sees both approaches side by side and understands the tradeoff. It's not just documentation; it's a teaching tool.
+
+---
+
+## Prompt 10: "Prefix all ScriptableObject file and class names with SO_"
+
+**What I thought:**
+- 3 ScriptableObjects in Phase A: `Interaction`, `ShopItemDefinition`, `ShopCategory`. All need renaming to `SO_Interaction`, `SO_ShopItemDefinition`, `SO_ShopCategory`.
+- `ShopItem` is NOT a ScriptableObject (it's a plain `[Serializable]` runtime class) — correctly left it unchanged.
+- Ripple effect: 10 files reference these classes. Updated all of them: IInteractable, InteractionSystem, InteractionWheelUI, ShopTerminal, ShopItem, ShopManager, ShopUI, ShopCategoryButton. ShopItemButton and ShopCartItemButton only reference `ShopItem` (not a SO), so untouched.
+- Can't delete old files via tools. User needs to manually delete `Interaction.cs`, `ShopItemDefinition.cs`, `ShopCategory.cs` — the old non-prefixed versions.
+- The SO_ prefix is a good convention — instantly tells you a class is data-only (ScriptableObject) vs runtime behavior (MonoBehaviour). Prevents confusion in large projects where both exist for the same concept (e.g., `SO_ShopItemDefinition` = data, `ShopItem` = runtime state).

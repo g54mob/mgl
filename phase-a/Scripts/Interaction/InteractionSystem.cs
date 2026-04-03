@@ -61,7 +61,7 @@ public class InteractionSystem : MonoBehaviour
 
         if (interactables.Count == 1 && !interactables[0].ShouldUseInteractionWheel())
         {
-            List<Interaction> interactions = interactables[0].GetInteractions();
+            List<SO_Interaction> interactions = interactables[0].GetInteractions();
             if (interactions != null && interactions.Count > 0)
             {
                 interactables[0].Interact(interactions[0]);

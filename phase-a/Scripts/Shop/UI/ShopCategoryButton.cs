@@ -21,13 +21,13 @@ public class ShopCategoryButton : MonoBehaviour
     private Color _normalColor = new Color(0.2f, 0.2f, 0.2f, 1f);
 
     /// <summary>The category data this button represents.</summary>
-    public ShopCategory Category { get; private set; }
+    public SO_ShopCategory Category { get; private set; }
 
     /// <summary>Fired when this category button is clicked. Parameter is the category.</summary>
-    public event Action<ShopCategory> OnPressed;
+    public event Action<SO_ShopCategory> OnPressed;
 
     /// <summary>Configures this button with category data and sets the label text.</summary>
-    public void Initialize(ShopCategory category)
+    public void Initialize(SO_ShopCategory category)
     {
         Category = category;
         if (_nameText != null)

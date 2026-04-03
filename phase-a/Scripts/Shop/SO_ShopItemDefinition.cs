@@ -5,7 +5,7 @@ using UnityEngine;
 /// Create via Assets > Create > Shop > ShopItemDefinition.
 /// </summary>
 [CreateAssetMenu(fileName = "New ShopItemDefinition", menuName = "Shop/ShopItemDefinition")]
-public class ShopItemDefinition : ScriptableObject
+public class SO_ShopItemDefinition : ScriptableObject
 {
     public string Name;
 
