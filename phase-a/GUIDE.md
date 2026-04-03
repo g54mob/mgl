@@ -350,6 +350,7 @@ Create these **empty GameObjects** at root:
 1. **GameObject > UI > Canvas** → name it `UICanvas`
    - Canvas Scaler: Scale With Screen Size, Reference: 1920×1080
 2. Add component: **Canvas Group** (for potential fading)
+3. Unity should auto-create an **EventSystem** GameObject. If not, create one: **GameObject > UI > Event System**. Without this, no UI buttons will respond to clicks.
 
 #### 8a. HUD Panel
 
@@ -420,8 +421,16 @@ Create these **empty GameObjects** at root:
 | Name | Type | Layout Component | Notes |
 |------|------|-----------------|-------|
 | `CategoryContainer` | Empty with VerticalLayoutGroup | Content Size Fitter (Preferred) | Left column |
-| `ItemListContainer` | Empty with VerticalLayoutGroup | Inside a ScrollRect | Center column |
-| `CartListContainer` | Empty with VerticalLayoutGroup | Inside a ScrollRect | Right column |
+| `ItemListContainer` | Empty with VerticalLayoutGroup | Inside a ScrollRect (see below) | Center column |
+| `CartListContainer` | Empty with VerticalLayoutGroup | Inside a ScrollRect (see below) | Right column |
+
+**Setting up ScrollRect for ItemList and Cart:**
+1. Create an empty `ItemListScrollArea` as child of ShopPanel
+2. Add **ScrollRect** component to it, uncheck Horizontal
+3. Create `ItemListContainer` as child of `ItemListScrollArea`
+4. Add **VerticalLayoutGroup** + **ContentSizeFitter** (Vertical Fit: Preferred Size) to `ItemListContainer`
+5. Assign `ItemListContainer` as the ScrollRect's **Content** field
+6. Repeat the same for `CartListScrollArea` / `CartListContainer`
 | `MoneyText` | Text | — | Top bar, shows current money |
 | `CartTotalText` | Text | — | Bottom bar, shows cart total |
 | `PurchaseButton` | Button | — | Bottom bar, calls `ShopUI.PurchaseCart()` |
@@ -572,19 +581,21 @@ Run the scene and verify:
 
 ## 9. How Systems Communicate (No Tight Coupling)
 
+Every cross-system communication uses either **GameEvents** (static event bus) or the **IInteractable interface**. No script directly references an unrelated system.
+
 ### Problem: How does MoneyDisplay know money changed?
 
 **NOT this (tight coupling):**
 ```csharp
 // MoneyDisplay.Update()
-text = FindObjectOfType<EconomyManager>().Money; // BAD: polls every frame
+text = FindObjectOfType<EconomyManager>().Money; // BAD: polls every frame, direct reference
 ```
 
 **Instead (event-driven via GameEvents):**
 ```csharp
-// EconomyManager sets money → fires GameEvents.RaiseMoneyChanged(amount)
+// EconomyManager.Money setter → GameEvents.RaiseMoneyChanged(amount)
 // MoneyDisplay subscribes to GameEvents.OnMoneyChanged on OnEnable
-// MoneyDisplay updates text only when event fires
+// MoneyDisplay updates text only when the event fires — zero polling
 ```
 
 ### Problem: How does ShopUI know an item was unlocked?
@@ -599,24 +610,177 @@ text = FindObjectOfType<EconomyManager>().Money; // BAD: polls every frame
 // ShopManager.UnlockShopItem() → GameEvents.RaiseShopItemUnlocked(item)
 // ShopUI subscribes to GameEvents.OnShopItemUnlocked on OnEnable
 // ShopUI refreshes its item list when the event fires
+// ShopManager has zero knowledge of ShopUI's existence
 ```
 
 ### Problem: How does the player controller know a menu is open?
 
-**Reads from UIManager singleton (query, not coupling):**
+**NOT this (tight coupling):**
 ```csharp
-// SimplePlayerController checks UIManager.Instance.IsInAnyMenu()
-// UIManager doesn't know about the player — it just reports state
+// Every frame: player polls UIManager directly
+bool open = Singleton<UIManager>.Instance.IsInAnyMenu(); // BAD: direct dependency
 ```
 
-### Problem: How does InteractionSystem trigger the shop?
+**Instead (event-driven via GameEvents):**
+```csharp
+// ShopUI.OnEnable()  → GameEvents.RaiseMenuStateChanged(true)
+// ShopUI.OnDisable() → GameEvents.RaiseMenuStateChanged(false)
+// SimplePlayerController subscribes to GameEvents.OnMenuStateChanged in Start()
+// Caches _anyMenuOpen bool — zero per-frame singleton access
+// Player has zero knowledge of UIManager or ShopUI
+```
+
+### Problem: How does the ShopTerminal open the shop?
+
+**NOT this (tight coupling):**
+```csharp
+// ShopTerminal directly reaches into UIManager → ShopUI → toggles it
+Singleton<UIManager>.Instance.ShopUI.gameObject.SetActive(true); // BAD: knows 2 unrelated classes
+```
+
+**Instead (event-driven):**
+```csharp
+// ShopTerminal.Interact() → GameEvents.RaiseToggleShopRequested()
+// ShopUI subscribes to GameEvents.OnToggleShopRequested in Start()
+// ShopUI toggles itself — ShopTerminal has zero knowledge of ShopUI
+```
+
+### Problem: How does InteractionSystem trigger things?
 
 **Through the IInteractable interface (abstraction):**
 ```csharp
 // InteractionSystem raycasts → finds IInteractable → calls Interact()
 // It doesn't know it's a ShopTerminal — could be any IInteractable
-// ShopTerminal.Interact() toggles ShopUI via UIManager
+// Future phases: OreNode, Machine, BuildingObject all just implement IInteractable
+// InteractionSystem code never changes
 ```
+
+### Full Event Flow Diagram
+
+```
+ShopTerminal.Interact()
+    → GameEvents.RaiseToggleShopRequested()
+        → ShopUI.OnToggleShopRequested()        [toggles panel]
+
+ShopUI.OnEnable()
+    → GameEvents.RaiseMenuStateChanged(true)
+        → SimplePlayerController.OnMenuStateChanged()  [unlocks cursor]
+
+ShopUI.OnDisable()
+    → GameEvents.RaiseMenuStateChanged(false)
+        → SimplePlayerController.OnMenuStateChanged()  [locks cursor]
+
+EconomyManager.Money setter
+    → GameEvents.RaiseMoneyChanged(amount)
+        → MoneyDisplay.OnMoneyChanged()          [updates HUD text]
+
+ShopManager.UnlockShopItem()
+    → GameEvents.RaiseShopItemUnlocked(item)
+        → ShopUI.OnShopItemUnlocked()            [refreshes item list]
+
+ShopUI.PurchaseCart()
+    → GameEvents.RaiseItemPurchased()
+        → (future: quest system, analytics, etc.)
+```
+
+---
+
+## 10. What Phase A Looks Like When Running
+
+When you hit Play, this is what you should experience:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                                                         │
+│   You're a first-person player on a flat ground plane.  │
+│   WASD to walk, mouse to look around.                   │
+│                                                         │
+│   In front of you: a cube representing a shop terminal. │
+│   Walk up to it, press E.                               │
+│                                                         │
+│   A shop panel fills the screen:                        │
+│   - Left: category tabs (Tools, Explosives, etc.)       │
+│   - Center: scrollable item list with icons and prices  │
+│   - Right: your cart (empty at first)                   │
+│                                                         │
+│   Click "Add to Cart" on a Pickaxe ($50).               │
+│   Cart shows: Pickaxe x1  $50                           │
+│   Use +/- or type a number to change quantity.           │
+│                                                         │
+│   Add a Lantern ($30). Cart total: $80.                 │
+│   Your money: $500. Purchase button is green.            │
+│                                                         │
+│   Click Purchase.                                       │
+│   → Money drops to $420 (HUD updates instantly)         │
+│   → A cube and sphere spawn near the terminal           │
+│   → Cart clears                                         │
+│                                                         │
+│   Press ESC or E to close shop. Cursor re-locks.        │
+│   Walk around — the spawned objects are on the ground.   │
+│                                                         │
+│   Locked items show "Locked" with greyed-out buttons.    │
+│   If you spend too much, "Can't Afford" appears in red. │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Visually it's simple** — placeholder cubes/spheres, basic Unity UI panels. The value is in the *systems* working correctly: interaction, categories, cart math, purchase flow, event-driven updates, cursor management.
+
+---
+
+## 11. LEGO-Linkability to Future Phases
+
+Phase A is designed so future phases snap on without modifying existing code. Here's exactly how:
+
+### Extension Points Built Into Phase A
+
+| Phase A Piece | Future Phase Uses It By... | What Changes in Phase A? |
+|---------------|---------------------------|--------------------------|
+| **`IInteractable`** | OreNode, Machine, BuildingObject all `implement IInteractable` | Nothing. InteractionSystem already handles any IInteractable. |
+| **`GameEvents`** | Add new events: `OnOreMined`, `OnBuildingPlaced`, `OnQuestCompleted` | Only add new lines — never modify existing events. |
+| **`Singleton<T>`** | New managers: `SavingLoadingManager`, `QuestManager`, `BuildingManager` | Nothing. They just inherit from Singleton. |
+| **`EconomyManager`** | Quest rewards call `AddMoney()`, selling ore calls `AddMoney()` | Nothing. Already has the API. |
+| **`ShopManager.UnlockShopItem()`** | Quest system calls it when player completes a quest | Nothing. Already wired to fire `GameEvents.OnShopItemUnlocked`. |
+| **`ShopItemDefinition.PrefabToSpawn`** | Point it at a BuildingCrate prefab instead of a plain cube | Just change the ScriptableObject data — zero code changes. |
+| **`InteractionSystem`** | Works for machines, ore nodes, terminals, anything with a collider on Interactable layer | Nothing. Already generic. |
+| **`UIManager.IsInAnyMenu()`** | Add new panels: PauseMenu, QuestTree, Inventory. Just check them in `IsInAnyMenu()`. | Add one `if` check per new panel. |
+| **`GameEvents.OnMenuStateChanged`** | New menus fire it on enable/disable, player cursor auto-responds | Nothing. Player already subscribes. |
+| **`GameEvents.OnItemPurchased`** | Quest system subscribes to track "Buy 5 items" quests | Nothing. Event already fires. |
+
+### What a Phase B Addition Looks Like (Example: Mining)
+
+```csharp
+// New file: OreNode.cs — Phase B
+// Zero changes to any Phase A file
+
+public class OreNode : MonoBehaviour, IInteractable, IDamageable
+{
+    // Implements IInteractable → InteractionSystem already detects it
+    // When mined → GameEvents.RaiseOreMined(resourceType)
+    // Quest system subscribes → tracks mining progress
+    // Economy untouched, shop untouched, player untouched
+}
+```
+
+### What a Phase C Addition Looks Like (Example: Quest Unlocking Shop Items)
+
+```csharp
+// New file: QuestManager.cs — Phase C
+// Zero changes to any Phase A file
+
+private void OnQuestCompleted(Quest quest)
+{
+    // Uses existing Phase A API:
+    Singleton<ShopManager>.Instance.UnlockShopItem(quest.RewardItem);
+    Singleton<EconomyManager>.Instance.AddMoney(quest.RewardMoney);
+    // ShopUI auto-refreshes via GameEvents.OnShopItemUnlocked
+    // MoneyDisplay auto-refreshes via GameEvents.OnMoneyChanged
+}
+```
+
+### The Rule
+
+> **Adding a new phase should mean adding new files and new ScriptableObject data. Existing Phase A scripts should rarely need modification — and when they do, it's a one-line addition (like adding a panel check to `IsInAnyMenu`), never a rewrite.**
 
 ---
 
