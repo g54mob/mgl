@@ -28,7 +28,7 @@
 │   The elevator starts descending immediately.               │
 │                                                             │
 │   During descent:                                           │
-│   - Platform shakes side-to-side (Perlin noise on X/Z)     │
+│   - Platform shakes side-to-side (Perlin noise on X/Z)      │
 │   - Shake is strong at the top, fades as you approach       │
 │     the bottom                                              │
 │   - Speed is fast at top, decelerates smoothly near bottom  │
