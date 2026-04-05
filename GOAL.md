@@ -61,14 +61,17 @@ Never let Script A directly call into unrelated Script B via singleton. Instead:
 | `OnEnable()` | Event subscriptions for toggled objects (UI panels)        | `OnDisable()` |
 | `OnDestroy()` | Cleanup for Start subscriptions                  | —       |
 | `OnDisable()` | Cleanup for OnEnable subscriptions                | —       |
+| `GameObject.Destroy()` | Cleans up onClick/UnityEvent listeners automatically  |
+| `SetActive(false)`     | Does NOT clean listeners — use OnEnable/OnDisable if you ever want to deactivate here |   |
+| `Object pooling`         | Always wire/unwire explicitly in OnEnable/OnDisable  |
 
 ### 5. .NET 2.0 Compatibility
 
-- No `$""` string interpolation — use `string.Format()`
-- No `?.` null-conditional — use explicit `if (x != null)`
+- No `$""` string interpolation — use `string.Format()` -> sure
+- No `?.` null-conditional — use explicit `if (x != null)` -> sure
 - No `async/await` — use coroutines
 - No expression-bodied members for complex logic
-- `for` loops preferred over LINQ in hot paths
+- `for` loops preferred over LINQ in hot paths -> sure
 
 ### 6. Documentation Per Method
 
@@ -78,6 +81,12 @@ Every method gets a one-liner XML `<summary>` comment:
 /// <summary>Adds the given amount to the player's money.</summary>
 public void AddMoney(float amount)
 ```
+
+seperate script into section such as: 
+- public API
+- private API
+- Unity Life Cycle(if monobehaviour)
+- enums etc ....
 
 ### 7. Phase GUIDE.md Requirements
 
@@ -110,6 +119,18 @@ Append a new entry to `surfer.md` after **every** prompt response. Format:
 - bullet points of reasoning, tradeoffs, decisions
 ```
 
+### 10. UI Component Responsibility
+
+MonoBehaviour components attached to UI prefabs (buttons, rows, panels)
+are typed prefab handles — inspector field refs + display methods only.
+
+- Inspector refs:        ✅ TextMeshProUGUI, Image, Button, TMP_InputField
+- Visual state methods:  ✅ SetSelected(), RefreshUI(), SetData()
+- onClick wiring:        ❌ never — owned by the parent orchestrator (e.g. ShopUI)
+- Business logic:        ❌ never — owned by the parent orchestrator
+- Singleton access:      ❌ never — parent passes what the component needs
+
+The orchestrator instantiates, wires, and destroys. The component only displays.
 ---
 
 ## Phase Overview
@@ -164,3 +185,7 @@ learn/
 6. **Move to the next phase** when all checks pass
 
 When asking for a new phase to be built, just say "start Phase B" — the conventions, source references, and documentation structure are all defined here.
+
+
+
+refer: https://claude.ai/share/f27c9018-a032-446d-8ade-1809db75a64d
