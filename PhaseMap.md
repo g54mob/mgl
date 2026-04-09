@@ -1,30 +1,31 @@
 # PhaseMap — Full Build Roadmap
 
-> Maps every phase from start to finish. Each phase shows: what it looks like when done, all .cs files to create/modify, importance weight, and dependencies. Phases are ordered so each one builds on the last like LEGO.
+> Every phase is a self-contained vertical slice. Each system works standalone first, connects to others via GameEvents.
+> Refer to `GOAL.md` for architecture rules, naming conventions, folder structure.
 >
-> **This plan may evolve** — new files may be added, phases may split or merge as implementation reveals needs.
+> **This plan evolves** — files may be added, split, or merged as implementation reveals needs.
 
 ---
 
 ## Overview
 
-| Phase     | Name                       | Importance | Cumulative | Difficulty | Status |
-| ------------- | ------------------------------------------------ | ---------- | ---------- | ---------- | ------- |
-| **A**  | World Interaction + Shop Cart          | 7%     | 7%     | Easy    | Done  |
-| **A½** | The Mine — Environment & Elevator        | 3%     | 10%    | Easy    | Done  |
-| **B**  | Player Controller + Inventory + Tools + Grabbing | 15%    | 25%    | Hard    | Done  |
-| **C**  | Mining & Ore System               | 14%    | 39%    | Medium   | Planned |
-| **D**  | Building & Conveyor System            | 14%    | 53%    | Hard    | Planned |
-| **E**  | Ore Processing Machines             | 18%    | 71%    | Medium   | Planned |
-| **F**  | Quest & Research System             | 10%    | 81%    | Medium   | Planned |
-| **G**  | Save/Load System                 | 8%     | 89%    | Hard    | Planned |
-| **H**  | Sound, Settings & UI Polish           | 5%     | 94%    | Easy    | Planned |
-| **I**  | Contracts, World Events & Menus         | 4%     | 98%    | Easy    | Planned |
-| **J**  | Debug, Demo & Final Polish            | 2%     | 100%    | Easy    | Planned |
+| Phase | Name | Weight | Cumulative | Difficulty | Status |
+|-------|------|--------|------------|------------|--------|
+| **A** | World Interaction + Shop Cart | 7% | 7% | Easy | In Progress |
+| **A½** | The Mine — Environment & Elevator | 3% | 10% | Easy | Planned |
+| **B** | Player Controller + Inventory + Tools + Grabbing | 15% | 25% | Hard | Planned |
+| **C** | Mining & Ore System | 14% | 39% | Medium | Planned |
+| **D** | Building & Conveyor System | 14% | 53% | Hard | Planned |
+| **E** | Ore Processing Machines | 18% | 71% | Medium | Planned |
+| **F** | Quest & Research System | 10% | 81% | Medium | Planned |
+| **G** | Save/Load System | 8% | 89% | Hard | Planned |
+| **H** | Sound, Settings & UI Polish | 5% | 94% | Easy | Planned |
+| **I** | Contracts, World Events & Menus | 4% | 98% | Easy | Planned |
+| **J** | Debug, Demo & Final Polish | 2% | 100% | Easy | Planned |
 
 ---
 
-## Phase A — World Interaction + Shop Cart (8%) DONE
+## Phase A — World Interaction + Shop Cart (7%)
 
 ### What It Looks Like
 
@@ -33,32 +34,92 @@ First-person player on a flat plane. Walk to a cube (shop terminal),
 press E. Shop panel opens with category tabs, item list, cart.
 Add items, adjust quantity, purchase. Items spawn near terminal.
 Money updates on HUD. ESC closes shop, cursor re-locks.
+Each system testable independently via vertical slice tests.
 ```
 
-### Files (17 scripts)
+### Script Purpose
 
-| File                 | Type | Status |
-| ------------------------------------- | ---- | ------ |
-| `Core/Singleton.cs`         | New | Done  |
-| `Core/GameEvents.cs`        | New | Done  |
-| `Interaction/IInteractable.cs`   | New | Done  |
-| `Interaction/SO_Interaction.cs`   | New | Done  |
-| `Interaction/InteractionSystem.cs` | New | Done  |
-| `Interaction/InteractionWheelUI.cs` | New | Done  |
-| `Economy/EconomyManager.cs`     | New | Done  |
-| `Shop/SO_ShopItemDefinition.cs`   | New | Done  |
-| `Shop/SO_ShopCategory.cs`      | New | Done  |
-| `Shop/ShopItem.cs`         | New | Done  |
-| `Shop/ShopManager.cs`        | New | Done  |
-| `Shop/ShopTerminal.cs`       | New | Done  |
-| `Shop/ShopSpawnPoint.cs`      | New | Done  |
-| `Shop/UI/ShopUI.cs`         | New | Done  |
-| `Shop/UI/ShopCategoryButton.cs`   | New | Done  |
-| `Shop/UI/ShopItemButton.cs`     | New | Done  |
-| `Shop/UI/ShopCartItemButton.cs`   | New | Done  |
-| `Player/SimplePlayerController.cs` | New | Done  |
-| `UI/UIManager.cs`          | New | Done  |
-| `UI/MoneyDisplay.cs`        | New | Done  |
+```
+Singleton              → "I ensure one instance"
+GameEvents             → "I deliver messages between systems"
+EconomyManager         → "I own money"
+UIManager              → "I report if any menu is open"
+ShopUI                 → "I open and close the shop panel"
+BgUI                   → "I show/hide blur when menus change"
+SO_ShopItemDef         → "I define what a shop item IS"
+SO_ShopCategory        → "I group items into a category"
+SO_Interaction         → "I define one interaction option"
+Field_ShopCategory     → "I display one category tab"
+Field_ShopItem         → "I display one item row"
+Field_ShopCartItem     → "I display one cart row"
+WShopItem              → "I track what happened to one item this session"
+ShopDataService        → "I manage all shop data + cart as a collection"
+ShopUIOrchestrator     → "I wire UI fields to data and handle actions"
+ShopTerminal           → "I'm an interactable that fires open shop event"
+ShopSpawnPoint         → "I mark where purchased items spawn"
+SimplePlayerController → "I handle WASD movement + mouse look"
+InteractionSystem      → "I raycast from camera and trigger IInteractable"
+InteractionWheelUI     → "I show radial buttons for multi-option interactions"
+MoneyOrchestrator      → "I show money on HUD"
+```
+
+### Files (22 scripts)
+
+```
+0-Core/
+├── Singleton.cs
+└── GameEvents.cs
+
+1-Managers/
+├── EconomyManager.cs
+├── UIManager.cs
+└── SubManager/
+    ├── ShopUI.cs
+    └── BgUI.cs
+
+2-Data/
+├── SO_Interaction.cs
+├── SO_ShopCategory.cs
+├── SO_ShopItemDef.cs
+├── Field_ShopCategory.cs
+├── Field_ShopItem.cs
+├── Field_ShopCartItem.cs
+├── Interface/
+│   └── IInteractable.cs
+├── DataWrapper/
+│   └── WShopItem.cs
+└── DataService/
+    └── ShopDataService.cs       (includes CartItem as nested class)
+
+3-MonoBehaviours/
+├── Orchestrator/
+│   ├── ShopUIOrchestrator.cs
+│   └── MoneyOrchestrator.cs
+├── ShopTerminal.cs
+├── ShopSpawnPoint.cs
+├── SimplePlayerController.cs
+├── InteractionSystem.cs
+└── InteractionWheelUI.cs
+
+4-Utils/
+├── UtilsPhaseA.cs               (formatMoney extension, TrySpawnAtShopPoint)
+└── PhaseALOG.cs                 (per-collection snapshot formatters)
+
+5-Tests/
+├── ShopUITest.cs                (UI-level vertical slice)
+├── InteractionTest.cs           (interaction vertical slice)
+├── PlayerControllerTest.cs      (player vertical slice)
+└── DEBUG_Check.cs               (data-level test — plain C# instances)
+```
+
+### Vertical Slice Tests
+
+| Test | Tests what independently | NOT required |
+|------|------------------------|-------------|
+| DEBUG_Check | ShopDataService (plain C# instance, zero dependency) | Everything else |
+| ShopUITest | Full shop UI flow (Space/T/Y/L keys) | PlayerController, InteractionSystem, UIManager |
+| InteractionTest | Raycast + IInteractable + wheel UI | ShopUI, EconomyManager, PlayerController |
+| PlayerControllerTest | WASD + mouse look + cursor lock via events | ShopUI, InteractionSystem, EconomyManager |
 
 ### Original Source Reference
 
@@ -84,37 +145,34 @@ The mine floor has:
 - Tunnel openings leading to mining areas (empty for now)
 - Basic lighting (point lights, ambient)
 
-The shop terminal and spawn points from Phase A are repositioned
-into this environment. Everything from Phase A still works —
-just inside a proper mine instead of a flat plane.
+Everything from Phase A still works — just inside a proper mine.
 ```
 
-### Files (~5 scripts + scene work)
+### Script Purpose
 
-| File               | Type         | Original Source             |
-| --------------------------------- | -------------------- | --------------------------------------- |
-| `World/StartingElevator.cs`   | New         | `StartingElevator.cs`         |
-| `World/MainMenuCameraShaker.cs` | New         | `MainMenuCameraShaker.cs`       |
-| `Core/GameEvents.cs`      | **Modify**   | Add:`OnElevatorLanded`        |
-| Scene: Mine environment      | **Scene work** | Terrain/ProBuilder, lighting, colliders |
-| Scene: Reposition Phase A objects | **Scene work** | Move terminal + spawn points into mine |
+```
+StartingElevator → "I lower the player into the mine on scene start"
+CameraShaker     → "I add ambient Perlin noise sway + view punch to camera"
+```
 
-### Key Systems Introduced
+### Files
 
-- **StartingElevator** — Lerps Y position from `StartingHeight` to `EndHeight`, Perlin noise shake on X/Z, roof collider during descent, landing particle on arrival
-- **Scene design** — Enclosed mine room built with ProBuilder or terrain, tunnel openings for future mining areas
-- **Spawn point placement** — ShopSpawnPoints positioned so purchased items appear to "drop" from the elevator shaft above
+```
+3-MonoBehaviours/
+├── StartingElevator.cs          — code-driven elevator descent with shake
+└── CameraShaker.cs              — Perlin noise camera sway + view punch
 
-### What This Phase Is NOT
+0-Core/
+└── GameEvents.cs                — Modify: add OnElevatorLanded, OnGamePaused, OnGameUnpaused
 
-- No main menu scene yet (that's Phase I)
-- No scene loading/transitions (that's Phase G/I)
-- The elevator just runs on scene start for new games
-- Focus is purely on the physical environment the player inhabits
+Scene work:
+├── Mine environment             — ProBuilder/terrain, lighting, colliders
+└── Reposition Phase A objects   — terminal + spawn points inside mine
+```
 
 ### Original Source Reference
 
-`StartingElevator.cs`, `MainMenuCameraShaker.cs`, Scene layout from `Assets/Scenes/`
+`StartingElevator.cs`, `MainMenuCameraShaker.cs`
 
 ---
 
@@ -141,64 +199,107 @@ Equip magnet tool → hold right-click → nearby physics objects
 fly toward you via spring joints. Left-click to launch them.
 R to drop gently. Q to cycle grab mode.
 
-FresnelHighlighter outlines whatever you're looking at
-(tools glow cyan, grabbables glow, buildings glow when hammer equipped).
+FresnelHighlighter outlines whatever you're looking at.
+Each system testable independently.
 ```
 
-### Files (~30 scripts)
+### Script Purpose
 
-| File                  | Type                 | Original Source                        |
-| -------------------------------------- | ------------------------------------- | ------------------------------------------------------------- |
-| `Player/PlayerController.cs`     | New (replaces SimplePlayerController) | `PlayerController.cs` (888 lines)              |
-| `Player/PlayerInventory.cs`     | New                  | `PlayerInventory.cs`                    |
-| `Player/PlayerFootsteps.cs`     | New                  | `PlayerFootsteps.cs`                    |
-| `Player/PlayerSpawnPoint.cs`     | New                  | `PlayerSpawnPoint.cs`                    |
-| `Tools/BaseHeldTool.cs`       | New                  | `BaseHeldTool.cs`                      |
-| `Tools/BaseHeldToolSaveData.cs`   | New                  | `BaseHeldToolSaveData.cs`                  |
-| `Tools/ToolPickaxe.cs`        | New                  | `ToolPickaxe.cs`                      |
-| `Tools/ToolMagnet.cs`        | New                  | `ToolMagnet.cs`                       |
-| `Tools/ToolMagnetSaveData.cs`    | New                  | `ToolMagnetSaveData.cs`                   |
-| `Tools/ToolHammer.cs`        | New                  | `ToolHammer.cs`                       |
-| `Tools/ToolMiningHat.cs`       | New                  | `ToolMiningHat.cs`                     |
-| `Tools/ToolSupportsWrench.cs`    | New                  | `ToolSupportsWrench.cs`                   |
-| `Tools/ToolResourceScanner.cs`    | New                  | `ToolResourceScanner.cs`                  |
-| `Tools/ToolBuilder.cs`        | New                  | `ToolBuilder.cs` (partial — placement logic in Phase D)  |
-| `Physics/BasePhysicsObject.cs`    | New                  | `BasePhysicsObject.cs`                   |
-| `Physics/BaseSellableItem.cs`    | New (pulled forward)         | `BaseSellableItem.cs` — BaseHeldTool inherits from this  |
-| `Physics/PhysicsUtils.cs`      | New                  | `PhysicsUtils.cs`                      |
-| `Physics/PhysicsSoundPlayer.cs`   | New                  | `PhysicsSoundPlayer.cs`                   |
-| `Physics/PhysicsGib.cs`       | New                  | `PhysicsGib.cs`                       |
-| `Rendering/FresnelHighlighter.cs`  | New                  | `FresnelHighlighter.cs` (Highlight Plus wrapper)      |
-| `Rendering/HighlightStyle.cs`    | New                  | `HighlightStyle.cs`                     |
-| `UI/InventoryUIManager.cs`      | New                  | `InventoryUIManager.cs` (inferred)             |
-| `UI/InventorySlotUI.cs`       | New                  | `InventorySlotUI.cs`                    |
-| `UI/InventoryItemPreview.cs`     | New                  | `InventoryItemPreview.cs`                  |
-| `Data/SO_FootstepSoundDefinition.cs` | New                  | `FootstepSoundDefinition.cs`                |
-| `Enums/MagnetToolSelectionMode.cs`  | New (pulled forward)         | `MagnetToolSelectionMode.cs` — ToolMagnet requires this  |
-| `Enums/SavableObjectID.cs`      | New (stub, expanded Phase G)     | `SavableObjectID.cs` — ISaveLoadableObject requires this  |
-| `Interfaces/IIconItem.cs`      | New (pulled forward)         | Inferred — BaseHeldTool implements this           |
-| `Interfaces/ISaveLoadableObject.cs` | New (stub, expanded Phase G)     | `ISaveLoadableObject.cs` — BaseHeldTool implements this  |
-| `Core/GameEvents.cs`         | **Modify**           | Add:`OnToolSwitched`, `OnItemPickedUp`, `OnItemDropped`, `OnToolPickedUp` |
-| `UI/UIManager.cs`          | **Modify**           | Add inventory panel check, on-screen controls, building info |
+```
+PlayerMovement         → "I handle walk, sprint, duck, jump, slope sliding"
+PlayerCamera           → "I handle mouse look, FOV, camera bobbing"
+PlayerGrab             → "I grab physics objects with SpringJoint + LineRenderer"
+PlayerInventory        → "I manage hotbar + extended inventory slots"
+BaseHeldTool           → "I'm the base class for all equippable tools"
+ToolPickaxe            → "I swing and raycast-hit with delay"
+ToolMagnet             → "I pull nearby physics objects via spring joints"
+ToolHammer             → "I pick up / pack placed buildings"
+ToolBuilder            → "I show ghost preview and place buildings (partial — Phase D completes)"
+InventoryOrchestrator  → "I wire inventory slot Field_ instances"
+Field_InventorySlot    → "I display one inventory slot"
+FresnelHighlighter     → "I outline whatever the player looks at"
+WInventorySlot         → "I track what's in one inventory slot this session"
+InventoryDataService   → "I manage all inventory slot data"
+```
 
-> **Note:** 5 files were pulled forward from future phases because `BaseHeldTool` inherits `BaseSellableItem` and implements `ISaveLoadableObject` + `IIconItem` in the original source. Without these stubs, the inheritance chain doesn't compile. `MagnetToolSelectionMode` is similarly required by `ToolMagnet`. `SavableObjectID` is a minimal stub — expanded with full IDs in Phase G.
+### Files
+
+```
+0-Core/
+└── GameEvents.cs                    — Modify: add OnToolSwitched, OnItemPickedUp, OnItemDropped
+
+1-Managers/
+├── UIManager.cs                     — Modify: add inventory panel check to IsInAnyMenu()
+└── SubManager/
+    └── InventoryUI.cs               — toggle inventory panel (lifecycle + toggle only)
+
+2-Data/
+├── SO_FootstepSoundDefinition.cs
+├── Field_InventorySlot.cs           — display-only: slot icon, name, amount, selection state
+├── Interface/
+│   ├── IIconItem.cs                 — interface for items with inventory icons
+│   └── ISaveLoadableObject.cs       — stub interface (expanded Phase G)
+├── DataWrapper/
+│   └── WInventorySlot.cs            — runtime slot state
+├── DataService/
+│   └── InventoryDataService.cs      — manages all slots, add/remove/switch/stack
+└── Entities/
+    ├── MagnetToolSelectionMode.cs    — enum
+    ├── SavableObjectID.cs            — enum stub (expanded Phase G)
+    └── HighlightStyle.cs             — serializable struct
+
+3-MonoBehaviours/
+├── Orchestrator/
+│   └── InventoryOrchestrator.cs     — wires Field_InventorySlot instances
+├── PlayerMovement.cs                — WASD, sprint, duck, jump, gravity, slope
+├── PlayerCamera.cs                  — mouse look, FOV, camera bob, view model bob
+├── PlayerGrab.cs                    — SpringJoint grab + LineRenderer rope
+├── PlayerFootsteps.cs
+├── PlayerSpawnPoint.cs
+├── BasePhysicsObject.cs
+├── BaseSellableItem.cs
+├── PhysicsSoundPlayer.cs
+├── PhysicsGib.cs
+├── FresnelHighlighter.cs            — Highlight Plus wrapper
+├── BaseHeldTool.cs                  — base class for all tools
+├── ToolPickaxe.cs
+├── ToolMagnet.cs
+├── ToolHammer.cs
+├── ToolMiningHat.cs
+├── ToolSupportsWrench.cs
+├── ToolResourceScanner.cs
+└── ToolBuilder.cs                   — partial (placement logic in Phase D)
+
+4-Utils/
+├── UtilsPhaseB.cs                   — physics helpers
+└── PhaseBLOG.cs                     — inventory + tool snapshot formatters
+
+5-Tests/
+├── PlayerMovementTest.cs            — WASD + jump + sprint without inventory/tools
+├── PlayerGrabTest.cs                — grab physics cubes without inventory
+├── InventoryTest.cs                 — add/remove/switch tools without player
+└── DEBUG_CheckB.cs                  — InventoryDataService plain C# test
+```
+
+> **Note:** Original `PlayerController.cs` (888 lines) is split into `PlayerMovement`, `PlayerCamera`, `PlayerGrab` — each fits one sentence. Original `InventorySlotUI` (203 lines with business logic) becomes `Field_InventorySlot` (display only) + `InventoryOrchestrator` (wiring).
 
 ### Modifications to Earlier Phases
 
-| File (from earlier phase)        | Change                                | Why                    |
-| ---------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------ |
-| `Core/GameEvents.cs` (A)        | Add `OnToolSwitched`, `OnItemPickedUp`, `OnItemDropped` events | Decoupled tool/inventory notifications   |
-| `UI/UIManager.cs` (A)         | Add inventory panel check to `IsInAnyMenu()`            | Cursor unlock when inventory open     |
-| `Player/SimplePlayerController.cs` (A) | **Replaced** by `PlayerController.cs`            | Full controller supersedes the minimal one |
-| `World/StartingElevator.cs` (A½)   | Update player teleport to use `PlayerController.TeleportPlayer()` | New controller has proper teleport method |
+| File (Phase) | Change | Why |
+|-------------|--------|-----|
+| `0-Core/GameEvents.cs` (A) | Add `OnToolSwitched`, `OnItemPickedUp`, `OnItemDropped` | Decoupled tool/inventory notifications |
+| `1-Managers/UIManager.cs` (A) | Add inventory panel check to `IsInAnyMenu()` | Cursor unlock when inventory open |
+| `SimplePlayerController.cs` (A) | **Replaced** by `PlayerMovement.cs` + `PlayerCamera.cs` | Split controller supersedes minimal one |
+| `StartingElevator.cs` (A½) | Update player teleport to use new controller | New controller has proper teleport method |
 
-### Key Systems Introduced
+### Vertical Slice Tests
 
-- **SpringJoint grab** — Player creates SpringJoint on grabbed rigidbody, LineRenderer draws rope
-- **Tool hierarchy** — `BaseHeldTool` base class, concrete tools override `PrimaryFire()`, `SecondaryFire()`, etc.
-- **View/World model toggle** — Equipped tools show ViewModel, dropped tools show WorldModel
-- **Hotbar + extended inventory** — 10 hotbar slots + 30 extended, scroll/number keys to switch
-- **FresnelHighlighter** — CommandBuffer-based GPU outline on looked-at objects
+| Test | Tests what independently | NOT required |
+|------|------------------------|-------------|
+| DEBUG_CheckB | InventoryDataService (plain C# instance) | Everything else |
+| PlayerMovementTest | WASD + jump + sprint + cursor lock | Inventory, tools, shop |
+| PlayerGrabTest | SpringJoint grab on physics cubes | Inventory, tools, shop |
+| InventoryTest | Add/remove/switch tools in hotbar UI | PlayerMovement, shop, interaction |
 
 ---
 
@@ -212,22 +313,22 @@ Glowing ore nodes embedded in the walls/floor — different
 colors for Iron (grey), Gold (yellow), Copper (orange), Coal (black).
 
 Equip pickaxe from hotbar → hold left-click:
- - Swing animation plays
- - 0.2s delay, then raycast hits the node
- - Particle sparks fly from impact point
- - Node health bar decreases
- - After 3-4 hits, node shatters:
-  → 2-4 ore pieces fly out with random velocity
-  → Pieces bounce and roll on the ground (Rigidbody physics)
-  → Break particle burst plays
-  → Node disappears permanently (position saved for persistence)
+  - Swing animation plays
+  - 0.2s delay, then raycast hits the node
+  - Particle sparks fly from impact point
+  - Node health bar decreases
+  - After 3-4 hits, node shatters:
+    → 2-4 ore pieces fly out with random velocity
+    → Pieces bounce and roll on the ground (Rigidbody physics)
+    → Break particle burst plays
+    → Node disappears permanently (position saved for persistence)
 
 Ore pieces on the ground:
- - Grabbable with hand (right-click SpringJoint from Phase B)
- - Pullable with magnet tool (Phase B)
- - Each has ResourceType (Iron, Gold, etc.) + PieceType (Ore, Crushed, etc.)
- - Random mesh variant + slight scale variation for visual variety
- - Random price multiplier (0.9x–1.1x)
+  - Grabbable with hand (right-click SpringJoint from Phase B)
+  - Pullable with magnet tool (Phase B)
+  - Each has ResourceType (Iron, Gold, etc.) + PieceType (Ore, Crushed, etc.)
+  - Random mesh variant + slight scale variation for visual variety
+  - Random price multiplier (0.9x–1.1x)
 
 AutoMiner placed at a node → rotates continuously, spawns ore
 on a timer. Probability-based (80% default). Rate adjustable.
@@ -236,53 +337,84 @@ SellerMachine (trigger volume) → ore enters → waits 2s →
 money increases → ore returns to pool.
 
 With 500+ ore pieces active, OreLimitManager kicks in:
- - UI warning appears
- - Auto-miner spawn rate slows down
- - At 2000+ moving objects, spawning blocks entirely
+  - UI warning appears
+  - Auto-miner spawn rate slows down
+  - At 2000+ moving objects, spawning blocks entirely
 
 OrePiecePoolManager recycles all ore — zero Instantiate/Destroy
 after initial pool warmup. Smooth performance.
 ```
 
-### Files (~20 scripts)
+### Script Purpose
 
-| File                    | Type       | Original Source                     |
-| ------------------------------------------ | ---------------- | -------------------------------------------------------- |
-| `Ore/OrePiece.cs`            | New       | `OrePiece.cs` (443 lines)               |
-| `Ore/OreNode.cs`             | New       | `OreNode.cs`                      |
-| `Ore/OreManager.cs`           | New       | `OreManager.cs`                    |
-| `Ore/OrePiecePoolManager.cs`       | New       | `OrePiecePoolManager.cs`                |
-| `Ore/OreLimitManager.cs`         | New       | `OreLimitManager.cs`                  |
-| `Ore/OrePieceKey.cs`           | New       | `OrePieceKey.cs`                    |
-| `Ore/OrePieceEntry.cs`          | New       | `OrePieceEntry.cs`                   |
-| `Ore/DamageableOrePiece.cs`       | New       | `DamageableOrePiece.cs`                |
-| `Data/SO_ResourceDescription.cs`     | New       | `ResourceDescription.cs`                |
-| `Data/SO_AutoMinerResourceDefinition.cs` | New       | `AutoMinerResourceDefinition.cs`            |
-| `Data/SO_WeightedOreChance.cs`      | New       | `WeightedOreChance.cs`                 |
-| `Data/SO_WeightedNodeDrop.cs`      | New       | `WeightedNodeDrop.cs`                 |
-| `Enums/ResourceType.cs`         | New       | `ResourceType.cs`                   |
-| `Enums/PieceType.cs`           | New       | `PieceType.cs`                     |
-| `Interfaces/IDamageable.cs`       | New       | `IDamageable.cs`                    |
-| `Machines/SellerMachine.cs`       | New       | `SellerMachine.cs`                   |
-| `Machines/AutoMiner.cs`         | New       | `AutoMiner.cs`                     |
-| `Items/BaseSellableItem.cs`       | New       | `BaseSellableItem.cs`                 |
-| `Particles/ParticleManager.cs`      | New       | `ParticleManager.cs`                  |
-| `UI/PhysicsLimitUIWarning.cs`      | New       | `PhysicsLimitUIWarning.cs`               |
-| `Core/GameEvents.cs`           | **Modify** | Add:`OnOreMined`, `OnOreSold`, `OnOreLimitChanged` |
+```
+OreNode              → "I'm a breakable rock that drops ore pieces when mined"
+OrePiece             → "I'm a physical resource object with type + piece type"
+OreManager           → "I clean up invalid ore pieces (round-robin)"
+OrePiecePoolManager  → "I recycle ore objects to avoid GC spikes"
+OreLimitManager      → "I throttle spawning when too many physics objects exist"
+AutoMiner            → "I spawn ore on a timer at a node"
+SellerMachine        → "I sell ore that enters my trigger for money"
+OreDataService       → "I manage ore pool, weighted drops, resource descriptions"
+```
+
+### Files
+
+```
+0-Core/
+└── GameEvents.cs                        — Modify: add OnOreMined, OnOreSold, OnOreLimitChanged
+
+1-Managers/
+└── OreManager.cs                        — singleton: round-robin ore cleanup
+
+2-Data/
+├── SO_ResourceDescription.cs
+├── SO_AutoMinerResourceDefinition.cs
+├── SO_WeightedOreChance.cs
+├── SO_WeightedNodeDrop.cs
+├── Interface/
+│   └── IDamageable.cs
+├── DataWrapper/
+│   └── WOrePiece.cs                     — runtime ore state (resource type, piece type, polish %)
+├── DataService/
+│   └── OreDataService.cs               — pool management, weighted drops, resource queries
+└── Entities/
+    ├── ResourceType.cs                  — enum
+    ├── PieceType.cs                     — enum
+    ├── OrePieceKey.cs
+    └── OrePieceEntry.cs
+
+3-MonoBehaviours/
+├── OreNode.cs
+├── OrePiece.cs
+├── OrePiecePoolManager.cs
+├── OreLimitManager.cs
+├── AutoMiner.cs
+├── SellerMachine.cs
+├── ParticleManager.cs
+└── PhysicsLimitUIWarning.cs
+
+4-Utils/
+├── UtilsPhaseC.cs
+└── PhaseCLOG.cs
+
+5-Tests/
+├── OreTest.cs                           — spawn/mine/sell flow without player
+└── DEBUG_CheckC.cs                      — OreDataService plain C# test
+```
 
 ### Modifications to Earlier Phases
 
-| File (from earlier phase) | Change                             | Why                      |
-| -------------------------- | --------------------------------------------------------------- | ---------------------------------------------- |
-| `Core/GameEvents.cs` (A) | Add `OnOreMined`, `OnOreSold`, `OnOreLimitChanged` events | Quest system (Phase F) will subscribe to these |
+| File (Phase) | Change | Why |
+|-------------|--------|-----|
+| `0-Core/GameEvents.cs` (A) | Add `OnOreMined`, `OnOreSold`, `OnOreLimitChanged` | Quest system (Phase F) subscribes to these |
 
-### Key Systems Introduced
+### Vertical Slice Tests
 
-- **Object pooling** — `OrePiecePoolManager` with `Dictionary<OreKey, Queue<OrePiece>>`
-- **Performance throttle** — `OreLimitManager` counts non-sleeping rigidbodies, throttles spawn rates
-- **Amortized cleanup** — `OreManager` checks one ore per frame (round-robin)
-- **Weighted random drops** — Cumulative weight selection for node drops and sieve outputs
-- **OrePiece transformation chain** — Crush, smelt, roll, polish pipeline via prefab references
+| Test | Tests what independently | NOT required |
+|------|------------------------|-------------|
+| DEBUG_CheckC | OreDataService (weighted drops, pool logic) | Everything else |
+| OreTest | Spawn ore, mine node, sell at machine | Player (use test controls instead) |
 
 ---
 
@@ -295,74 +427,88 @@ Open shop → buy "Conveyor Belt" → a crate spawns near elevator.
 Walk to crate, press E → "Take" → goes into hotbar as ToolBuilder.
 
 Equip the conveyor tool from hotbar:
- - A transparent green ghost of the conveyor belt follows
-  your camera aim, snapped to a 1m world grid
- - Move mouse → ghost slides along grid positions
- - Look at invalid spot (overlapping another building) →
-  ghost turns red
- - Press R → ghost rotates 90°
- - Press Q → ghost mirrors (for L/R variants)
- - Place near another conveyor → auto-snaps input→output
-  (tests 4 rotations, picks best alignment)
- - Left-click → real conveyor belt instantiates at ghost position
- - Tool quantity decreases. At 0, tool is consumed.
+  - A transparent green ghost of the conveyor belt follows
+    your camera aim, snapped to a 1m world grid
+  - Move mouse → ghost slides along grid positions
+  - Look at invalid spot (overlapping another building) →
+    ghost turns red
+  - Press R → ghost rotates 90°
+  - Press Q → ghost mirrors (for L/R variants)
+  - Place near another conveyor → auto-snaps input→output
+    (tests 4 rotations, picks best alignment)
+  - Left-click → real conveyor belt instantiates at ghost position
+  - Tool quantity decreases. At 0, tool is consumed.
 
 Conveyor belt in the world:
- - Ore pieces that touch the belt trigger get pushed forward
-  via physics velocity in FixedUpdate
- - Place multiple belts end-to-end → ore flows along the line
- - Belt has visual texture scroll (ConveyorRenderer)
+  - Ore pieces that touch the belt trigger get pushed forward
+    via physics velocity in FixedUpdate
+  - Place multiple belts end-to-end → ore flows along the line
+  - Belt has visual texture scroll (ConveyorRenderer)
 
 Equip hammer → look at any placed building:
- - FresnelHighlighter outlines it in cyan
- - Press E → interaction wheel: "Take" or "Pack"
- - Take → building goes back into inventory as ToolBuilder
- - Pack → building becomes a crate on the ground
+  - FresnelHighlighter outlines it in cyan
+  - Press E → interaction wheel: "Take" or "Pack"
+  - Take → building goes back into inventory as ToolBuilder
+  - Pack → building becomes a crate on the ground
 
 Buildings on uneven ground:
- - Modular scaffolding legs raycast downward
- - Legs spawn dynamically to reach the floor
- - Toggle supports on/off with wrench tool
+  - Modular scaffolding legs raycast downward
+  - Legs spawn dynamically to reach the floor
+  - Toggle supports on/off with wrench tool
 ```
 
-### Files (~18 scripts)
+### Files
 
-| File                    | Type       | Original Source               |
-| ------------------------------------------ | ---------------- | -------------------------------------------- |
-| `Building/BuildingManager.cs`      | New       | `BuildingManager.cs` (404 lines)      |
-| `Building/BuildingObject.cs`       | New       | `BuildingObject.cs` (271 lines)      |
-| `Building/BuildingPlacementNode.cs`   | New       | `BuildingPlacementNode.cs`         |
-| `Building/BuildingCrate.cs`       | New       | `BuildingCrate.cs`             |
-| `Building/BuildingRotationInfo.cs`    | New       | `BuildingRotationInfo.cs`         |
-| `Building/ModularBuildingSupports.cs`  | New       | `ModularBuildingSupports.cs`        |
-| `Building/ScaffoldingSupportLeg.cs`   | New       | `ScaffoldingSupportLeg.cs`         |
-| `Building/BaseModularSupports.cs`    | New       | `BaseModularSupports.cs`          |
-| `Data/SO_BuildingInventoryDefinition.cs` | New       | `BuildingInventoryDefinition.cs`      |
-| `Data/SO_BuildingObjectEntry.cs`     | New       | `BuildingObjectEntry.cs`          |
-| `Enums/CanPlaceBuilding.cs`       | New       | `CanPlaceBuilding.cs`           |
-| `Enums/PlacementNodeRequirement.cs`   | New       | `PlacementNodeRequirement.cs`       |
-| `Enums/SupportType.cs`          | New       | `SupportType.cs`              |
-| `Conveyor/ConveyorBelt.cs`        | New       | `ConveyorBelt.cs`             |
-| `Conveyor/ConveyorBeltManager.cs`    | New       | `ConveyorBeltManager.cs`          |
-| `Conveyor/ConveyorRenderer.cs`      | New       | `ConveyorRenderer.cs`           |
-| `Conveyor/ConveyorSoundSource.cs`    | New       | `ConveyorSoundSource.cs`          |
-| `Tools/ToolBuilder.cs`          | **Modify** | Complete placement logic (grid, ghost, snap) |
+```
+1-Managers/
+└── BuildingManager.cs               — singleton: grid placement, ghost preview
+
+2-Data/
+├── SO_BuildingInventoryDefinition.cs
+├── Interface/
+│   └── (uses existing IInteractable)
+├── DataService/
+│   └── BuildingDataService.cs       — placement validation, conveyor snap detection
+└── Entities/
+    ├── CanPlaceBuilding.cs          — enum
+    ├── PlacementNodeRequirement.cs  — enum
+    ├── SupportType.cs               — enum
+    └── BuildingRotationInfo.cs
+
+3-MonoBehaviours/
+├── BuildingObject.cs
+├── BuildingPlacementNode.cs
+├── BuildingCrate.cs
+├── ModularBuildingSupports.cs
+├── ScaffoldingSupportLeg.cs
+├── BaseModularSupports.cs
+├── ConveyorBelt.cs
+├── ConveyorBeltManager.cs
+├── ConveyorRenderer.cs
+├── ConveyorSoundSource.cs
+└── ToolBuilder.cs                   — Modify: complete placement logic
+
+4-Utils/
+└── UtilsPhaseD.cs
+5-Tests/
+├── BuildingTest.cs                  — place/rotate/snap without player
+└── ConveyorTest.cs                  — conveyor flow without player
+```
 
 ### Modifications to Earlier Phases
 
-| File (from earlier phase)       | Change                                    | Why                                  |
-| ------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `Tools/ToolBuilder.cs` (B)     | Complete placement logic — grid snap, ghost preview, conveyor snap detection | Phase B creates partial ToolBuilder; Phase D finishes it        |
-| `Shop/SO_ShopItemDefinition.cs` (A) | Add `SO_BuildingInventoryDefinition` field                 | Links shop items to building data (crate → tool → building pipeline) |
-| `Shop/ShopUI.cs` (A)        | Update `TrySpawnItem()` to handle BuildingCrate spawning          | Buildings spawn as crates instead of raw prefabs            |
+| File (Phase) | Change | Why |
+|-------------|--------|-----|
+| `ToolBuilder.cs` (B) | Complete placement logic — grid snap, ghost, conveyor snap | Phase B creates partial; Phase D finishes |
+| `SO_ShopItemDef.cs` (A) | Add `SO_BuildingInventoryDefinition` field | Links shop items to building data |
+| `ShopUIOrchestrator.cs` (A) | Handle BuildingCrate spawning in purchase flow | Buildings spawn as crates |
 
-### Key Systems Introduced
+### Vertical Slice Tests
 
-- **Grid-based placement** — `GetClosestGridPosition()` snaps to 1m grid
-- **Ghost preview** — Instantiate prefab as ghost, swap materials, disable scripts
-- **Conveyor snap detection** — Test 4 rotations × all I/O points, pick best by frequency
-- **Physics conveyor** — `ConveyorBelt.FixedUpdate()` applies velocity to `BasePhysicsObject` on belt
-- **Modular supports** — Raycast downward, spawn scaffolding legs dynamically
+| Test | Tests what independently | NOT required |
+|------|------------------------|-------------|
+| BuildingTest | Place/rotate/snap buildings via test controls | Player, shop, ore |
+| ConveyorTest | Ore flows along belt chain | Player, shop |
 
 ---
 
@@ -371,98 +517,82 @@ Buildings on uneven ground:
 ### What It Looks Like
 
 ```
-You now have all the machines to build a complete factory.
-A typical layout in the mine:
-
-AutoMiner (placed at ore node) → ore spawns on a timer,
-drops onto a conveyor belt below it.
-  ↓
-Conveyor carries ore to CrusherMachine → ore enters trigger,
-2× crushed pieces pop out the other side. Crushing sound plays.
-  ↓
-Conveyor carries crushed ore to CastingFurnace:
- - Crushed pieces fall into the furnace basin
- - Liquid plane rises as pieces accumulate
- - Display shows contents bar (colored by resource type)
- - When enough material: furnace animates, pours into molds
- - Output depends on majority type:
-  All Iron → Iron Ingot. Iron + Coal → Steel. Mixed → Slag.
- - 3 mold slots → 3 output pieces per smelt cycle
-  ↓
-Conveyor carries ingots to shaping machines:
- - RollingMill → ingot becomes plate (flat)
- - PipeRoller → ingot becomes pipe (round)
- - RodExtruder → ingot becomes rod (thin)
- - ThreadingLathe → rod becomes threaded rod
-  ↓
-PolishingMachine → ore piece sits on the polisher,
-polish % gradually increases (0→100%). At 100%, piece
-transforms into polished variant (shinier material, higher sell price).
-  ↓
-SorterMachine → ore enters, routes to different output
-conveyors based on ResourceType. Configure filters per output.
-  ↓
-PackagerMachine → individual ore pieces boxed into a
-BoxObject container. Box tracks contents (type, count, polish).
-  ↓
-SellerMachine → box or loose ore enters trigger → sold after
-2s delay → money increases → quest progress updates.
-
-Advanced conveyor pieces:
- - ConveyorSplitter → splits flow into 2 directions
- - ConveyorBlocker → stops flow (toggle on/off)
- - RoutingConveyor → configurable output direction
- - RollerSplitter → alternates items between outputs
-
-DepositBox → animated bucket elevator, buckets move up/down,
-motor sound pitch scales with speed, auto-stops when idle.
-
-The player can now build a fully automated ore-to-money pipeline
-that runs while they mine more nodes or expand the factory.
+Full factory pipeline:
+AutoMiner → Conveyor → Crusher → Furnace → Shaping → Polish → Sort → Package → Sell
+Each machine is self-contained with trigger-based I/O.
+Advanced conveyors: splitters, blockers, routing.
+DepositBox: animated bucket elevator.
+Player builds fully automated ore-to-money pipeline.
 ```
 
-### Files (~30 scripts)
+### Script Purpose
 
-| File                       | Type | Original Source             |
-| ------------------------------------------------ | ---- | --------------------------------------- |
-| `Machines/CastingFurnace.cs`          | New | `CastingFurnace.cs` (456 lines)    |
-| `Machines/CastingFurnaceCoalInput.cs`     | New | `CastingFurnaceCoalInput.cs`     |
-| `Machines/CastingFurnaceInteractionHandler.cs` | New | `CastingFurnaceInteractionHandler.cs` |
-| `Machines/CastingFurnaceMoldArea.cs`      | New | `CastingFurnaceMoldArea.cs`      |
-| `Machines/BlastFurnace.cs`           | New | `BlastFurnace.cs`           |
-| `Machines/RollingMill.cs`           | New | `RollingMill.cs`           |
-| `Machines/PipeRoller.cs`            | New | `PipeRoller.cs`            |
-| `Machines/RodExtruder.cs`           | New | `RodExtruder.cs`           |
-| `Machines/ThreadingLathe.cs`          | New | `ThreadingLathe.cs`          |
-| `Machines/PolishingMachine.cs`         | New | `PolishingMachine.cs`         |
-| `Machines/CrusherMachine.cs`          | New | `CrusherMachine.cs`          |
-| `Machines/ClusterBreaker.cs`          | New | `ClusterBreaker.cs`          |
-| `Machines/ShakerTable.cs`           | New | `ShakerTable.cs`           |
-| `Machines/SorterMachine.cs`          | New | `SorterMachine.cs`          |
-| `Machines/BulkSorter.cs`            | New | `BulkSorter.cs`            |
-| `Machines/PackagerMachine.cs`         | New | `PackagerMachine.cs`         |
-| `Machines/DepositBox.cs`            | New | `DepositBox.cs`            |
-| `Machines/RapidAutoMiner.cs`          | New | `RapidAutoMiner.cs`          |
-| `Machines/RapidAutoMinerDrillBit.cs`      | New | `RapidAutoMinerDrillBit.cs`      |
-| `Machines/OreAnalyzer.cs`           | New | `OreAnalyzer.cs`           |
-| `Conveyor/ConveyorBlocker.cs`         | New | `ConveyorBlocker.cs`         |
-| `Conveyor/ConveyorBlockerT2.cs`        | New | `ConveyorBlockerT2.cs`        |
-| `Conveyor/ConveyorSplitterT2.cs`        | New | `ConveyorSplitterT2.cs`        |
-| `Conveyor/RollerSplitter.cs`          | New | `RollerSplitter.cs`          |
-| `Conveyor/RoutingConveyor.cs`         | New | `RoutingConveyor.cs`         |
-| `Items/BoxObject.cs`              | New | `BoxObject.cs`            |
-| `Items/BoxContents.cs`             | New | `BoxContents.cs`           |
-| `Items/BoxContentEntry.cs`           | New | `BoxContentEntry.cs`         |
-| `Items/BaseBasket.cs`             | New | `BaseBasket.cs`            |
-| `Items/SorterFilterBasket.cs`         | New | `SorterFilterBasket.cs`        |
-| `Items/Hopper.cs`               | New | `Hopper.cs`              |
-| `Data/SO_CastingFurnaceRecipie.cs`       | New | `CastingFurnaceRecipie.cs`      |
-| `Data/SO_CastingFurnaceMoldRecipieSet.cs`   | New | `CastingFurnaceMoldRecipieSet.cs`   |
-| `Enums/CastingMoldType.cs`           | New | `CastingMoldType.cs`         |
+```
+CastingFurnace    → "I smelt crushed ore by majority type into ingots"
+CrusherMachine    → "I crush ore into 2x smaller pieces"
+RollingMill       → "I flatten ingots into plates"
+PolishingMachine  → "I gradually polish ore pieces to increase value"
+SorterMachine     → "I route ore to different outputs by type"
+PackagerMachine   → "I box loose ore into BoxObject containers"
+DepositBox        → "I animate a bucket elevator for selling"
+```
+
+### Files
+
+```
+2-Data/
+├── SO_CastingFurnaceRecipe.cs
+├── SO_CastingFurnaceMoldRecipeSet.cs
+├── DataWrapper/
+│   └── WBoxContents.cs              — runtime box state
+└── Entities/
+    ├── CastingMoldType.cs           — enum
+    └── BoxContentEntry.cs
+
+3-MonoBehaviours/
+├── CastingFurnace.cs
+├── CastingFurnaceCoalInput.cs
+├── CastingFurnaceInteractionHandler.cs
+├── CastingFurnaceMoldArea.cs
+├── BlastFurnace.cs
+├── RollingMill.cs
+├── PipeRoller.cs
+├── RodExtruder.cs
+├── ThreadingLathe.cs
+├── PolishingMachine.cs
+├── CrusherMachine.cs
+├── ClusterBreaker.cs
+├── ShakerTable.cs
+├── SorterMachine.cs
+├── BulkSorter.cs
+├── PackagerMachine.cs
+├── DepositBox.cs
+├── RapidAutoMiner.cs
+├── OreAnalyzer.cs
+├── ConveyorBlocker.cs
+├── ConveyorSplitterT2.cs
+├── RollerSplitter.cs
+├── RoutingConveyor.cs
+├── BoxObject.cs
+├── BaseBasket.cs
+├── SorterFilterBasket.cs
+└── Hopper.cs
+
+4-Utils/
+└── PhaseELOG.cs
+5-Tests/
+└── MachineTest.cs                   — test individual machines with spawned ore
+```
 
 ### Modifications to Earlier Phases
 
-None — all new machine scripts. Each machine is self-contained with trigger/collision-based I/O.
+None — all new machine scripts. Each is self-contained with trigger/collision-based I/O.
+
+### Vertical Slice Tests
+
+| Test | Tests what independently | NOT required |
+|------|------------------------|-------------|
+| MachineTest | Individual machine I/O (spawn ore at input, check output) | Player, shop, quests |
 
 ---
 
@@ -471,78 +601,82 @@ None — all new machine scripts. Each machine is self-contained with trigger/co
 ### What It Looks Like
 
 ```
-Bottom-left of HUD shows active quest:
- "Sell 10 Iron Ingots (3/10)" ← progress bar updates live
-
-Sell ore at SellerMachine → quest counter increments.
-When all requirements met → quest completes automatically:
- - Notification appears
- - Shop items unlock (e.g. "Polishing Machine" now available)
- - Money reward added
- - Research tickets awarded
- - Next quest in chain auto-activates
-
-Press Q to open Quest Tree UI:
- - Full tree view of all quests
- - Completed quests: green checkmark
- - Available quests: white, clickable to activate
- - Locked quests: greyed out (prerequisites not met)
- - Click a quest → see requirements, rewards, description
- - Can pause/unpause active quests
-
-Quest types you'll see:
- - "Mine your first ore" (TriggeredQuestRequirement)
- - "Sell 10 Iron Ingots" (ResourceQuestRequirement)
- - "Research the Conveyor Belt" (UnlockResearchQuestRequirement)
- - "Buy an Auto-Miner" (ShopItemQuestRequirement)
-
-Research Tree (separate tab from Quest Tree):
- - Grid of research items with prerequisites
- - Each costs research tickets + optionally money
- - Completed items: colored. Locked: greyed.
- - Click to research → tickets deducted → item unlocked
- - Unlocked research enables new shop items or features
-
-This is the progression loop:
-Mine → Sell → Complete Quest → Unlock Items → Build Factory
-→ Earn More → Research → Unlock Advanced Machines → Repeat
+Quest HUD shows active quest. Quests chain: mine → sell → unlock → research.
+Quest Tree UI (Q key). Research Tree UI (separate tab).
+Progression loop: Mine → Sell → Quest → Unlock → Build → Research → Repeat.
 ```
 
-### Files (~20 scripts)
+### Script Purpose
 
-| File                    | Type       | Original Source                             |
-| ------------------------------------------- | ---------------- | ----------------------------------------------------------------------- |
-| `Quest/QuestManager.cs`          | New       | `QuestManager.cs`                           |
-| `Quest/Quest.cs`             | New       | `Quest.cs`                              |
-| `Quest/SO_QuestDefinition.cs`       | New       | `QuestDefinition.cs`                         |
-| `Quest/QuestRequirement.cs`        | New       | `QuestRequirement.cs`                         |
-| `Quest/ResourceQuestRequirement.cs`    | New       | `ResourceQuestRequirement.cs`                     |
-| `Quest/TriggeredQuestRequirement.cs`   | New       | `TriggeredQuestRequirement.cs`                    |
-| `Quest/TimedQuestRequirement.cs`     | New       | `TimedQuestRequirement.cs`                      |
-| `Quest/UnlockResearchQuestRequirement.cs` | New       | `UnlockResearchQuestRequirement.cs`                  |
-| `Quest/ShopItemQuestRequirement.cs`    | New       | `ShopItemQuestRequirement.cs`                     |
-| `Quest/ActiveQuestEntry.cs`        | New       | `ActiveQuestEntry.cs`                         |
-| `Quest/ResourceQuestRequirementEntry.cs` | New       | `ResourceQuestRequirementEntry.cs`                  |
-| `Research/ResearchManager.cs`       | New       | `ResearchManager.cs`                         |
-| `Research/SO_ResearchItemDefinition.cs`  | New       | `ResearchItemDefinition.cs`                      |
-| `UI/QuestHud.cs`             | New       | `QuestHud.cs`                             |
-| `UI/QuestTreeUI.cs`            | New       | `QuestTreeUI.cs`                           |
-| `UI/QuestTreeItemButton.cs`        | New       | `QuestTreeItemButton.cs`                       |
-| `UI/QuestTreeQuestInfoUI.cs`       | New       | `QuestTreeQuestInfoUI.cs`                       |
-| `UI/ResearchTreeUI.cs`          | New       | `ResearchTreeUI.cs`                          |
-| `UI/ResearchItemButton.cs`        | New       | `ResearchItemButton.cs`                        |
-| `Enums/QuestID.cs`            | New       | `QuestID.cs`                             |
-| `Enums/TriggeredQuestRequirementType.cs` | New       | `TriggeredQuestRequirementType.cs`                  |
-| `Core/GameEvents.cs`           | **Modify** | Add:`OnQuestCompleted`, `OnQuestActivated`, `OnResearchCompleted` |
-| `UI/UIManager.cs`             | **Modify** | Add quest tree panel to `IsInAnyMenu()`                |
+```
+QuestManager       → "I manage quest lifecycle (activate, progress, complete)"
+ResearchManager    → "I manage research items (spend tickets, unlock)"
+QuestDataService   → "I manage quest collections + progress tracking"
+WQuest             → "I track one quest's progress this session"
+QuestOrchestrator  → "I wire quest tree Field_ instances"
+Field_QuestItem    → "I display one quest in the tree"
+Field_ResearchItem → "I display one research item"
+```
+
+### Files
+
+```
+0-Core/
+└── GameEvents.cs                    — Modify: add OnQuestCompleted, OnQuestActivated, OnResearchCompleted
+
+1-Managers/
+├── QuestManager.cs
+├── ResearchManager.cs
+├── UIManager.cs                     — Modify: add quest tree to IsInAnyMenu() + Q key routing
+└── SubManager/
+    └── QuestTreeUI.cs               — toggle quest tree panel
+
+2-Data/
+├── SO_QuestDefinition.cs
+├── SO_ResearchItemDefinition.cs
+├── Field_QuestItem.cs
+├── Field_ResearchItem.cs
+├── DataWrapper/
+│   └── WQuest.cs
+├── DataService/
+│   └── QuestDataService.cs         — quest collections, progress, requirement checks
+└── Entities/
+    ├── QuestID.cs                   — enum
+    ├── TriggeredQuestRequirementType.cs — enum
+    ├── QuestRequirement.cs          — base class
+    ├── ResourceQuestRequirement.cs
+    ├── TriggeredQuestRequirement.cs
+    ├── TimedQuestRequirement.cs
+    ├── UnlockResearchQuestRequirement.cs
+    └── ShopItemQuestRequirement.cs
+
+3-MonoBehaviours/
+├── Orchestrator/
+│   ├── QuestOrchestrator.cs
+│   └── ResearchOrchestrator.cs
+└── QuestHud.cs
+
+4-Utils/
+└── PhaseFLOG.cs
+5-Tests/
+├── QuestTest.cs                     — activate/progress/complete quests without ore/machines
+└── DEBUG_CheckF.cs                  — QuestDataService plain C# test
+```
 
 ### Modifications to Earlier Phases
 
-| File (from earlier phase)  | Change                                 | Why                  |
-| --------------------------- | ----------------------------------------------------------------------- | -------------------------------------- |
-| `Core/GameEvents.cs` (A) | Add `OnQuestCompleted`, `OnQuestActivated`, `OnResearchCompleted` | Decoupled quest/research notifications |
-| `UI/UIManager.cs` (A)   | Add quest tree panel to `IsInAnyMenu()`                | Cursor unlock when quest tree open   |
-| `Shop/ShopManager.cs` (A) | Quest completion calls `UnlockShopItem()` via events         | Quests unlock shop items on completion |
+| File (Phase) | Change | Why |
+|-------------|--------|-----|
+| `0-Core/GameEvents.cs` (A) | Add `OnQuestCompleted`, `OnQuestActivated`, `OnResearchCompleted` | Decoupled quest/research notifications |
+| `1-Managers/UIManager.cs` (A) | Add quest tree to `IsInAnyMenu()` + Q key priority routing | Quest tree opens only when not in shop/pause |
+| `ShopDataService.cs` (A) | Quest completion unlocks shop items via events | Quests unlock shop items |
+
+### Vertical Slice Tests
+
+| Test | Tests what independently | NOT required |
+|------|------------------------|-------------|
+| DEBUG_CheckF | QuestDataService (plain C# instance) | Everything else |
+| QuestTest | Activate/progress/complete quests via test controls | Player, ore, machines, shop |
 
 ---
 
@@ -555,76 +689,93 @@ Press ESC → Pause Menu appears (game time freezes).
 FPS capped to 50 while paused (saves GPU).
 
 Click "Save Game":
- - Screen briefly captures a JPG screenshot
- - "Auto-saving..." warning appears on HUD
- - JSON file written atomically (write to .tmp, rename)
- - Backup .bak created before overwriting
- - Save includes:
-  • Every tool in inventory (position, slot, custom data)
-  • Every placed building (position, rotation, supports)
-  • Every ore piece in world (position, rotation, scale,
-   mesh ID, resource type, piece type, polish %)
-  • Player position + rotation
-  • Money, research tickets
-  • All quest progress (completed + active + counters)
-  • Shop purchase history
-  • Destroyed ore node positions
-  • World events (explosions, etc.)
-  • Total play time
+  - Screen briefly captures a JPG screenshot
+  - "Auto-saving..." warning appears on HUD
+  - JSON file written atomically (write to .tmp, rename)
+  - Backup .bak created before overwriting
+  - Save includes:
+    • Every tool in inventory (position, slot, custom data)
+    • Every placed building (position, rotation, supports)
+    • Every ore piece in world (position, rotation, scale,
+      mesh ID, resource type, piece type, polish %)
+    • Player position + rotation
+    • Money, research tickets
+    • All quest progress (completed + active + counters)
+    • Shop purchase history
+    • Destroyed ore node positions
+    • World events (explosions, etc.)
+    • Total play time
 
 Click "Load Game":
- - All existing objects destroyed
- - Scene reloaded
- - Every saved object reinstantiated from prefab lookup
- - Player teleported to saved position
- - Economy/quests/research restored
- - Destroyed nodes re-destroyed
+  - All existing objects destroyed
+  - Scene reloaded
+  - Every saved object reinstantiated from prefab lookup
+  - Player teleported to saved position
+  - Economy/quests/research restored
+  - Destroyed nodes re-destroyed
 
 Auto-save runs every 5 minutes (configurable):
- - Shows "Auto-saving..." warning briefly
- - Same atomic write process
+  - Shows "Auto-saving..." warning briefly
+  - Same atomic write process
 
 Save file format: versioned JSON (version 15).
 Backward compatible from version 4+.
 Legacy save migration from old folder structure.
 ```
 
-### Files (~18 scripts)
+### Files
 
-| File                      | Type | Original Source             |
-| ---------------------------------------------- | ---- | --------------------------------------- |
-| `SaveLoad/SavingLoadingManager.cs`      | New | `SavingLoadingManager.cs` (853 lines) |
-| `SaveLoad/SaveFile.cs`            | New | `SaveFile.cs`             |
-| `SaveLoad/SaveEntry.cs`           | New | `SaveEntry.cs`            |
-| `SaveLoad/SaveFileHeader.cs`         | New | `SaveFileHeader.cs`          |
-| `SaveLoad/SaveFileHeaderFileCombo.cs`    | New | `SaveFileHeaderFileCombo.cs`     |
-| `SaveLoad/AutoSaveManager.cs`        | New | `AutoSaveManager.cs`         |
-| `SaveLoad/SaveFileScreenshotCamera.cs`    | New | `SaveFileScreenshotCamera.cs`     |
-| `Interfaces/ISaveLoadableObject.cs`     | New | `ISaveLoadableObject.cs`       |
-| `Interfaces/ISaveLoadableBuildingObject.cs` | New | `ISaveLoadableBuildingObject.cs`   |
-| `Interfaces/ISaveLoadableStaticBreakable.cs` | New | `ISaveLoadableStaticBreakable.cs`   |
-| `Interfaces/ISaveLoadableWorldEvent.cs`   | New | `ISaveLoadableWorldEvent.cs`     |
-| `Interfaces/ICustomSaveDataProvider.cs`   | New | `ICustomSaveDataProvider.cs`     |
-| `Data/WorldEventEntry.cs`          | New | `WorldEventEntry.cs`         |
-| `Data/ShopPurchases.cs`           | New | `ShopPurchases.cs`          |
-| `Enums/SavableObjectID.cs`          | New | `SavableObjectID.cs`         |
-| `Enums/SavableWorldEventType.cs`       | New | `SavableWorldEventType.cs`      |
-| `UI/SaveFileButton.cs`            | New | `SaveFileButton.cs`          |
-| `UI/AutoSavingWarning.cs`          | New | `AutoSavingWarning.cs`        |
+```
+1-Managers/
+├── SavingLoadingManager.cs          — singleton: save, load, auto-save, versioning
+└── AutoSaveManager.cs
+
+2-Data/
+├── Interface/
+│   ├── ISaveLoadableObject.cs
+│   ├── ISaveLoadableBuildingObject.cs
+│   ├── ISaveLoadableStaticBreakable.cs
+│   ├── ISaveLoadableWorldEvent.cs
+│   └── ICustomSaveDataProvider.cs
+├── DataService/
+│   └── SaveDataService.cs           — serialize/deserialize all systems, prefab lookup
+└── Entities/
+    ├── SaveFile.cs, SaveEntry.cs, SaveFileHeader.cs
+    ├── SavableObjectID.cs           — enum (expanded from Phase B stub)
+    ├── SavableWorldEventType.cs     — enum
+    ├── WorldEventEntry.cs
+    └── ShopPurchases.cs
+
+3-MonoBehaviours/
+├── SaveFileScreenshotCamera.cs
+├── Field_SaveFileButton.cs          — display-only save file row
+└── AutoSavingWarning.cs
+
+4-Utils/
+└── PhaseGLOG.cs
+5-Tests/
+└── SaveLoadTest.cs                  — save/load cycle without full gameplay
+```
 
 ### Modifications to Earlier Phases
 
-| File (from earlier phase)      | Change                            | Why                          |
-| ----------------------------------- | ------------------------------------------------------------ | ----------------------------------------------------- |
-| `Tools/BaseHeldTool.cs` (B)    | Add `ISaveLoadableObject` interface            | Tools save/load position, inventory slot, custom data |
-| `Building/BuildingObject.cs` (D) | Add `ISaveLoadableBuildingObject` interface        | Buildings save/load position, rotation, support state |
-| `Ore/OreNode.cs` (C)       | Add `ISaveLoadableStaticBreakable` interface        | Broken nodes persist across saves           |
-| `Machines/AutoMiner.cs` (C)    | Add `ICustomSaveDataProvider` interface          | Save on/off state                   |
-| `Machines/CastingFurnace.cs` (E) | Add `ICustomSaveDataProvider` interface          | Save coal amount, mold types             |
-| `Economy/EconomyManager.cs` (A)  | Add `SetMoney()` for load, wire to save file        | Restore money on load                 |
-| `Shop/ShopItem.cs` (A)      | Add `ShopPurchases` tracking with `SavableObjectID` keys | Persistent purchase history              |
-| `Quest/QuestManager.cs` (F)    | Add `LoadFromSaveFile()` method              | Restore quest progress                |
-| `Research/ResearchManager.cs` (F) | Add `LoadFromSaveFile()` method              | Restore research progress               |
+| File (Phase) | Change | Why |
+|-------------|--------|-----|
+| `BaseHeldTool.cs` (B) | Add `ISaveLoadableObject` interface | Tools persist across saves |
+| `BuildingObject.cs` (D) | Add `ISaveLoadableBuildingObject` interface | Buildings persist |
+| `OreNode.cs` (C) | Add `ISaveLoadableStaticBreakable` interface | Broken nodes persist |
+| `AutoMiner.cs` (C) | Add `ICustomSaveDataProvider` interface | Save on/off state |
+| `CastingFurnace.cs` (E) | Add `ICustomSaveDataProvider` interface | Save coal, mold types |
+| `EconomyManager.cs` (A) | Add `SetMoney()` for load | Restore money |
+| `ShopDataService.cs` (A) | Add `ShopPurchases` tracking | Persistent purchase history |
+| `QuestManager.cs` (F) | Add `LoadFromSaveFile()` | Restore quest progress |
+| `ResearchManager.cs` (F) | Add `LoadFromSaveFile()` | Restore research progress |
+
+### Vertical Slice Tests
+
+| Test | Tests what independently | NOT required |
+|------|------------------------|-------------|
+| SaveLoadTest | Save → load → verify state matches | Only needs a minimal scene with a few objects |
 
 ---
 
@@ -633,79 +784,59 @@ Legacy save migration from old folder structure.
 ### What It Looks Like
 
 ```
-The game now has full audio and is fully configurable.
-
-Sounds you hear:
- - Pickaxe: swing whoosh, impact thud on nodes, clang on world
- - Ore: breaking crunch, crushing sound, furnace sizzle
- - Conveyor: ambient hum (spatial, N closest to player)
- - Machines: processing loops, pour sounds, motor sounds
- - Footsteps: surface-dependent (stone, metal, etc.)
- - UI: button hover, click, purchase chime, error buzz
- - Elevator: rumble during descent
-
-SoundManager pools 30 AudioSources. Sounds too far from
-player are culled (sqrMagnitude check). Zero allocation.
-
-Press ESC → Pause Menu → Settings:
- - Mouse Sensitivity slider
- - FOV slider (60–120)
- - Master Volume slider
- - Camera Bob slider (0–200%)
- - Viewmodel Bob slider (0–200%)
- - VSync toggle
- - FPS Limit (30/60/120/144/240/300/Unlimited)
- - Physics Object Limit (500/1000/2000/5000/10000)
- - Display Mode (Windowed/Borderless/Fullscreen)
- - Resolution dropdown
- - Invert Mouse X/Y toggles
- - Toggle Ducking (hold vs toggle)
- - Reverse Hotbar Scrolling toggle
-
-Keybind Rebinding:
- - List of all actions with current key shown
- - Click an action → "Press a key..." → press new key
- - Saved to keybinds.json in persistent data
- - Reset to Default button per binding
- - UI text auto-updates: "Press [Interact] to open" shows
-  actual bound key via token replacement
-
-All settings persist via PlayerPrefs. Applied on game start.
+Full audio: pickaxe, ore, conveyors, machines, footsteps, UI, elevator.
+SoundManager pools 30 AudioSources. Distance culling.
+Settings menu: sensitivity, FOV, volume, keybinds, display mode.
+All settings persist via PlayerPrefs.
 ```
 
-### Files (~15 scripts)
+### Files
 
-| File                | Type | Original Source      |
-| ---------------------------------- | ---- | ------------------------- |
-| `Sound/SoundManager.cs`     | New | `SoundManager.cs`    |
-| `Sound/SoundPlayer.cs`      | New | `SoundPlayer.cs`    |
-| `Sound/SO_SoundDefinition.cs`  | New | `SoundDefinition.cs`  |
-| `Sound/LoopingSoundPlayer.cs`  | New | `LoopingSoundPlayer.cs` |
-| `Sound/LoopingSoundFader.cs`   | New | `LoopingSoundFader.cs` |
-| `Settings/SettingsManager.cs`  | New | `SettingsManager.cs`  |
-| `Settings/SettingsMenu.cs`    | New | `SettingsMenu.cs`    |
-| `Settings/SettingSlider.cs`   | New | `SettingSlider.cs`   |
-| `Settings/SettingToggle.cs`   | New | `SettingToggle.cs`   |
-| `Settings/SettingKeybind.cs`   | New | `SettingKeybind.cs`   |
-| `Settings/ResolutionSetting.cs` | New | `ResolutionSetting.cs` |
-| `Settings/DisplayModeSetting.cs` | New | `DisplayModeSetting.cs` |
-| `Input/KeybindManager.cs`    | New | `KeybindManager.cs`   |
-| `Input/KeybindAction.cs`     | New | `KeybindAction.cs`   |
-| `Input/KeybindEntry.cs`     | New | `KeybindEntry.cs`    |
-| `Input/KeybindTokenText.cs`   | New | `KeybindTokenText.cs`  |
+```
+1-Managers/
+├── SoundManager.cs                  — singleton: pooled AudioSources, distance culling
+├── SettingsManager.cs               — singleton: PlayerPrefs for all settings
+├── KeybindManager.cs                — singleton: rebindable Input System
+├── UIManager.cs                     — Modify: add PauseMenu + ESC routing
+└── SubManager/
+    ├── PauseMenuUI.cs               — toggle pause, save/load/settings buttons
+    └── SettingsUI.cs                — toggle settings panel
+
+2-Data/
+├── SO_SoundDefinition.cs
+├── Field_SettingSlider.cs
+├── Field_SettingToggle.cs
+├── Field_SettingKeybind.cs
+└── Entities/
+    └── KeybindEntry.cs
+
+3-MonoBehaviours/
+├── Orchestrator/
+│   └── SettingsOrchestrator.cs      — wires settings Field_ instances
+├── SoundPlayer.cs
+├── LoopingSoundPlayer.cs
+├── LoopingSoundFader.cs
+├── ResolutionSetting.cs
+├── DisplayModeSetting.cs
+└── KeybindTokenText.cs
+
+4-Utils/
+└── PhaseHLOG.cs
+5-Tests/
+└── SoundTest.cs                     — play sounds without gameplay
+```
 
 ### Modifications to Earlier Phases
 
-| File (from earlier phase)        | Change                                                                  | Why                             |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| `Player/PlayerController.cs` (B)    | Read `SettingsManager.Instance.MouseSensitivity` / `DesiredFOV` / `CameraBobScale` instead of hardcoded `[SerializeField]` values | Settings become user-configurable instead of inspector-only |
-| `Player/PlayerController.cs` (B)    | Replace `Input.GetKeyDown(KeyCode.X)` → `PlayerInputActions` from Input System                            | All keybinds become rebindable               |
-| `Interaction/InteractionSystem.cs` (A) | Replace `KeyCode.E` → Input System action                                               | Interact key becomes rebindable               |
-| `Shop/ShopUI.cs` (A)          | Add purchase/add/remove sound calls via `SoundManager`                                         | UI sounds on cart actions                  |
-| `World/StartingElevator.cs` (A½)   | Wire `SoundPlayer` for elevator descent sound                                              | Elevator sound during descent                |
-| `Machines/*.cs` (E)          | Add processing sounds to each machine                                                   | Machine audio feedback                   |
-| `Tools/ToolPickaxe.cs` (B)       | Add swing/hit sounds via `SoundManager`                                                 | Mining audio feedback                    |
-| `UI/UIManager.cs` (A)         | Add `PauseMenu` panel reference + check in `IsInAnyMenu()`                                      | Pause menu integration                   |
+| File (Phase) | Change | Why |
+|-------------|--------|-----|
+| `PlayerCamera.cs` (B) | Read `SettingsManager.Ins` for sensitivity/FOV/bob | Settings become configurable |
+| `PlayerMovement.cs` (B) | Replace `Input.GetKeyDown` → Input System | Keybinds rebindable |
+| `InteractionSystem.cs` (A) | Replace `KeyCode.E` → Input System action | Interact key rebindable |
+| `ShopUIOrchestrator.cs` (A) | Add sound calls on purchase/add/remove | UI sounds |
+| `StartingElevator.cs` (A½) | Wire SoundPlayer for descent sound | Elevator audio |
+| `Machines/*.cs` (E) | Add processing sounds | Machine audio |
+| `ToolPickaxe.cs` (B) | Add swing/hit sounds | Mining audio |
 
 ---
 
@@ -714,69 +845,61 @@ All settings persist via PlayerPrefs. Applied on game start.
 ### What It Looks Like
 
 ```
-Contracts Terminal (in-world, near shop):
- - Walk up, press E → Contracts UI opens
- - List of available contracts:
-  "Deliver 20 Polished Iron Plates" — Reward: $2,000
-  "Deliver 10 Steel Ingots" — Reward: $3,500
- - Accept one contract at a time
- - Pack ore into BoxObjects via PackagerMachine
- - Carry/convey boxes to ContractSellTrigger
- - Box contents checked against contract requirements
- - Progress updates. Complete → claim reward → money added.
-
-World Objects:
- - DetonatorBuySign → buy dynamite for money
- - DetonatorTrigger → place near ore nodes, interact to detonate
- - Explosion blasts ore nodes, spawns ore pieces
- - BreakableCrate → hit with pickaxe → random loot drops
- - EditableSign → interact → type custom text → sign displays it
- - WaterVolume → player enters water trigger (swim/slow)
- - ExtinguishableFire → visual fire, can be put out
-
-Main Menu (separate scene):
- - Title screen with logo
- - MainMenuElevator sways gently (Perlin noise)
- - "New Game" → map selection → elevator drops → fade → load scene
- - "Load Game" → save file browser with JPG thumbnails
-  Shows: save name, date, play time, money, game version
- - "Settings" → same settings menu from Phase H
- - "Quit" → exits application
- - Loading screen during scene transitions
+Contracts terminal: accept contracts, fill boxes, deposit for money.
+World objects: dynamite, breakable crates, editable signs, water, fire.
+Main menu: new game, load game (save browser), settings, quit.
 ```
 
-### Files (~20 scripts)
+### Files
 
-| File                  | Type | Original Source      |
-| -------------------------------------- | ---- | -------------------------- |
-| `Contracts/ContractsManager.cs`   | New | `ContractsManager.cs`  |
-| `Contracts/SO_ContractDefinition.cs` | New | `ContractDefinition.cs` |
-| `Contracts/ContractInstance.cs`   | New | `ContractInstance.cs`  |
-| `Contracts/ContractsTerminal.cs`   | New | `ContractsTerminal.cs`  |
-| `Contracts/ContractSellTrigger.cs`  | New | `ContractSellTrigger.cs` |
-| `UI/ContractsTerminalUI.cs`     | New | `ContractsTerminalUI.cs` |
-| `UI/ContractInfoUI.cs`        | New | `ContractInfoUI.cs`   |
-| `World/DetonatorExplosion.cs`    | New | `DetonatorExplosion.cs` |
-| `World/DetonatorTrigger.cs`     | New | `DetonatorTrigger.cs`  |
-| `World/DetonatorBuySign.cs`     | New | `DetonatorBuySign.cs`  |
-| `World/BreakableCrate.cs`      | New | `BreakableCrate.cs`   |
-| `World/EditableSign.cs`       | New | `EditableSign.cs`    |
-| `World/ExtinguishableFire.cs`    | New | `ExtinguishableFire.cs` |
-| `World/WaterVolume.cs`        | New | `WaterVolume.cs`     |
-| `Menus/MainMenu.cs`         | New | `MainMenu.cs`      |
-| `Menus/LoadingMenu.cs`        | New | `LoadingMenu.cs`     |
-| `Menus/NewGameMenu.cs`        | New | `NewGameMenu.cs`     |
-| `Menus/PauseMenu.cs`         | New | `PauseMenu.cs`      |
-| `Menus/MapSelectButton.cs`      | New | `MapSelectButton.cs`   |
-| `UI/EditTextPopup.cs`        | New | `EditTextPopup.cs`    |
+```
+1-Managers/
+├── ContractsManager.cs
+├── UIManager.cs                     — Modify: add contracts panel + ESC close
+└── SubManager/
+    └── ContractsUI.cs               — toggle contracts panel
+
+2-Data/
+├── SO_ContractDefinition.cs
+├── Field_ContractInfo.cs
+├── DataWrapper/
+│   └── WContractInstance.cs
+├── DataService/
+│   └── ContractDataService.cs
+└── Entities/
+    └── (grouped contract entries)
+
+3-MonoBehaviours/
+├── Orchestrator/
+│   └── ContractOrchestrator.cs
+├── ContractsTerminal.cs
+├── ContractSellTrigger.cs
+├── DetonatorExplosion.cs
+├── DetonatorTrigger.cs
+├── DetonatorBuySign.cs
+├── BreakableCrate.cs
+├── EditableSign.cs
+├── ExtinguishableFire.cs
+├── WaterVolume.cs
+├── MainMenu.cs
+├── LoadingMenu.cs
+├── NewGameMenu.cs
+├── MapSelectButton.cs
+└── EditTextPopup.cs
+
+4-Utils/
+└── PhaseILOG.cs
+5-Tests/
+└── ContractTest.cs                  — accept/fill/deposit contract without full gameplay
+```
 
 ### Modifications to Earlier Phases
 
-| File (from earlier phase)      | Change                                  | Why                     |
-| ----------------------------------- | ------------------------------------------------------------------------ | -------------------------------------------- |
-| `UI/UIManager.cs` (A)       | Add `ContractsTerminalUI` panel reference + check in `IsInAnyMenu()` | Cursor unlock when contracts UI open     |
-| `World/StartingElevator.cs` (A½) | Wire to `SavingLoadingManager.SceneWasLoadedFromNewGame` check     | Only lower elevator on new game, not on load |
-| `Menus/PauseMenu.cs` (H)     | Add save/load file browser integration                  | Pause menu gets full save/load UI      |
+| File (Phase) | Change | Why |
+|-------------|--------|-----|
+| `UIManager.cs` (A) | Add contracts panel + ESC routing | Contracts UI in menu state |
+| `StartingElevator.cs` (A½) | Wire to SceneWasLoadedFromNewGame check | Only lower on new game |
+| `PauseMenuUI.cs` (H) | Add save/load file browser | Full pause menu |
 
 ---
 
@@ -785,63 +908,44 @@ Main Menu (separate scene):
 ### What It Looks Like
 
 ```
-Developer Mode (hidden):
- - Type "shaftmaster" during gameplay → dev mode activates
- - Sound plays on activation
- - Debug keys become active:
-  V → toggle noclip (fly through walls)
-  M → add $1,000
-  I → unlock all shop items
-  U → toggle unlimited building (no quantity consumed)
-  Z → complete next active quest
-  -/= → halve/double time scale
-  Backspace → reset time scale to 1.0
- - Debug shop categories become visible
- - DebugOreSpawner → spawn any ore type at cursor
-
-Error Handling:
- - Runtime errors/exceptions caught via Application.logMessageReceived
- - Error popup appears in-game with message + stack trace
- - "Don't show again this session" option
-
-Version & Level Management:
- - Version number displayed on HUD and main menu
- - LevelManager tracks current scene/level ID
- - DemoManager restricts locked items in demo builds
-
-Visual Polish:
- - DisplacementMeshGenerator → terrain detail meshes
- - VertexPainter → hand-painted vertex colors on mine walls
- - DecalDestroyer → cleanup decals when objects are removed
- - Particle tuning across all systems
-
-The game is now feature-complete.
+Dev mode: type "shaftmaster" → debug keys (noclip, money, unlock all, time scale).
+Error popup. Version display. Demo mode restrictions. Visual polish.
+Game is feature-complete.
 ```
 
-### Files (~12 scripts)
+### Files
 
-| File                  | Type | Original Source         |
-| --------------------------------------- | ---- | -------------------------------- |
-| `Debug/DebugManager.cs`        | New | `DebugManager.cs`       |
-| `Debug/DebugOreSpawner.cs`      | New | `DebugOreSpawner.cs`      |
-| `Debug/ToolDebugSpawnTool.cs`     | New | `ToolDebugSpawnTool.cs`    |
-| `Core/VersionManager.cs`       | New | `VersionManager.cs`      |
-| `Core/LevelManager.cs`        | New | `LevelManager.cs`       |
-| `Core/LevelInfo.cs`          | New | `LevelInfo.cs`         |
-| `Core/DemoManager.cs`         | New | `DemoManager.cs`        |
-| `Visual/DisplacementMeshGenerator.cs` | New | `DisplacementMeshGenerator.cs` |
-| `Visual/VertexPainter.cs`       | New | `VertexPainter.cs`       |
-| `Visual/DecalDestroyer.cs`      | New | `DecalDestroyer.cs`      |
-| `UI/ErrorMessagePopup.cs`       | New | `ErrorMessagePopup.cs`     |
-| `UI/InfoMessagePopup.cs`       | New | `InfoMessagePopup.cs`     |
+```
+1-Managers/
+├── DebugManager.cs
+├── VersionManager.cs
+├── LevelManager.cs
+└── DemoManager.cs
+
+2-Data/
+└── Entities/
+    └── LevelInfo.cs
+
+3-MonoBehaviours/
+├── DebugOreSpawner.cs
+├── ToolDebugSpawnTool.cs
+├── DisplacementMeshGenerator.cs
+├── VertexPainter.cs
+├── DecalDestroyer.cs
+├── ErrorMessagePopup.cs
+└── InfoMessagePopup.cs
+
+5-Tests/
+└── DebugTest.cs                     — verify debug keys work
+```
 
 ### Modifications to Earlier Phases
 
-| File (from earlier phase)     | Change                      | Why                |
-| ---------------------------------- | ------------------------------------------------ | --------------------------------- |
-| `Player/PlayerController.cs` (B) | Add noclip toggle on V key (dev mode only)    | Debug flight mode         |
-| `Economy/EconomyManager.cs` (A) | Add `UnlockAllShopItems()` call from debug key | Dev shortcut to unlock everything |
-| `Shop/ShopUI.cs` (A)       | Show debug categories when dev mode is active  | Debug shop items visible     |
+| File (Phase) | Change | Why |
+|-------------|--------|-----|
+| `PlayerMovement.cs` (B) | Add noclip toggle (dev mode only) | Debug flight mode |
+| `EconomyManager.cs` (A) | Add `UnlockAllShopItems()` | Dev shortcut |
+| `ShopDataService.cs` (A) | Show debug categories when dev mode active | Debug items visible |
 
 ---
 
@@ -849,135 +953,49 @@ The game is now feature-complete.
 
 ```
 Phase A ─── foundation (interaction, shop, economy, events)
- │
- ▼
+   │
+   ▼
 Phase A½ ── mine environment, elevator descent
- │
- ▼
+   │
+   ▼
 Phase B ─── player, inventory, tools, grabbing, physics, highlighting
- │
- ├──► Phase C ─── ore, mining, pooling, selling
- │    │
- │    ▼
- │  Phase D ─── buildings, conveyors, grid placement
- │    │
- │    ▼
- │  Phase E ─── processing machines (full factory pipeline)
- │
- ├──► Phase F ─── quests, research (can start after B, benefits from C-E)
- │
- ▼
+   │
+   ├──► Phase C ─── ore, mining, pooling, selling
+   │       │
+   │       ▼
+   │    Phase D ─── buildings, conveyors, grid placement
+   │       │
+   │       ▼
+   │    Phase E ─── processing machines (full factory pipeline)
+   │
+   ├──► Phase F ─── quests, research (can start after B, benefits from C-E)
+   │
+   ▼
 Phase G ─── save/load (needs all above systems to exist)
- │
- ▼
+   │
+   ▼
 Phase H ─── sound, settings, keybinds (polish layer)
- │
- ├──► Phase I ─── contracts, world events, menus (content layer)
- │
- └──► Phase J ─── debug, demo, final polish
+   │
+   ├──► Phase I ─── contracts, world events, menus
+   │
+   └──► Phase J ─── debug, demo, final polish
 ```
 
 ---
 
-## Parallel Execution Windows
-
-> If running multiple agents, these are the phases that can be built simultaneously. Each "wave" completes before the next begins. Parallel phases within a wave have no logical dependency on each other.
-
-### Wave Schedule
-
-| Wave | Agents | Phases | Why Parallel Works |
-| ---- | ------ | ------ | ------------------ |
-| 1 | 1 | **A** | Foundation — nothing else can start without interaction, shop, economy, GameEvents |
-| 2 | 1 | **A½** | Needs A's GameEvents for `OnElevatorLanded`, `OnGamePaused` |
-| 3 | 1 | **B** | Sole dependency on A + A½. Replaces SimplePlayerController, adds inventory, tools, physics |
-| **4** | **2** | **C** ∥ **F** | Both depend only on B. C = ore/mining/pooling, F = quests/research. No logical overlap |
-| 5 | 1 | **D** | Needs C — ore pieces must exist for conveyor transport testing |
-| 6 | 1 | **E** | Needs D — conveyors must exist for machine I/O pipeline |
-| 7 | 1 | **G** | Needs B through F — serializes every system |
-| 8 | 1 | **H** | Needs G — sound definitions referenced in save format |
-| **9** | **2** | **I** ∥ **J** | I = contracts/menus, J = debug/polish. No shared modifications |
-
-### Visual Timeline
+## Parallel Execution (2 agents)
 
 ```
-Wave: 1  2  3    4     5  6  7  8    9
-   ┌──┐ ┌──┐ ┌────┐ ┌────┐  ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌────┐
-Agent1 │ A│ │A½│ │ B │ │ C │───►│ D│ │ E│ │ G│ │ H│ │ I │
-   └──┘ └──┘ └────┘ ├────┤  └──┘ └──┘ └──┘ └──┘ ├────┤
-Agent2          │ F │             │ J │
-            └────┘             └────┘
+Wave:  1    2    3       4          5    6    7    8       9
+       ┌──┐ ┌──┐ ┌────┐ ┌────┐    ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌────┐
+Agent1 │ A│ │A½│ │ B  │ │ C  │───►│ D│ │ E│ │ G│ │ H│ │ I  │
+       └──┘ └──┘ └────┘ ├────┤    └──┘ └──┘ └──┘ └──┘ ├────┤
+Agent2                   │ F  │                         │ J  │
+                         └────┘                         └────┘
 ```
 
-### Merge Conflicts to Resolve After Parallel Waves
-
-**Wave 4 (C ∥ F) — shared file: `GameEvents.cs`**
-
-| Agent | Adds to `GameEvents.cs` |
-| ----- | ----------------------- |
-| C | `OnOreMined`, `OnOreSold`, `OnOreLimitChanged` |
-| F | `OnQuestCompleted`, `OnQuestActivated`, `OnResearchCompleted` |
-
-Both also modify `Core/GameEvents.cs` from Phase A. After both agents finish, merge the event declarations into one file. No logic conflicts — both add independent `event Action` fields.
-
-F also modifies `UI/UIManager.cs` (adds quest tree panel check) and `Shop/ShopManager.cs` (quest unlock wiring). C modifies only `GameEvents.cs`. No overlap beyond GameEvents.
-
-**Wave 9 (I ∥ J) — shared file: `ShopUI.cs`**
-
-| Agent | Modifies |
-| ----- | -------- |
-| I | `UI/UIManager.cs` (contracts panel), `World/StartingElevator.cs` (new game check), `Menus/PauseMenu.cs` (save/load browser) |
-| J | `Player/PlayerController.cs` (noclip), `Economy/EconomyManager.cs` (unlock all), `Shop/ShopUI.cs` (debug categories) |
-
-No file overlap — clean parallel. I touches UIManager/StartingElevator/PauseMenu, J touches PlayerController/EconomyManager/ShopUI.
-
-### Phase F Caveat
-
-F can be **coded** after B, but full **testing** of resource-based quest requirements (e.g., "Sell 10 Iron Ingots") requires C's SellerMachine and OrePiece. Two strategies:
-
-1. **Stub testing** — F agent writes quest logic with mock event invocations, full integration test after C merges
-2. **Delayed testing** — F agent writes code in Wave 4, integration testing happens in Wave 5 after C is merged
-
-### Critical Path
-
-The longest sequential chain determines minimum total time:
-
-```
-A → A½ → B → C → D → E → G → H → I (or J)
-1  2  3  4  5  6  7  8  9 waves
-```
-
-Without parallelism: **11 sequential phases**.
-With 2 agents: **9 waves** (saving C∥F and I∥J).
-**Speedup: 2 phase-durations saved.**
-
-### What Cannot Be Parallelized
-
-| Sequence | Why |
-| -------- | --- |
-| **C → D → E** | Each machine layer depends on the previous: D needs ore physics from C, E needs conveyors from D |
-| **G alone** | Save/load must serialize every system — needs B through F complete |
-| **H after G** | Sound definitions get referenced in save format; settings modify controller parameters that G serializes |
+Sequential: 11 phases. With 2 agents: **9 waves**.
 
 ---
 
-## Total File Count Estimate
-
-| Phase      | New Files   | Modified Files | Total     |
-| --------------- | -------------- | -------------- | -------------- |
-| A        | 17       | 0       | 17       |
-| B        | 28       | 2       | 30       |
-| C        | 19       | 1       | 20       |
-| D        | 17       | 1       | 18       |
-| E        | 30       | 0       | 30       |
-| F        | 20       | 2       | 22       |
-| G        | 17       | 0       | 17       |
-| H        | 16       | 0       | 16       |
-| I        | 20       | 0       | 20       |
-| J        | 12       | 0       | 12       |
-| **Total** | **~191** | **~6**  | **~197** |
-
-This closely matches the original source's ~200 scripts in `Assembly-CSharp/`.
-
----
-
-> **Note:** This roadmap may evolve. Files may be added, split, or merged as implementation reveals new needs. The phase boundaries are designed so each phase is self-contained and testable independently.
+> **Note:** This roadmap evolves. Files may be added, split, or merged. Each phase follows the architecture in `GOAL.md`: numbered folders, DataWrapper/DataService/Orchestrator pattern, minimal public API, vertical slice tests per system.
