@@ -1,6 +1,5 @@
 # Surfer — Critical Thoughts Log
 
-
 > This file captures my critical thinking for each prompt — what I considered, why I made certain choices, and what I deliberately avoided. Appended with each new request.
 
 ---
@@ -9,11 +8,15 @@
 
 **What I thought:**
 
-- The `Scripts/` folder has ~130 subfolders but only `Assembly-CSharp/` (~200 files) is actual game code — the rest are Unity engine and third-party DLL decompilations. Focused there exclusively.
-- Read the largest/most connected files first (SavingLoadingManager at 853 lines, PlayerController at 888 lines) to map the dependency graph before reading leaf scripts.
-- The codebase uses Singletons everywhere — I considered whether to frame this as a flaw. Decided it's pragmatic for this scope and said so honestly rather than dogmatically criticizing it.
-- `FindObjectOfType` calls in runtime paths (BaseHeldTool.DropItem, etc.) are a genuine perf issue worth calling out. LINQ in hot paths (CastingFurnace) is another.
-- The PlayerController is a textbook God Object but splitting it would be a refactor suggestion, not a bug. Framed it as a learning opportunity.
+The `Scripts/` folder has ~130 subfolders but only `Assembly-CSharp/` (~200 files) is actual game code — the rest are Unity engine and third-party DLL decompilations. Focused there exclusively.
+
+Read the largest/most connected files first (SavingLoadingManager at 853 lines, PlayerController at 888 lines) to map the dependency graph before reading leaf scripts.
+
+The codebase uses Singletons everywhere — I considered whether to frame this as a flaw. Decided it's pragmatic for this scope and said so honestly rather than dogmatically criticizing it.
+
+`FindObjectOfType` calls in runtime paths (BaseHeldTool.DropItem, etc.) are a genuine perf issue worth calling out. LINQ in hot paths (CastingFurnace) is another.
+
+The PlayerController is a textbook God Object but splitting it would be a refactor suggestion, not a bug. Framed it as a learning opportunity.
 
 ---
 
@@ -47,8 +50,8 @@
 **What I thought:**
 
 - Audited all 17 scripts. Found exactly 2 real coupling issues:
- 1. `ShopTerminal` directly reaching into `UIManager.ShopUI.gameObject.SetActive()` — crosses 2 system boundaries
- 2. `SimplePlayerController` polling `UIManager.IsInAnyMenu()` every frame — unnecessary direct dependency
+  1. `ShopTerminal` directly reaching into `UIManager.ShopUI.gameObject.SetActive()` — crosses 2 system boundaries
+  2. `SimplePlayerController` polling `UIManager.IsInAnyMenu()` every frame — unnecessary direct dependency
 - Everything else is either read-only singleton queries (acceptable), same-subsystem references (necessary), or one-time setup reads (fine).
 - Resisted the urge to event-ify `ShopUI → EconomyManager.AddMoney()`. That's a legitimate command — the shop *must* call the economy system to deduct money. Wrapping it in an event would add indirection with zero benefit.
 - Resisted event-ifying `ShopItemButton → ShopUI` reference. They're parent-child UI components. Forcing them through GameEvents would make the code harder to follow for a learner.
@@ -73,9 +76,9 @@
 **What I thought:**
 
 - Re-read the entire 630-line GUIDE.md end-to-end looking for gaps. Found 3:
- 1. Section 9 still showed the OLD coupling patterns (pre-fix code). Updated all 4 examples + added the full event flow diagram.
- 2. Missing EventSystem note — Unity UI buttons silently fail without it. A learner would be stuck. Added it.
- 3. ScrollRect setup was hand-waved ("Inside a ScrollRect"). A learner wouldn't know how to wire Content/Viewport. Added step-by-step.
+  1. Section 9 still showed the OLD coupling patterns (pre-fix code). Updated all 4 examples + added the full event flow diagram.
+  2. Missing EventSystem note — Unity UI buttons silently fail without it. A learner would be stuck. Added it.
+  3. ScrollRect setup was hand-waved ("Inside a ScrollRect"). A learner wouldn't know how to wire Content/Viewport. Added step-by-step.
 - Coupling is confirmed clean. Reviewed the event flow: ShopTerminal→GameEvents→ShopUI, ShopUI→GameEvents→PlayerController, EconomyManager→GameEvents→MoneyDisplay. No script crosses system boundaries.
 - "What does it look like?" — The user needs a mental picture before building. Added Section 10 with an ASCII walkthrough of the exact gameplay flow: walk to terminal, press E, browse, cart, purchase, items spawn, money updates.
 - "LEGO-linkable?" — This is the most important architectural question. Added Section 11 with a concrete table: every Phase A extension point, what future phases plug into it, and what changes (answer: almost nothing). Included code examples of Phase B (OreNode) and Phase C (QuestManager) showing zero changes to Phase A files.
@@ -220,25 +223,12 @@
 
 - The user identified a real Unity pitfall: `Awake()` and `OnEnable()` execution order across GameObjects is not guaranteed. If Script A subscribes to GameEvents in `OnEnable()` and the handler reads `Singleton<B>.Instance`, but B's `Awake()` hasn't run yet, you get a null ref.
 - Established a clear lifecycle rule:
- - `Awake()` — singleton registration, `GetComponent` caching only
- - `Start()` — event subscriptions for permanent objects (all Awake done by now). Pair with `OnDestroy()`.
- - `OnEnable()/OnDisable()` — event subscriptions ONLY for toggled objects (UI panels). Pair together.
+  - `Awake()` — singleton registration, `GetComponent` caching only
+  - `Start()` — event subscriptions for permanent objects (all Awake done by now). Pair with `OnDestroy()`.
+  - `OnEnable()/OnDisable()` — event subscriptions ONLY for toggled objects (UI panels). Pair together.
 - Fixed `StartingElevator.cs` — moved `GameEvents.OnGamePaused` subscription from `OnEnable→Start` and unsub from `OnDisable→OnDestroy`. The elevator is never toggled, so it should use the permanent pattern.
 - Checked all existing Phase A scripts: `ShopUI` correctly splits between `Start()` (toggle event — needs to hear it even when inactive) and `OnEnable()` (refresh events — only when visible). `SimplePlayerController` uses `Start()` — correct. `MoneyDisplay` uses `OnEnable/OnDisable` — acceptable since it's a UI element.
 - This rule should be applied consistently in all future phases. Didn't save a memory for it because it's a standard Unity best practice, not a project-specific convention.
-
----
-
-## Prompt 19: "Implement Handle/Toggle/Refresh naming convention across phase-a and phase-a-1"
-
-**What I thought:**
-
-- Audited all 6 event handlers across 4 scripts. Every `On...` prefixed handler was a leftover from initial implementation — renamed them all to match the convention the user liked:
- - `Handle...` for state-change reactions (HandleMenuStateChanged, HandleMoneyChanged, HandleGamePaused, HandleGameUnpaused)
- - `Toggle...` for on/off switching (ToggleShop)
- - `Refresh...` for UI repopulation (RefreshOnItemUnlocked)
-- The `On...` prefix is now reserved exclusively for Unity lifecycle methods (OnEnable, OnDisable, OnDestroy) and GameEvents event declarations (OnMoneyChanged, OnMenuStateChanged). Handler methods that subscribe to those events use Handle/Toggle/Refresh.
-- Verified subscription lifecycle patterns were already correct from the previous fix. No additional Start/OnEnable changes needed — just the method names.
 
 ---
 
@@ -335,7 +325,8 @@
 
 - Read `FresnelHighlighter.cs` (151 lines) and `HighlightStyle.cs` (50 lines) from the original source. It's NOT an outline — it's a Fresnel rim glow using a custom shader injected via CommandBuffer.
 - Key distinction: outlines are geometric (inverted hull or edge detection), Fresnel is a dot-product effect on surface normals. Edges glow, flat faces stay transparent.
-- The shader `Hidden/Focus/FresnelAdd` uses additive blending (One+One), no depth write, configurable ZTest for x-ray mode. 4 properties: \_Color, \_Power, \_Intensity, \_ZTest.
+- The shader `Hidden/Focus/FresnelAdd` uses additive blending (One+One), no depth write, configurable ZTest for x-ray mode. 4 properties: _Color, _Power, _Intensity, _ZTest.
+
 ---
 
 ## Prompt 28: "What kind of shader does it use?"
@@ -364,14 +355,114 @@
 
 - Largest phase: 25 scripts across 8 categories. Read all original source files first to ensure 100% source fidelity.
 - Key decisions:
- - Used legacy `Input.GetKey/GetAxis` instead of Input System — Phase H adds rebinding. Same logic, different API.
- - Stubbed all SoundManager/SettingsManager/QuestManager/DebugManager calls — those systems don't exist yet. Logic is in place, just commented.
- - `BaseHeldTool._interactions` uses `List<SO_Interaction>` (our SO_ prefix convention) instead of original's `List<Interaction>`.
- - FresnelHighlighter is the Highlight Plus wrapper with commented-out HP calls — uncomment when package is imported.
- - Added `GameEvents.OnToolSwitched`, `OnItemPickedUp`, `OnItemDropped`, `OnToolPickedUp` to replace direct singleton calls the original uses for quest triggers.
- - Modified UIManager: added `IsInAnyMenuExceptInventory()`, `IsInInventory()`, `IsInEditTextPopup()`, `UpdateOnScreenControls()`, `ShowBuildingInfo()`, `HideBuildingInfo()`.
- - PlayerController caches `_anyMenuOpen` via GameEvents instead of polling `UIManager.IsInAnyMenu()` every frame — our decoupling improvement.
- - Preserved the original's `FindObjectOfType<PlayerInventory>()` in BaseHeldTool.DropItem() for source fidelity, even though it's a known perf issue. Documented in the diff section.
+  - Used legacy `Input.GetKey/GetAxis` instead of Input System — Phase H adds rebinding. Same logic, different API.
+  - Stubbed all SoundManager/SettingsManager/QuestManager/DebugManager calls — those systems don't exist yet. Logic is in place, just commented.
+  - `BaseHeldTool._interactions` uses `List<SO_Interaction>` (our SO_ prefix convention) instead of original's `List<Interaction>`.
+  - FresnelHighlighter is the Highlight Plus wrapper with commented-out HP calls — uncomment when package is imported.
+  - Added `GameEvents.OnToolSwitched`, `OnItemPickedUp`, `OnItemDropped`, `OnToolPickedUp` to replace direct singleton calls the original uses for quest triggers.
+  - Modified UIManager: added `IsInAnyMenuExceptInventory()`, `IsInInventory()`, `IsInEditTextPopup()`, `UpdateOnScreenControls()`, `ShowBuildingInfo()`, `HideBuildingInfo()`.
+  - PlayerController caches `_anyMenuOpen` via GameEvents instead of polling `UIManager.IsInAnyMenu()` every frame — our decoupling improvement.
+  - Preserved the original's `FindObjectOfType<PlayerInventory>()` in BaseHeldTool.DropItem() for source fidelity, even though it's a known perf issue. Documented in the diff section.
 - ToolBuilder is partial — placement logic (grid snap, ghost, conveyor snap) completed in Phase D.
 - ToolHammer and ToolSupportsWrench have raycast structure but BuildingObject calls are stubbed for Phase D.
 - ToolResourceScanner has the identification raycast loop but specific type checks (OreNode, OrePiece, etc.) are stubbed for Phase C.
+
+---
+
+## Prompt 27 (this session): "Which files to delete? Can I delete phase-b and regenerate later?"
+
+**What I thought:**
+- 5 files to delete from Phase A: ShopManager, SO_ShopItemDefinition, ShopCategoryButton, ShopItemButton, ShopCartItemButton.
+- Audited Phase B (built by other agent) against current GOAL rules. Found violations: no section regions (Rule 6), InventorySlotUI has business logic + 7 event interfaces (violates Rule 8), uses old verbose style, BaseHeldTool.DropItem uses FindObjectOfType (no decoupling improvement).
+- Recommended: delete phase-b entirely. Regenerating is zero-risk — original source + PhaseMap.md + GOAL rules are all still here.
+
+---
+
+## Prompt 28 (this session): "Create phase-a(New) with clean folder structure, vertical slice tests, GOAL rules 13-16"
+
+**What I thought:**
+- User wants a completely fresh phase-a in a new folder so they can delete the old one and rename later. Smart approach — no risk of mixing old/new files.
+- Added 4 new rules to GOAL.md: Rule 13 (minimal public API), Rule 14 (LEGO independence — each system works standalone first), Rule 15 (vertical slice test scripts per phase), Rule 16 (hand-typing order: sections → inspector → lifecycle → public → private → handlers → compile → test).
+- Created 16 scripts in `phase-a(New)/Scripts/` across 7 folders: Core, Managers, Shop, Interaction, Player, UI, Tests.
+- The GUIDE.md has a "Hand-Typing Order" section that groups scripts into 8 groups. Each group compiles independently. Group 5 is the big stop point — after typing ShopUI + ShopUITest, you can test the entire shop system without any player controller or interaction system.
+- `ShopUITest.cs` is the key addition: a 22-line MonoBehaviour that opens the shop on Start and provides T/Y/Space test keys. Proves LEGO independence — shop works alone.
+- GameEvents.cs uses `?.Invoke()` pattern now (allowed by Rule 5) — much more concise than the old explicit null checks.
+- Every script follows the section pattern. Every SO is pure data. Every Fields component is display-only. ShopUI is the single orchestrator.
+
+---
+
+## Prompt 29 (this session): "Add LOG.AddLog + PhaseALOG for debug state dumping to file"
+
+**What I thought:**
+- User's reference shows a PhaseALOG static class that serializes shop data to JSON-like snapshots using anonymous types + custom extensions (.map, .ToNSJson). Smart debugging approach for hand-typing workflow — see internal state without breakpoints.
+- Created `Core/LOG.cs` — static file logger, appends to `persistentDataPath/log_{tag}.txt`. Simple API: `LOG.AddLog(content, "json")`, `LOG.Clear("json")`, `LOG.OpenLogFolder()`.
+- Created `Tests/PhaseALOG.cs` — static snapshot formatters using StringBuilder to build readable JSON-like output. Methods: `ShopCategories()` (dumps all categories + SO defs + runtime ShopItems), `Cart()` (dumps current cart), `Economy()` (dumps money).
+- Didn't use anonymous types + custom serializer like the user's reference — would require extra extension methods. Used StringBuilder instead which is zero-dependency and works everywhere.
+- Updated ShopUITest: press L to dump state to file, K to open log folder. Added `_shopUI` inspector reference so test can call `GetShopDataSnapshot()`.
+- Added `GetShopDataSnapshot()` public method to ShopUI — delegates to PhaseALOG. This is a minimal public API addition (Rule 13) but justified because the test script needs it.
+
+---
+
+## Prompts 30-50+ (Apr 6-9 session): "Complete architecture redesign + hand-typing"
+
+**What happened (summary of major decisions):**
+
+### Architecture Redesign
+- **PhaseALOG rewritten** — removed StringBuilder, uses `.ToNSJson(pretify: true)` from SPACE_UTIL. Per-collection targeting: `LIST_CATEGORY__TO__JSON()`, `DOC_CATEGORY_ITEM__TO__JSON()`, `LIST_CARTITEM__TO__JSON()`. All serialization lives in PhaseXLOG only.
+- **Field_ prefix** — renamed ShopCategoryFields → Field_ShopCategory, etc. Convention: prefix = no logic. `SO_` = pure data, `Field_` = display only, `W` = session wrapper.
+- **GameEvents.LogSubscriberCount** — every Raise method logs `[GameEvents] OnX raised → N subscriber(s)`. User renamed `Log` → `LogSubscribersCount`.
+- **No defensive null checks** — let it crash, crash is traceable. Exception: `?.Invoke()` on events (can have zero subscribers).
+- **Economy shortcut property** — `private EconomyManager Economy => Singleton<EconomyManager>.Ins;` No `?.` on core singletons — direct access.
+- **`_` prefix only for [SerializeField]** — private non-serialized fields use camelCase.
+
+### Folder Structure (final)
+- **6 numbered folders:** `0-Core/`, `1-Managers/`, `2-Data/`, `3-MonoBehaviours/`, `4-Utils/`, `5-Tests/`
+- **2-Data/ subfolders:** `SO_*` + `Field_*` (root), `Interface/`, `DataWrapper/`, `DataService/`, `Enum/`, `Entities/`
+- **Key insight:** most of 2-Data/ is pure C# (testable via `new` instance). Only SO_ and Field_ have Unity dependency.
+- **Orchestrator/** is the only special pattern in MonoBehaviours/ — wires Field_ instances. Everything else is just "MonoBehaviour with game logic."
+
+### ShopUI Split into 4
+- **ShopUI** (SubManager) → toggle + events + lifecycle ONLY. Zero business logic. ~40 lines.
+- **ShopUIOrchestrator** → wires Field_ instances, AddListener, purchase flow, refresh. All UI logic here.
+- **ShopDataService** → pure C# collection manager. Builds WShopItem wrappers, cart operations, snapshot. Includes CartItem as nested class. Merged cart service into data service (one service per domain).
+- **UtilsPhaseA** → static helpers (TrySpawnAtShopPoint, formatMoney extension).
+
+### UIManager Purpose
+- Researched original UIManager.LateUpdate() — complex priority blocking (Q only opens quest if NOT in shop/pause/contracts).
+- **Hybrid approach:** world-triggered opens via GameEvents (decoupled), keyboard routing + ESC close via UIManager (needs priority knowledge).
+- UIManager justified by priority blocking — stays thin for Phase A, grows naturally when Q/Tab/ESC logic arrives in later phases.
+
+### Unity Lifecycle
+- **Self-init pattern:** SubManagers start ACTIVE, init in Start(), disable self. OnEnable = just announce "I'm open". Start runs once — never re-runs on re-enable.
+- **Event-driven refresh:** removed RefreshAll() from Update(). Orchestrator subscribes to OnMoneyChanged + refreshes after every action. Zero polling.
+- Added full Unity lifecycle order diagram to GOAL.md.
+
+### Hand-Typed Audit (9/10)
+- User hand-typed Phase A (19 scripts, shop system working). Audited all files.
+- **What's great:** architecture solid, merged cart into DataService, W prefix for wrappers, DOC__ for dictionaries, ALL_CAPS for collections, #region blocks, .Ins instead of .Instance, SPACE_UTIL extensions (.map, .gc, .colorTag, .destroyLeaves, .toggle).
+- **Minor issues:** moneyOrchestrator lowercase class name, lambda unsubscribe in ShopUI, DataService accesses Singleton directly, ShopSpawnPoint.GetRandomSpawnPoint not static.
+- User's emphasis: **least possible public API + least possible private methods**.
+
+### GOAL.md Final Version
+- Complete rewrite incorporating user's actual coding style from hand-typed scripts.
+- Core Principle: "Every script's purpose fits in one sentence. Every script performs ONLY that service — purely, nothing else."
+- Added: Why This Structure (separation by responsibility not domain, natural MVP pattern).
+- Added: comprehensive folder rules with one-liner purpose per folder/subfolder.
+- Added: 14-question decision tree for file placement.
+
+### PhaseMap.md Full Rewrite
+- All 11 phases updated to new architecture: numbered folders, Script Purpose sections, folder-tree file lists, Vertical Slice Tests per phase, Modifications to Earlier Phases.
+- Phase B: original PlayerController (888 lines) split into PlayerMovement + PlayerCamera + PlayerGrab + InventoryOrchestrator.
+
+### New Files Created
+- **phase-a-1(New):** StartingElevator.cs, CameraShaker.cs, ElevatorTest.cs, GUIDE.md
+- **Estimate.md:** ~153 hours total, ~7 weeks at 4hr/weekday + 8hr/weekend
+
+### Key Rules Locked In
+- `→ "I do X"` one-liner is the script's contract — anything outside it belongs elsewhere
+- 2-Data/ is fully independent — testable via `new`, no scene needed
+- Orchestrator/ is the only special pattern in MonoBehaviours/
+- SubManagers self-init in Start(), disable self, listen for GameEvents
+- UtilsPhaseX = static extensions + helpers by region
+- PhaseXLOG = per-collection snapshot formatters via .ToNSJson()
+- End goal: 100% main source functionality + clever architecture reusable in future projects
