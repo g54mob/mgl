@@ -7,7 +7,7 @@
 ## What
 
 Rebuild **MINEMGL** from `Scripts/Assembly-CSharp/` (~200 scripts).
-**100% source behavior** + cleaner architecture + independently testable systems.
+**100% main-source behavior** + cleaner architecture + independently testable systems.
 
 ## Source of Truth
 
@@ -205,6 +205,17 @@ One service per domain. Plain C#. Manages ALL collections for that domain.
 Nested types live here (`CartItem` inside `ShopDataService`).
 Has `GetSnapShotForTest(header)` that combines all PhaseXLOG calls into one formatted output.
 
+**When to create a DataService:**
+- Operations are pure logic (add, remove, query, sort, total) — no Unity API needed
+- Testable via `new` instance in `DEBUG_Check` — zero scene, zero GameObjects
+- Examples: InventoryDataService (slots, switch, stack), ShopDataService (categories, cart, afford)
+
+**When NOT to create a DataService — keep in MonoBehaviour:**
+- Operations need Unity physics (SpringJoint, Rigidbody, AddForce, OverlapSphere)
+- Operations need Unity lifecycle (Update, FixedUpdate, Destroy, Instantiate)
+- Data is transient frame state (velocity, bob counter) not a persistent collection
+- Example: ToolMagnet manages `List<Rigidbody>` + SpringJoints — every operation needs Unity. Not a DataService.
+
 ### Managers (1-Managers/)
 Singleton MonoBehaviours. One domain, one manager.
 `EconomyManager` — owns money via `GetMoney()`, `AddMoney()`, `CanAfford()`.
@@ -247,10 +258,32 @@ Each test is independent. Lists prerequisites in summary or inspector field.
 
 - **`GameEvents`** — static event bus. Event + Raise grouped by domain with `// when X >>` `// << when X` comment blocks.
   Each Raise calls `LogSubscribersCount()`: `[GameEvents] OnX raised for -> N subscribers`
+- **Every `.Raise...()` call must have a `// purpose:` one-liner** explaining why it's fired and who listens:
+  ```csharp
+  // purpose: cursor lock/unlock for player controller
+  GameEvents.RaiseMenuStateChanged(isAnyMenuOpen: true);
+  
+  // purpose: MoneyOrchestrator updates HUD text
+  GameEvents.RaiseMoneyChanged(money);
+  ```
 - **Interfaces** — for abstraction (`IInteractable`)
 - **Singleton reads** — only for queries (`Singleton<EconomyManager>.Ins.GetMoney()`), never cross-system commands
 - **Never** let Script A directly call into unrelated Script B
 - **Event-driven refresh** — never poll in `Update()`. Refresh only when state changes.
+
+### Cross-Phase File Changes
+
+When a new phase needs to add to an existing file:
+
+- **`GameEvents` (static class)** → use `partial class`. Each phase adds its own events in its own `0-Core/GameEvents.cs`. No modification to earlier phase's file. Phase A's GameEvents must have `partial` keyword.
+  ```
+  phase-a/0-Core/GameEvents.cs    → OnMoneyChanged, OnMenuStateChanged, OnOpenShopView
+  phase-a-1/0-Core/GameEvents.cs  → OnElevatorLanded, OnGamePaused, OnGameUnpaused
+  phase-b/0-Core/GameEvents.cs    → OnToolSwitched, OnItemPickedUp, OnItemDropped
+  ```
+- **MonoBehaviours with `[SerializeField]`** (UIManager, InteractionSystem) → must be **directly modified** because inspector fields can't be added via partial across files. Document in GUIDE.md exactly what to change and why.
+- **Rule:** prefer `partial` extend over direct modify. Only modify when `[SerializeField]` or inheritance requires it.
+- **Every phase GUIDE.md** lists modifications in a table: `| File | Change | Why |`
 
 ---
 
@@ -325,7 +358,7 @@ Player opens shop:
 
 ## C# Features
 
-**Allowed:** `$""`, `?.` (on events only), LINQ, `.map()`, `=>` expression-bodied, ternary `? :`
+**Allowed:** `$""`, `?.` (on events only), LINQ, `.Select()`, `=>` expression-bodied, ternary `? :`
 
 **Not allowed:** `async/await` (use coroutines), `Span<T>`, `Memory<T>`, `ValueTuple` deconstruction
 
@@ -349,13 +382,26 @@ Connect via GameEvents → full phase works
 ## Vertical Slice Tests
 
 **Two levels per system:**
-1. **Data-level** — test DataService logic without UI (DEBUG_Check, coroutine-based)
-2. **UI-level** — test full UI flow with keyboard shortcuts (ShopUITest)
+1. **Data-level** — test DataService logic without UI (`DEBUG_Check` — plain `new` instance, zero scene)
+2. **UI-level** — test full system flow with keyboard shortcuts (`ShopUITest`, `PlayerGrabTest`, etc.)
 
-Each test lists prerequisites in inspector README field or summary comment.
-Each is independent — doesn't require other systems to run.
+**Each test in GUIDE.md must have ALL of these:**
+- **Internal prerequisites** — which scripts must be typed first to compile
+- **External prerequisites** — exact scene setup: which GOs, which components, what to assign in inspector
+- **NOT required** — explicitly list which OTHER systems are NOT needed (proves LEGO independence)
+- **Controls** — keyboard shortcuts for manual testing
+- **Checklist** — pass/fail items to verify
 
----
+**Each test is a standalone scene.** You should be able to create a fresh empty scene, follow the external prerequisites, and the test works without any other system present. If a test requires another system to run, it's not independent — fix the architecture.
+
+**Each Test script (.cs) must contain:**
+- **Summary comment** with: prerequisites, NOT required, "How to test" step-by-step (what to do + what to expect), controls
+- **`// purpose:` one-liner** on every `Raise` call and `+=` subscription inside the test
+- **Console logging** via GameEvents subscription — proves the system fired the right events without manual visual inspection
+- **Minimal code** — the test script is a bootstrap. The actual system handles its own input/logic in its own `Update()`. The test just: locks cursor, provides sim keys (M/N for menu), subscribes to events for logging.
+- **No duplicate logic** — never re-implement the system's behavior inside the test. If the test needs to trigger something, fire a GameEvent (e.g. `RaiseToolPickupRequested`) rather than calling methods directly.
+
+----
 
 ## Hand-Typing Order
 
@@ -380,7 +426,7 @@ Every phase folder has a `GUIDE.md` with:
 - **Scene setup** (step-by-step)
 - **Source vs Phase diff** (what original did vs what we changed)
 
----
+----
 
 ## Phase Overview
 
@@ -397,3 +443,203 @@ Every phase folder has a `GUIDE.md` with:
 | H | Sound, Settings & UI Polish | 5% | Easy |
 | I | Contracts, World Events & Menus | 4% | Easy |
 | J | Debug, Demo & Final Polish | 2% | Easy |
+
+---
+
+## For Future Agents
+
+This section captures hard-won decisions from Phase A + B implementation. Read before building any phase.
+
+### Always Do First
+1. **Read the original source file** in `Scripts/Assembly-CSharp/` before writing any script. Match the behavior 100%.
+2. **Read GOAL.md** (this file) for architecture rules + naming conventions.
+3. **Read the target phase section in PhaseMap.md** for file list + modifications table.
+4. **Check existing phases** for patterns — Phase A (shop) and Phase B (player/inventory) are the reference implementations.
+
+### Splitting Rules
+- **Split when one sentence isn't enough.** Original `PlayerController.cs` (888 lines) → 4 scripts (Movement, Camera, Grab, Outline). Each fits one sentence.
+- **Don't split when the file is small + single purpose.** `ShopTerminal.cs` (22 lines) stays as-is. `ToolMiningHat.cs` (20 lines) stays as-is.
+- **Original god-objects WILL need splitting.** `ComputerShopUI` → ShopUI + ShopUIOrchestrator + ShopDataService. `PlayerController` → PlayerMovement + PlayerCamera + PlayerGrab + PlayerOutline. Expect similar splits for future large files.
+
+### Inheritance
+- **Keep the original inheritance chain** unless it's genuinely unnecessary. `BasePhysicsObject → BaseSellableItem → BaseHeldTool → ToolPickaxe` exists because Phase C's `OrePiece` shares `BaseSellableItem`. Don't flatten chains that future phases depend on.
+- **Interfaces go in 2-Data/Interface/.** Stub them if the full implementation comes in a later phase (e.g. `ISaveLoadableObject` stub in Phase B, expanded in Phase G).
+
+### Cross-Phase Pattern
+- **`GameEvents`** — always use `partial class`. Each phase adds events in its own `0-Core/GameEvents.cs`. Phase A's file needs the `partial` keyword.
+- **MonoBehaviours** — when modifying existing scripts (adding `[SerializeField]`, changing method body), document it in the GUIDE.md modifications table: `| File | How | Change | Why |`
+- **Prefer extending over modifying.** If you can add behavior via GameEvents subscription instead of editing an existing script, do that.
+
+### The User's Coding Style
+**Read `learn/phase-a(hand typed)/` to see the ACTUAL code.** Match this style, not generic C#.
+
+Conventions:
+- `#region` blocks (not `// ───` comments)
+- `W` prefix for DataWrappers (`WShopItem`, not `ShopItem`)
+- `DOC__` prefix for Dictionary lookups (`DOC__category_wShopItem`, `DOC__CartItem__Field`)
+- `ALL_CAPS` for List/collection fields (`CATEGORY`, `ITEM_DEF`, `CARTITEM`)
+- `.Ins` for Singleton access (not `.Instance`)
+- `// purpose:` one-liner on every `.Raise...()` call and every `+=` subscription
+- `// when X >>` and `// << when X` comment blocks around GameEvents in GameEvents.cs
+- No blank lines between `#endregion` and next `#region`
+- Least possible public API. Least possible private methods. Don't over-fragment.
+- The user types every script by hand — keep files concise.
+
+SPACE_UTIL extensions the user has (use these, don't reinvent):
+- `.map()` — same as `.Select()` from LINQ
+- `.find()` — same as `.FirstOrDefault()`
+- `.all()` / `.any()` — same as LINQ `.All()` / `.Any()`
+- `.gc<T>()` — same as `.GetComponent<T>()`
+- `.destroyLeaves()` — destroys all children of a Transform
+- `.toggle(value)` — same as `.SetActive(value)`
+- `.colorTag("color")` — wraps string in rich text color tag for Debug.Log
+- `.formatMoney()` / `.formatMoneyShort()` — `$"${amount:#,##0.00}"` / `$"${amount:#,##0.##}"`
+- `.parseInt()` — parses string to int
+- `.getRandom()` — random element from list
+- `.repeat(n)` — repeats a char n times
+- `.ToNSJson(pretify: true)` — Newtonsoft JSON serialization
+- `C.method(this)` — logs `[ClassName.MethodName]` for debug
+- `INPUT.K.InstantDown(KeyCode)` — same as `Input.GetKeyDown`
+- `INPUT.UI.SetCursor(isFpsMode)` — cursor lock/visibility
+- `LOG.AddLog(string, "json")` — writes to persistent log file
+
+### Tight Coupling Red Flags — NEVER Do These
+The user WILL push back hard if you do any of these. Catch them before the user does.
+
+```
+❌ FindObjectOfType<AnyType>()          → use [SerializeField], Owner chain, or GameEvents
+❌ Singleton<X>.Ins.DoSomething()        → fire GameEvents.Raise...(), let X subscribe
+   (Exception: Singleton reads for queries like EconomyManager.Ins.GetMoney() are OK)
+❌ Script A calls Script B's method directly (cross-system)
+                                         → fire GameEvents, B subscribes
+❌ Tool calls FindObjectOfType<InventoryOrchestrator>()
+                                         → tool fires GameEvents.RaiseToolPickupRequested(this)
+❌ MonoBehaviour accesses another MonoBehaviour via FindObjectOfType
+                                         → use [SerializeField] inspector ref or Owner.GetComponent<>()
+```
+
+### Public API Obsession — The User's #1 Priority
+**Before making ANY method public, ask: "does another script ACTUALLY call this?"**
+If no → it's private. If only subclasses → it's protected. If only same class → inline it.
+
+```
+❌ WRONG: public void Release() on PlayerGrab
+   → nobody calls it externally. Grab state is via GameEvents. Make it private.
+
+❌ WRONG: public void TryAddTool() on InventoryOrchestrator
+   → only called from HandleToolPickup event handler. Make it private.
+
+❌ WRONG: public void ToggleLight() on ToolMiningHat
+   → only called from own OnEnable/OnDisable. Make it private.
+
+❌ WRONG: public GameObject WorldModel on BaseHeldTool
+   → only this class and subclasses use it. Make it [SerializeField].
+
+✅ RIGHT: public void Init() on Orchestrator
+   → SubManager.Start() calls it. Genuinely external.
+
+✅ RIGHT: public virtual void PrimaryFire() on BaseHeldTool
+   → InventoryOrchestrator calls active.PrimaryFire(). Genuinely external.
+
+✅ RIGHT: public float GetMoney() on EconomyManager
+   → multiple scripts query money. Genuinely external.
+```
+
+**After writing every script, audit: can any public method be made private/protected?**
+
+### Splitting Judgment — Real Examples
+
+```
+SPLIT — ShopUI (260 lines doing 4 things):
+  → ShopUI (SubManager: toggle only, 40 lines)
+  → ShopUIOrchestrator (wire Field_, 150 lines)
+  → ShopDataService (collections, 45 lines)
+  → ShopCartService (cart math, 55 lines) — merged into ShopDataService by user
+  WHY: 4 distinct responsibilities. SubManager shouldn't wire UI. Data shouldn't need Unity.
+
+SPLIT — PlayerController (888 lines doing 10 things):
+  → PlayerMovement (WASD, jump, slope, duck)
+  → PlayerCamera (look, FOV, bob)
+  → PlayerGrab (SpringJoint, rope)
+  → PlayerOutline (FresnelHighlighter)
+  WHY: each fits one sentence. Camera bob has nothing to do with grab physics.
+
+DON'T SPLIT — ToolMagnet (108 lines):
+  → manages List<Rigidbody> + SpringJoints, but every operation needs Unity physics
+  → DataService would be an empty list wrapper — no testable logic
+  WHY: data is inseparable from Unity physics. One file, one purpose.
+
+DON'T SPLIT — ShopTerminal (22 lines):
+  → implements IInteractable, fires one GameEvent
+  WHY: already one sentence. Splitting would create 2 files with 11 lines each.
+
+DON'T SPLIT — ToolMiningHat (20 lines):
+  → toggles a light on enable/disable
+  WHY: trivially small, one purpose.
+```
+
+### Self-Init Lifecycle Pattern (SubManagers)
+Every UI SubManager follows this exact pattern. Don't deviate.
+
+```csharp
+// SubManager starts ACTIVE in scene (required for Start to run)
+private void OnEnable()
+{
+    // purpose: cursor lock/unlock for player controller
+    GameEvents.RaiseMenuStateChanged(isAnyMenuOpen: true);
+}
+private void Start()
+{
+    // build data, init orchestrator
+    dataService.Build(categories);
+    orchestrator.Init(dataService, categories);
+    orchestrator.BuildView();
+    // subscribe to open event, then disable self
+    GameEvents.OnOpenThisPanel += () => this.gameObject.SetActive(true);
+    this.gameObject.SetActive(false); // ← self-disable after init
+}
+private void Update()
+{
+    // close on ESC/E only
+    if (Input.GetKeyDown(KeyCode.Escape)) gameObject.SetActive(false);
+}
+private void OnDisable()
+{
+    GameEvents.RaiseMenuStateChanged(isAnyMenuOpen: false);
+}
+```
+
+**Key facts:**
+- OnEnable fires BEFORE Start (first frame — brief true→false pulse, acceptable)
+- Start runs ONCE — never again on re-enable
+- OnEnable fires EVERY re-enable
+- UIManager never calls SetActive on SubManagers — they own their own lifecycle
+
+### UIManager Hybrid Decision
+UIManager exists because **priority blocking** requires centralized knowledge:
+
+```
+World trigger (terminal)  → GameEvents → panel self-enables       (decoupled)
+Keyboard (Q/Tab)          → UIManager checks priority → toggles   (centralized)
+ESC                       → UIManager closes panels with logic    (centralized)
+Cursor/Blur               → UIManager reads panel states          (centralized)
+```
+
+UIManager for Phase A = just `IsInAnyMenu()`. Grows in Phase F+ when Q/Tab/ESC priority logic arrives.
+
+### What's Been Proven (Phase A + B)
+- ✅ DataService tested via plain C# instance (`DEBUG_Check`, `DEBUG_CheckB`)
+- ✅ Orchestrator pattern (shop UI + inventory)
+- ✅ SubManager self-init pattern (ShopUI, InventoryUI, BgUI)
+- ✅ `partial` GameEvents across phase folders
+- ✅ Field_ display-only components
+- ✅ Vertical slice tests per system (7 tests across 2 phases)
+- ✅ Player split from 888-line god-object into 4 focused scripts
+- ✅ Tool inheritance chain (BasePhysicsObject → BaseSellableItem → BaseHeldTool → concrete tools)
+
+### What's NOT Been Tested Yet
+- ❌ `3-MonoBehaviours/` with domain subfolders (expect ~80+ files by Phase E)
+- ❌ Cross-DataService communication (Phase F: quests unlock shop items)
+- ❌ Scene switching + `OnDestroy` cleanup (Phase I)
+- ❌ Save/load serialization of DataService state (Phase G)
+- ❌ `SettingsManager` singleton reads replacing hardcoded values (Phase H)
