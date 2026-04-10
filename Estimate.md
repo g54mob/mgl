@@ -1,26 +1,42 @@
 # Estimate — Hand-Typing Timeline
 
 > Based on Phase A taking ~3 days (~14 hours) including architecture design.
+> Architecture is now locked (GOAL.md). Patterns repeat across phases.
 > Schedule: 4 hours/weekday, 8 hours/weekend = ~36 hours/week.
 
 ---
 
 ## Per Phase
 
-| Phase | Scripts | Difficulty | New patterns? | Est. Hours | Est. Days |
-|-------|---------|-----------|---------------|-----------|-----------|
-| **A** | 22 | Easy | Yes — designed entire architecture from scratch | 14h | 3 days ✅ |
-| **A½** | 2 | Easy | No — just 2 MonoBehaviours + scene work | 3h | < 1 day |
-| **B** | ~30 | Hard | PlayerController split, inventory orchestrator | 25h | 5-6 days |
-| **C** | ~20 | Medium | Object pooling, weighted drops | 15h | 3-4 days |
-| **D** | ~18 | Hard | Ghost preview, grid snap, conveyor snap | 18h | 4-5 days |
-| **E** | ~25 | Medium | Repetitive — machines follow same I/O pattern | 15h | 3-4 days |
-| **F** | ~20 | Medium | Quest tree UI, research tree | 15h | 3-4 days |
-| **G** | ~18 | Hard | Save/load serialization, interface wiring | 22h | 5-6 days |
-| **H** | ~16 | Easy | Settings UI — familiar orchestrator pattern | 10h | 2-3 days |
-| **I** | ~20 | Easy | Contracts — familiar quest-like pattern | 10h | 2-3 days |
-| **J** | ~12 | Easy | Debug tools — simple | 6h | 1-2 days |
-| **Total** | **~200** | | | **~153h** | |
+| Phase | Scripts | Difficulty | What's new | Est. Hours | Est. Days |
+|-------|---------|-----------|-----------|-----------|-----------|
+| **A** | 22 | Easy | Designed entire architecture: DataService, Orchestrator, SubManager, Field_, GameEvents, vertical slice tests | 14h | 3 days ✅ |
+| **A½** | 3 | Easy | 2 MonoBehaviours + partial GameEvents + scene work | 3h | < 1 day |
+| **B** | 35 | Hard | PlayerController split (888→4 scripts), inventory DataService, tool inheritance chain, 7 tools, partial GameEvents, zero FindObjectOfType | 28h | 6-7 days |
+| **C** | ~22 | Medium | Object pooling (OrePiecePoolManager), weighted drops, IDamageable, OreDataService | 15h | 3-4 days |
+| **D** | ~18 | Hard | Ghost preview, grid snap, conveyor snap detection, BuildingDataService | 18h | 4-5 days |
+| **E** | ~25 | Medium | Repetitive — machines follow same trigger I/O pattern. Each is one MonoBehaviour. | 12h | 3 days |
+| **F** | ~22 | Medium | QuestDataService, QuestOrchestrator, quest requirements (polymorphic) | 15h | 3-4 days |
+| **G** | ~18 | Hard | SaveDataService, ISaveLoadable interface wiring across ALL phases | 22h | 5-6 days |
+| **H** | ~16 | Easy | SoundManager, SettingsManager, SettingsOrchestrator — familiar patterns | 10h | 2-3 days |
+| **I** | ~20 | Easy | ContractDataService — follows quest pattern. Main menu scene. | 10h | 2-3 days |
+| **J** | ~12 | Easy | DebugManager, VersionManager — simple singletons | 6h | 1-2 days |
+| **Total** | **~213** | | | **~153h** | |
+
+---
+
+## Why It's Faster Now (After Phase A + B Architecture)
+
+| Advantage | Impact |
+|-----------|--------|
+| **Architecture locked** | No more multi-day design sessions. GOAL.md defines everything. |
+| **Patterns repeat** | Phase E machines = same as Phase C. Phase I contracts = same as Phase F quests. Just different data. |
+| **DataService first** | Type DataService → test with `DEBUG_Check` (plain C# `new` instance) → then wire UI. Bugs caught early. |
+| **Orchestrator pattern** | Every UI system follows same: SubManager (toggle) → Orchestrator (wire Field_) → DataService (data). Copy the shape, change the content. |
+| **partial GameEvents** | Each phase adds events in its own `0-Core/GameEvents.cs`. No merge conflicts. No modifying Phase A. |
+| **OwnerCamRay / protected helpers** | Tools are ~10 lines each. Base class does the heavy lifting. |
+| **Vertical slice tests** | Test each system independently. Never wonder "did I break something else?" |
+| **Zero FindObjectOfType** | No hidden dependencies. Inspector refs + GameEvents only. |
 
 ---
 
@@ -36,31 +52,23 @@ Weekly total: ~36 hours
 
 | Week | Phases | Hours | Milestone |
 |------|--------|-------|-----------|
-| 1 | A½ + B (start) | 28h | Mine environment + player movement working |
-| 2 | B (finish) | 25h | Full player controller + inventory + tools + grab |
-| 3 | C + D (start) | 30h | Mining works, ore flows on conveyors |
-| 4 | D (finish) + E (start) | 33h | Building placement + first machines |
-| 5 | E (finish) + F | 30h | Full factory pipeline + quest system |
-| 6 | G | 22h | Save/load working |
-| 7 | H + I + J | 26h | Sound, settings, contracts, menus, debug |
+| 1 | A½ + B (start) | 31h | Mine environment + player movement + grab working |
+| 2 | B (finish) | 28h | Full player: movement + camera + grab + tools + inventory |
+| 3 | C + D (start) | 30h | Mining works, ore spawns, conveyors carry ore |
+| 4 | D (finish) + E (start) | 30h | Building placement + first machines (crusher, furnace) |
+| 5 | E (finish) + F | 27h | Full factory pipeline + quest system |
+| 6 | G | 22h | Save/load working — game persists |
+| 7 | H + I + J | 26h | Sound, settings, contracts, menus, debug — feature complete |
 
-**Total: ~7 weeks from now. ~153 hours of hand-typing.**
+**Total: ~7 weeks. ~153 hours of hand-typing.**
 
 ---
 
-## What Speeds Things Up
-
-- Architecture is locked — no more multi-day design sessions
-- Patterns repeat — Phase E machines follow Phase C pattern, Phase I follows Phase F
-- LEGO independence — type one system, test it, move on
-- `DEBUG_Check` catches DataService bugs before wiring UI
-- `PhaseXLOG` snapshots verify data at every step
-
 ## What Slows Things Down
 
-- **Phase B** — hardest phase. 888-line PlayerController split into 4+ scripts. Physics math.
-- **Phase G** — trickiest. Save/load touches every system. Interface wiring across all phases.
-- **Hand-typing** — slower than copy-paste, but you understand every line (pays off in later phases)
+- **Phase B** — hardest. 35 scripts. 888-line split. Tool inheritance. Inventory system. But architecture is proven.
+- **Phase G** — trickiest. Save/load touches every system. ISaveLoadable interface wiring across all phases.
+- **Hand-typing** — slower than copy-paste, but you understand every line. Pays off when debugging.
 
 ---
 
@@ -68,10 +76,14 @@ Weekly total: ~36 hours
 
 ```
 Week 4-5: fully playable mining/factory game
-  → ore flows through conveyors
+  → mine ore nodes with pickaxe
+  → ore flows through conveyors automatically
   → furnaces smelt by majority type
-  → automated pipeline runs while you mine
+  → machines shape, polish, sort, package
+  → seller machine converts to money
   → quest system guides progression
+  → every system tested independently via vertical slice
+  → zero tight coupling — add/remove any system without breaking others
 ```
 
-That's the moment it clicks.
+That's the moment it clicks — and the architecture proves itself.
