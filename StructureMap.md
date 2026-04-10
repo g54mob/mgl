@@ -1170,3 +1170,9 @@ phase-j/
 | 13 | `MachineTest` | E | UI | Individual machine I/O | Player, Shop |
 | 14 | `DEBUG_CheckF` | F | Data | QuestDataService + ResearchDataService | Everything |
 | 15 | `QuestTest` | F | UI | Activate/progress/complete | Ore, Machines |
+
+---
+
+> **This is the minimum confirmed structure** — derived from 100% main source analysis + GOAL.md architecture rules.
+> Every file listed is required for 100% source fidelity. The hierarchy can only grow, not shrink.
+> Files may be added, split, or merged as implementation reveals needs.
