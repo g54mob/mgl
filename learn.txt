@@ -1,7 +1,7 @@
 <!-- ==== FILE: learn/ARCHITECTURE.md ==== -->
 # MINEMGL — Detailed Architecture Documentation
 
-> **Purpose:** This document provides a comprehensive architectural analysis of the MINEMGL codebase — a first-person mining/factory simulation game built in Unity (C#). It is intended as a learning reference for understanding how each system is designed and how they interconnect.
+> **Purpose of Architecture.md:** This document provides a comprehensive architectural analysis of the MINEMGL codebase — a first-person mining/factory simulation game built in Unity (C#). It is intended as a learning reference for understanding how each system is designed and how they interconnect.
 
 ---
 
