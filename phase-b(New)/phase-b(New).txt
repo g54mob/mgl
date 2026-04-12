@@ -4322,6 +4322,7 @@ for (const filePath of files) {
 
 fs.writeFileSync(outputFile, packed, 'utf8');
 console.log(`Packed ${files.length} files -> ${outputFile}`);
+// used in terminal as: node pack.js "learn/phase-b(New)"
 
 
 
