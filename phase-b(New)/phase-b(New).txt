@@ -1163,6 +1163,23 @@ public static class HighlightStyle_REPLACED
 	// see FresnelHighlighter.cs for HighlightProfile [SerializeField] references
 }
 
+<!-- ==== FILE: phase-b(New)/Scripts/2-Data/Entities/InteractionType.cs ==== -->
+/// <summary>
+/// all interaction types used across phases — replaces magic strings
+/// </summary>
+public enum InteractionType
+{
+	Take,
+	Destroy,
+	Toggle,
+	// Phase D:
+	// Pack,
+	// TakeBuilding,
+	// Phase E:
+	// SetMold,
+	// ToggleDirection,
+}
+
 <!-- ==== FILE: phase-b(New)/Scripts/2-Data/Entities/MagnetToolSelectionMode.cs ==== -->
 /// <summary>
 /// magnet tool grab filter modes
@@ -2579,12 +2596,12 @@ public class BaseHeldTool : BaseSellableItem, IInteractable, ISaveLoadableObject
 	public string GetObjectName() => _name;
 	public virtual void Interact(SO_InteractionOption selectedOption)
 	{
-		if (selectedOption.interactionName == "Take")
+		if (selectedOption.interactionType == InteractionType.Take)
 		{
 			// purpose: InventoryOrchestrator adds this tool to hotbar
 			GameEvents.RaiseToolPickupRequested(this);
 		}
-		else if (selectedOption.interactionName == "Destroy")
+		else if (selectedOption.interactionType == InteractionType.Destroy)
 		{
 			Destroy(gameObject);
 		}
@@ -2905,7 +2922,7 @@ public class ToolMiningHat : BaseHeldTool
 	public override void PrimaryFire() => ToggleLight(!isOn);
 	public override void Interact(SO_InteractionOption selectedOption)
 	{
-		if (selectedOption.interactionName == "Toggle") ToggleLight(!isOn);
+		if (selectedOption.interactionType == InteractionType.Toggle) ToggleLight(!isOn);
 		else base.Interact(selectedOption);
 	}
 	#endregion
