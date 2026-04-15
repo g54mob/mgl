@@ -2324,6 +2324,7 @@ For each phase, the agent must produce:
 
 - **Check Gap Audit before building any phase.** Both `PhaseMap.md` and `StructureMap.md` have a "Gap Audit" section at the end listing missing files/features per phase with priority ratings. Include all **Critical** and **Important** items. **Polish** items go in `#region extra` blocks.
 - **PhaseMap/StructureMap are NOT exhaustive.** Always cross-reference every original source file (`Scripts/Assembly-CSharp/`) for the phase. If the source has functionality not listed in PhaseMap or StructureMap, **include it anyway** — create new files, add `#region extra` blocks, or document as a Gap Audit addition. The main source is the ultimate source of truth for 100% fidelity.
+- **MANDATORY: Post-delivery self-audit.** After producing all files for a phase, do a method-by-method comparison: read every original source file line-by-line, check every public method, every field, every interface implementation against what you produced. List any gaps. Fix them before delivering. This is non-negotiable — previous phases missed 5-15% on first delivery because the agent skipped small methods, SO_ logic wasn't moved, or singletons were in wrong folders.
 - **One sentence per script.** If it doesn't fit, split it.
 - **GlobalEnumsX.cs** — all enums for a phase go in ONE file: `2-Data/Enums/GlobalEnumsX.cs` (e.g. `GlobalEnumsB.cs`). No separate file per enum. Use `InteractionType` enum instead of magic strings for interaction names.
 - **`phase-All/`** — scripts shared across ALL phases live here (Singleton, UIManager, EconomyManager, core GameEvents). Never duplicated into phase folders. UIManager grows 1-2 lines per phase (keyboard routing). See GOAL.md folder structure.
@@ -2333,7 +2334,7 @@ For each phase, the agent must produce:
 - **partial GameEvents.** Each phase extends in its own `0-Core/GameEvents.cs`.
 - **SubManagers self-init.** Start() builds + subscribes + disables self. OnEnable/OnDisable announce menu state.
 - **No defensive null checks.** Let it crash — the crash is traceable.
-- **Least possible public API.** Default private. Promote only when another script calls it.
+- **Least possible public API.** Default private. Promote only when another script calls it. **After writing every script, audit:** can any public method be made private/protected? If nobody outside the class calls it → make it private. If only subclasses → protected. The user checks this on every review.
 - **`// purpose:`** on every Raise call and every += subscription.
 - **Vertical slice = standalone scene.** If a test needs another system, fix the architecture.
 
@@ -14719,3 +14720,4 @@ The PlayerController is a textbook God Object but splitting it would be a refact
 - **Status tracking is critical:** Added a Current Status table showing exactly what exists (typed, generated, planned). This is the first thing the user sees — no ambiguity about where things stand.
 - **Avoided inflating hours for scene work:** Scene setup time is real but unpredictable (depends on Unity Editor speed, prefab complexity). Captured it as a risk factor rather than padding every phase estimate.
 - **Phase E is fastest scripts-per-hour despite highest count:** 32 scripts but all follow the same trigger I/O machine pattern. Estimated 16h = 0.5h/script — lower than average because repetition.
+
