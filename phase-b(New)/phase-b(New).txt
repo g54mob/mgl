@@ -300,10 +300,8 @@ phase-b(New)/
 │   │   └── ISaveLoadableObject.cs          → "I can be saved/loaded (stub)"
 │   ├── DataService/
 │   │   └── InventoryDataService.cs         → "I manage all inventory slots" (nested: Slot)
-│   └── Entities/
-│       ├── MagnetToolSelectionMode.cs      → "I list magnet grab modes"
-│       ├── SavableObjectID.cs              → "I identify savable objects (stub)"
-│       └── HighlightStyle.cs               → "I define a fresnel highlight preset"
+│   └── Enums/
+│       └── GlobalEnumsB.cs                 → "all Phase B enums: InteractionType, MagnetToolSelectionMode, SavableObjectID"
 ├── 3-MonoBehaviours/
 │   ├── Orchestrator/
 │   │   └── InventoryOrchestrator.cs        → "I wire inventory slot Field_ instances"
@@ -355,9 +353,7 @@ phase-b(New)/
 | `IIconItem.cs` | I'm a contract for items with inventory icons |
 | `ISaveLoadableObject.cs` | I'm a stub contract for save/load (expanded Phase G) |
 | `InventoryDataService.cs` | I manage all inventory slots — add/remove/switch/stack |
-| `MagnetToolSelectionMode.cs` | I list magnet grab filter modes |
-| `SavableObjectID.cs` | I identify savable objects (stub — expanded Phase G) |
-| `HighlightStyle.cs` | I define a fresnel highlight preset (color, power, intensity) |
+| `GlobalEnumsB.cs` | I hold all Phase B enums: InteractionType, MagnetToolSelectionMode, SavableObjectID |
 | `InventoryOrchestrator.cs` | I wire Field_InventorySlot instances to InventoryDataService |
 | `PlayerMovement.cs` | I handle walk, sprint, duck, jump, slope sliding |
 | `PlayerCamera.cs` | I handle mouse look, FOV, camera bobbing, viewmodel bobbing |
@@ -388,79 +384,77 @@ phase-b(New)/
 ## Hand-Typing Order (Compile Groups)
 
 ### Group 1 — Pure Data (compiles alone, zero Unity dependency)
-1. `MagnetToolSelectionMode.cs`
-2. `SavableObjectID.cs`
-3. `HighlightStyle.cs`
-4. `IIconItem.cs`
-5. `ISaveLoadableObject.cs`
+1. `GlobalEnumsB.cs`
+2. `IIconItem.cs`
+3. `ISaveLoadableObject.cs`
 
 **STOP — compile. Zero errors expected.**
 
 ### Group 2 — DataService
-6. `InventoryDataService.cs`
+4. `InventoryDataService.cs`
 
 **STOP — compile. Run DEBUG_CheckB to verify add/remove/switch.**
 
 ### Group 3 — SO + Field
-7. `SO_FootstepSoundDefinition.cs`
-8. `Field_InventorySlot.cs`
+5. `SO_FootstepSoundDefinition.cs`
+6. `Field_InventorySlot.cs`
 
 **STOP — compile.**
 
 ### Group 4 — Physics Chain
-9. `BasePhysicsObject.cs`
-10. `BaseSellableItem.cs`
-11. `PhysicsSoundPlayer.cs`
-12. `PhysicsGib.cs`
+7. `BasePhysicsObject.cs`
+8. `BaseSellableItem.cs`
+9. `PhysicsSoundPlayer.cs`
+10. `PhysicsGib.cs`
 
 **STOP — compile.**
 
 ### Group 5 — Tools
-13. `BaseHeldTool.cs`
-14. `ToolPickaxe.cs`
-15. `ToolMagnet.cs`
-16. `ToolHammer.cs`
-17. `ToolMiningHat.cs`
-18. `ToolSupportsWrench.cs`
-19. `ToolResourceScanner.cs`
-20. `ToolBuilder.cs`
-21. `ToolHardHat.cs`
+11. `BaseHeldTool.cs`
+12. `ToolPickaxe.cs`
+13. `ToolMagnet.cs`
+14. `ToolHammer.cs`
+15. `ToolMiningHat.cs`
+16. `ToolSupportsWrench.cs`
+17. `ToolResourceScanner.cs`
+18. `ToolBuilder.cs`
+19. `ToolHardHat.cs`
 
 **STOP — compile.**
 
 ### Group 6 — GameEvents + Utils + UIRelay
-22. `GameEvents.cs` (partial)
-23. `UtilsPhaseB.cs`
-24. `PhaseBLOG.cs`
-25. `UIEventRelay.cs`
+20. `GameEvents.cs` (partial)
+21. `UtilsPhaseB.cs`
+22. `PhaseBLOG.cs`
+23. `UIEventRelay.cs`
 
 **STOP — compile.**
 
 ### Group 7 — Player Scripts
-26. `PlayerMovement.cs`
-27. `PlayerCamera.cs`
-28. `PlayerGrab.cs`
-29. `RigidbodyDraggerController.cs`
-30. `PlayerFootsteps.cs`
-31. `PlayerSpawnPoint.cs`
-32. `FresnelHighlighter.cs`
+24. `PlayerMovement.cs`
+25. `PlayerCamera.cs`
+26. `PlayerGrab.cs`
+27. `RigidbodyDraggerController.cs`
+28. `PlayerFootsteps.cs`
+29. `PlayerSpawnPoint.cs`
+30. `FresnelHighlighter.cs`
 
 **STOP — compile. Run PlayerMovementTest.**
 
 ### Group 8 — Orchestrator + SubManager
-33. `InventoryOrchestrator.cs`
-34. `InventoryUI.cs`
+31. `InventoryOrchestrator.cs`
+32. `InventoryUI.cs`
 
 **STOP — compile. Run InventoryTest.**
 
 ### Group 9 — Tests
-35. `DEBUG_CheckB.cs`
-36. `PlayerMovementTest.cs`
-37. `PlayerGrabTest.cs`
-38. `InventoryTest.cs`
-39. `ToolActionTest.cs`
+33. `DEBUG_CheckB.cs`
+34. `PlayerMovementTest.cs`
+35. `PlayerGrabTest.cs`
+36. `InventoryTest.cs`
+37. `ToolActionTest.cs`
 
-**STOP — compile. Run all 5 vertical slice tests + 3 manual tests.**
+**STOP — compile. Run all 5 vertical slice tests + 4 manual tests.**
 
 ---
 
@@ -470,7 +464,7 @@ phase-b(New)/
 
 ### 1. DEBUG_CheckB — InventoryDataService (Data-Level)
 
-**Internal prerequisites:** `InventoryDataService.cs`, `HighlightStyle.cs`
+**Internal prerequisites:** `InventoryDataService.cs`, `GlobalEnumsB.cs`
 **External prerequisites:** Empty scene, one GO with `DEBUG_CheckB`
 **NOT required:** Player, tools, UI, shop, interaction — nothing
 **Controls:**
@@ -1143,26 +1137,6 @@ public class InventoryDataService
 	#endregion
 }
 
-<!-- ==== FILE: phase-b(New)/Scripts/2-Data/Entities/HighlightStyle.cs ==== -->
-/// <summary>
-/// REPLACED — use HighlightPlus.HighlightProfile (ScriptableObject) instead.
-/// Create profiles in Unity: Create → Highlight Plus → Profile.
-/// Assign them as [SerializeField] HighlightProfile on FresnelHighlighter.
-///
-/// Original presets (create as HighlightProfile assets):
-///   ToolPreset       → outline cyan (0.25, 0.85, 1), width 1, no see-through
-///   GrabbablePreset  → outline cyan (0.25, 0.85, 1), width 1, no see-through
-///   BuildingPreset   → outline cyan, width 1.2 (Phase D)
-///   WrenchEnable     → outline green (0.3, 1, 0.3) (Phase D)
-///   WrenchDisable    → outline red (1, 0.3, 0.3) (Phase D)
-///
-/// This file kept as documentation only. Can be deleted.
-/// </summary>
-public static class HighlightStyle_REPLACED
-{
-	// see FresnelHighlighter.cs for HighlightProfile [SerializeField] references
-}
-
 <!-- ==== FILE: phase-b(New)/Scripts/2-Data/Enums/GlobalEnumsB.cs ==== -->
 /// <summary>
 /// all enums introduced in Phase B — one file, one place
@@ -1328,20 +1302,25 @@ public class SO_FootstepSoundDefinition : ScriptableObject
 <!-- ==== FILE: phase-b(New)/Scripts/3-MonoBehaviours/FresnelHighlighter.cs ==== -->
 using System.Collections.Generic;
 using UnityEngine;
-using HighlightPlus;
+// ──────────────────────────────────────────────────────────────
+// HIGHLIGHT PLUS: uncomment the line below once the package is imported
+// using HighlightPlus;
+// ──────────────────────────────────────────────────────────────
 
 /// <summary>
 /// outlines whatever the player looks at — powered by Highlight Plus asset
+/// Compiles without the package. Uncomment all [HP] sections after import.
 /// </summary>
 public class FresnelHighlighter : MonoBehaviour
 {
 	#region Inspector Fields
-	[Header("Profiles (Create: Create → Highlight Plus → Profile)")]
-	[SerializeField] HighlightProfile _toolProfile;
-	[SerializeField] HighlightProfile _grabbableProfile;
-	[SerializeField] HighlightProfile _buildingProfile;
-	[SerializeField] HighlightProfile _wrenchEnableProfile;
-	[SerializeField] HighlightProfile _wrenchDisableProfile;
+	// ── [HP] uncomment these once HighlightPlus is imported ──
+	// [Header("Profiles (Create → Highlight Plus → Profile)")]
+	// [SerializeField] HighlightProfile _toolProfile;
+	// [SerializeField] HighlightProfile _grabbableProfile;
+	// [SerializeField] HighlightProfile _buildingProfile;
+	// [SerializeField] HighlightProfile _wrenchEnableProfile;
+	// [SerializeField] HighlightProfile _wrenchDisableProfile;
 
 	[Header("Raycast")]
 	[SerializeField] Camera _cam;
@@ -1350,34 +1329,38 @@ public class FresnelHighlighter : MonoBehaviour
 	#endregion
 
 	#region private API
-	readonly List<HighlightEffect> activeEffects = new List<HighlightEffect>();
+	// ── [HP] uncomment once HighlightPlus is imported ──
+	// readonly List<HighlightEffect> activeEffects = new List<HighlightEffect>();
+	//
+	// void HighlightObject(GameObject obj, HighlightProfile profile)
+	// {
+	// 	var effect = obj.GetComponent<HighlightEffect>();
+	// 	if (effect == null) effect = obj.AddComponent<HighlightEffect>();
+	// 	effect.ProfileLoad(profile);
+	// 	effect.SetHighlighted(true);
+	// 	activeEffects.Add(effect);
+	// }
+	// void ClearAll()
+	// {
+	// 	foreach (var effect in activeEffects)
+	// 		if (effect != null) effect.SetHighlighted(false);
+	// 	activeEffects.Clear();
+	// }
 
-	void HighlightObject(GameObject obj, HighlightProfile profile)
-	{
-		var effect = obj.GetComponent<HighlightEffect>();
-		if (effect == null) effect = obj.AddComponent<HighlightEffect>();
-		effect.ProfileLoad(profile);
-		effect.SetHighlighted(true);
-		activeEffects.Add(effect);
-	}
-	void ClearAll()
-	{
-		foreach (var effect in activeEffects)
-			if (effect != null) effect.SetHighlighted(false);
-		activeEffects.Clear();
-	}
 	void OutlineLookedAtThing()
 	{
 		if (!Physics.Raycast(_cam.transform.position, _cam.transform.forward, out RaycastHit hit, _interactRange, _interactLayerMask))
 			return;
+
+		// ── [HP] uncomment the highlight calls once HighlightPlus is imported ──
 		if (hit.collider.GetComponentInParent<BaseHeldTool>() != null)
 		{
-			HighlightObject(hit.collider.gameObject, _toolProfile);
+			// HighlightObject(hit.collider.gameObject, _toolProfile);
 			return;
 		}
 		if (hit.collider.CompareTag("Grabbable"))
 		{
-			HighlightObject(hit.collider.gameObject, _grabbableProfile);
+			// HighlightObject(hit.collider.gameObject, _grabbableProfile);
 			return;
 		}
 		// Phase A: ComputerTerminal, ContractsTerminal → _toolProfile
@@ -1388,7 +1371,8 @@ public class FresnelHighlighter : MonoBehaviour
 	#region Unity Life Cycle
 	private void Update()
 	{
-		ClearAll();
+		// ── [HP] uncomment ClearAll once HighlightPlus is imported ──
+		// ClearAll();
 		OutlineLookedAtThing();
 	}
 	#endregion
