@@ -1163,10 +1163,12 @@ public static class HighlightStyle_REPLACED
 	// see FresnelHighlighter.cs for HighlightProfile [SerializeField] references
 }
 
-<!-- ==== FILE: phase-b(New)/Scripts/2-Data/Entities/InteractionType.cs ==== -->
+<!-- ==== FILE: phase-b(New)/Scripts/2-Data/Enums/GlobalEnumsB.cs ==== -->
 /// <summary>
-/// all interaction types used across phases — replaces magic strings
+/// all enums introduced in Phase B — one file, one place
 /// </summary>
+
+/// <summary> interaction option types — replaces magic strings </summary>
 public enum InteractionType
 {
 	Take,
@@ -1180,10 +1182,7 @@ public enum InteractionType
 	// ToggleDirection,
 }
 
-<!-- ==== FILE: phase-b(New)/Scripts/2-Data/Entities/MagnetToolSelectionMode.cs ==== -->
-/// <summary>
-/// magnet tool grab filter modes
-/// </summary>
+/// <summary> magnet tool grab filter modes </summary>
 public enum MagnetToolSelectionMode
 {
 	Everything = 0,
@@ -1191,10 +1190,7 @@ public enum MagnetToolSelectionMode
 	ResourcesNotOnConveyors = 2
 }
 
-<!-- ==== FILE: phase-b(New)/Scripts/2-Data/Entities/SavableObjectID.cs ==== -->
-/// <summary>
-/// stub enum — expanded in Phase G with all savable object IDs
-/// </summary>
+/// <summary> stub — expanded in Phase G with all savable object IDs </summary>
 public enum SavableObjectID
 {
 	INVALID = 0,
