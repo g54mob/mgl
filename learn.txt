@@ -1645,7 +1645,9 @@ SimplePlayerController: 0 public, 3 private handlers
 ## Class Responsibilities
 
 ### `SO_` — Pure Data (2-Data/)
-Only fields. No methods. One file per SO.
+Only fields. **Zero methods.** One file per SO.
+If the original source has helper methods on an SO (e.g. `GetOrePrefab()`, `GetPrimaryResourceType()`), move them to the **consumer** that reads the SO (the MonoBehaviour, DataService, or Orchestrator). The SO exposes its fields as `public` — the consumer reads them and does the logic.
+This keeps SO_ as pure config blueprints that the inspector can edit without any code coupling.
 
 ### `Field_` — Display Only (2-Data/)
 Inspector refs + display setters: `SetData(...)`, `SetButtonInteractable(...)`, `SetPrice(...)`, `SetQty(...)`.
@@ -1666,7 +1668,15 @@ Has `GetSnapShotForTest(header)` that combines all PhaseXLOG calls into one form
 **When to create a DataService:**
 - Operations are pure logic (add, remove, query, sort, total) — no Unity API needed
 - Testable via `new` instance in `DEBUG_Check` — zero scene, zero GameObjects
-- Examples: InventoryDataService (slots, switch, stack), ShopDataService (categories, cart, afford)
+- Examples: InventoryDataService (slots, switch, stack), ShopDataService (categories, cart, afford), OreDataService (resource descriptions, color formatting)
+
+**Actively look for DataService opportunities in every phase.** If a Manager or MonoBehaviour has pure C# logic that could be extracted into a testable class, extract it. The question: "Can I test this logic by calling `new DataService()` with no scene?" If yes → it's a DataService.
+
+Common candidates that should be DataServices:
+- **Collection management** — any `List<T>` / `Dictionary<K,V>` with Build/Get/Add/Remove operations
+- **Lookup/query** — resource descriptions by type, quest progress by ID, save file headers by path
+- **Formatting** — colored resource strings, money formatting, quest requirement text
+- **Validation** — placement checks (pure math), afford checks, requirement checks
 
 **When NOT to create a DataService — keep in MonoBehaviour:**
 - Operations need Unity physics (SpringJoint, Rigidbody, AddForce, OverlapSphere)
@@ -1693,7 +1703,17 @@ Reads from DataService. Refreshes on events only — never `Update()`.
 World objects, systems, player. Each has minimal public API (ideally zero).
 
 ### Utils (4-Utils/)
-`UtilsPhaseA` — extensions by region (`formatMoney()`, `formatMoneyShort()`).
+`UtilsPhaseX` — static extensions + helpers grouped by `#region`. One per phase.
+`PhaseXLOG` — snapshot formatters targeting specific collections.
+
+**important: Actively extract reusable logic into UtilsPhaseX.** If a method appears in 2+ scripts, or if a MonoBehaviour has a pure static helper that doesn't need `this`, it belongs in Utils. Examples:
+- `UtilsPhaseA.formatMoney()` — used by ShopOrchestrator + MoneyHUD
+- `UtilsPhaseB.IgnoreAllCollisions()` — used by PlayerGrab + ToolMagnet
+- `UtilsPhaseC.WeightedRandom<T>()` — used by OreNode + AutoMiner + future OrePiece sieving
+- `UtilsPhaseC.PickOrePrefab()` — reads SO fields + filters gems + weighted select
+
+**Rule:** If logic was on an SO_ (moved per "SO_ = pure data" rule) and it's reusable, put it in UtilsPhaseX, not in a single consumer. If only one consumer uses it, inline it in that consumer.
+
 `PhaseALOG` — snapshot formatters **targeting specific collections separately**:
 ```
 LIST_CATEGORY__TO__JSON(CATEGORY)           → snapshot of category list
@@ -2255,7 +2275,8 @@ For each phase, the agent must produce:
    - Minimal public API — private by default
    - `partial class GameEvents` in own `0-Core/GameEvents.cs`
    - Protected helpers for repeated patterns (`OwnerCamRay`, etc.)
-   - DataService only when operations are pure C# (no Unity API needed)
+   - **Actively create DataServices** for any pure C# logic (collections, lookups, formatting, validation). Ask: "Can I test this via `new`?" If yes → DataService. See GOAL.md "Common candidates" list. Don't leave testable logic buried in Managers/MonoBehaviours.
+   - **Actively extract reusable logic into UtilsPhaseX.** If a method appears in 2+ scripts, or is a pure static helper (no `this`), it goes in `4-Utils/UtilsPhaseX.cs`. If logic was moved off an SO_ (pure data rule), put reusable parts in Utils, not in a single consumer.
 
 3. **Test scripts for Vertical Slice Test of Each System in that phase** with:
    - Summary comment: prerequisites, NOT required, "How to test" steps, controls
@@ -2333,6 +2354,8 @@ The user is strict. Catch these before delivering:
 8. **Missing `isFirstEnable` pattern on SubManagers** → every SubManager MUST use `isFirstEnable` in OnEnable. NOT Start(). Read GOAL.md "Why isFirstEnable" section. No exceptions.
 9. **Toggle instead of separate Open/Close events** → every UI panel must have SEPARATE `OnOpen...View` + `OnClose...View` events. NOT a single toggle. This is how the user's handTyped code works.
 10. **Using `Input.GetKeyDown` directly in SubManagers** → SubManagers don't handle input. They subscribe to Open/Close events. Input routing lives elsewhere (UIManager or test scripts fire the events).
+11. **Methods on SO_ classes** → SO_ = pure data, zero methods. If the original source has helper methods on an SO (e.g. `GetOrePrefab()`), move them to the consumer (MonoBehaviour, DataService). SO exposes public fields, consumer reads them.
+12. **Singleton in `3-MonoBehaviours/` instead of `1-Managers/`** → if a script extends `Singleton<T>`, it goes in `1-Managers/`. Always. PhaseMap may list it wrong — GOAL.md is the authority.
 
 ---
 
@@ -12012,7 +12035,7 @@ When the state **changes**, `GameEvents.RaiseOreLimitChanged(state)` fires. `Phy
 
 `AutoMiner.Update()` runs every frame when `_enabled` is true. It rotates the `_rotator` child at a speed based on `_spawnRate * _oresPerRotation`. A timer counts down — when it hits zero, `TrySpawnOre()` fires.
 
-Inside `TrySpawnOre`: it checks `OreLimitManager.ShouldBlockOreSpawning()` — if blocked, *returns immediately*. Then a random roll against `_spawnProbability` (default 80%) — if it fails, *no spawn*. If both pass, it calls `_resourceDefinition.GetOrePrefab(canProduceGems)` which uses `UtilsPhaseC.WeightedRandom()` to pick a prefab, then `OrePiecePoolManager.SpawnPooledOre(prefab, spawnPoint)`.
+Inside `TrySpawnOre`: it checks `OreLimitManager.ShouldBlockOreSpawning()` — if blocked, *returns immediately*. Then a random roll against `_spawnProbability` (default 80%) — if it fails, *no spawn*. If both pass, it calls `UtilsPhaseC.PickOrePrefab(_resourceDefinition.PossibleOrePrefabs, true)` which reads the SO's public field list and uses `WeightedRandom` to pick a prefab, then `OrePiecePoolManager.SpawnPooledOre(prefab, spawnPoint)`. The SO itself has **zero methods** — AutoMiner reads its fields, UtilsPhaseC does the selection logic.
 
 The timer resets to `_spawnRate * OreLimitManager.GetAutoMinerSpawnTimeMultiplier()` — **throttled** during high load.
 
@@ -12126,7 +12149,7 @@ phase-c(New)/
 |--------|---------|
 | `GameEvents.cs` | I deliver Phase C messages (ore mined, ore sold, ore limit changed) |
 | `OreManager.cs` | I clean up invalid ore pieces via round-robin check |
-| `SO_AutoMinerResourceDefinition.cs` | I configure auto-miner spawn rate + weighted ore drops |
+| `SO_AutoMinerResourceDefinition.cs` | I hold auto-miner spawn rate + weighted ore drops (pure data, zero methods) |
 | `IDamageable.cs` | I'm a contract for anything that takes damage at a position |
 | `OreDataService.cs` | I manage resource descriptions, sell values, and formatted strings |
 | `GlobalEnumsC.cs` | I hold all Phase C enums: ResourceType, PieceType, OreLimitState |
@@ -12169,21 +12192,21 @@ phase-c(New)/
 
 **STOP — compile.**
 
-### Group 5 — Core MonoBehaviours
+### Group 5 — Managers (Singletons)
 8. `ParticleManager.cs`
-9. `OrePiece.cs`
-10. `DamageableOrePiece.cs`
-11. `OreNode.cs`
-12. `OrePiecePoolManager.cs`
-13. `OreLimitManager.cs`
-14. `PhysicsLimitUIWarning.cs`
-15. `AutoMiner.cs`
-16. `SellerMachine.cs`
+9. `OrePiecePoolManager.cs`
+10. `OreLimitManager.cs`
+11. `OreManager.cs`
 
 **STOP — compile.**
 
-### Group 6 — Manager
-17. `OreManager.cs`
+### Group 6 — MonoBehaviours
+12. `OrePiece.cs`
+13. `DamageableOrePiece.cs`
+14. `OreNode.cs`
+15. `PhysicsLimitUIWarning.cs`
+16. `AutoMiner.cs`
+17. `SellerMachine.cs`
 
 **STOP — compile. Run OreTest.**
 
@@ -12446,6 +12469,19 @@ public class OreLimitManager : Singleton<OreLimitManager>
 			default: return 1f;
 		}
 	}
+	/// <summary> force immediate recheck — called when objects are bulk destroyed </summary>
+	public void OnObjectLimitChanged() => timeSinceLastCheck = 10f;
+	#endregion
+
+	#region private API
+	bool hasShownPopup;
+	void TryShowWarningPopup()
+	{
+		if (hasShownPopup) return;
+		hasShownPopup = true;
+		Debug.Log($"[OreLimitManager] Ore limit reached! Current limit: {_movingObjectLimit}".colorTag("orange"));
+		// Phase I: Singleton<UIManager>.Ins.ShowInfoMessagePopup("Ore Limit", message);
+	}
 	#endregion
 
 	#region Unity Life Cycle
@@ -12471,9 +12507,9 @@ public class OreLimitManager : Singleton<OreLimitManager>
 				if (movingCount > hardLimit) break;
 			}
 		}
-		if (movingCount > hardLimit) SetState(OreLimitState.Blocked);
-		else if (movingCount > softLimit) SetState(OreLimitState.HighlyLimited);
-		else if (movingCount > _movingObjectLimit) SetState(OreLimitState.SlightlyLimited);
+		if (movingCount > hardLimit) { SetState(OreLimitState.Blocked); TryShowWarningPopup(); }
+		else if (movingCount > softLimit) { SetState(OreLimitState.HighlyLimited); TryShowWarningPopup(); }
+		else if (movingCount > _movingObjectLimit) { SetState(OreLimitState.SlightlyLimited); TryShowWarningPopup(); }
 		else SetState(OreLimitState.Regular);
 	}
 	void SetState(OreLimitState state)
@@ -12618,6 +12654,13 @@ public class OrePiecePoolManager : Singleton<OrePiecePoolManager>
 		piece.gameObject.tag = "Grabbable";
 		piece.transform.SetParent(root, false);
 		queue.Enqueue(piece);
+	}
+	/// <summary> returns total count of inactive (pooled) ore pieces </summary>
+	public int GetInactiveCount()
+	{
+		int count = 0;
+		foreach (var queue in pools.Values) count += queue.Count;
+		return count;
 	}
 	#endregion
 
@@ -12894,30 +12937,14 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// configures auto-miner spawn rate + weighted ore drops
+/// configures auto-miner spawn rate + weighted ore drops — pure data, no methods
 /// </summary>
 [CreateAssetMenu(menuName = "SO/SO_AutoMinerResourceDefinition", fileName = "SO_AutoMinerResourceDefinition")]
 public class SO_AutoMinerResourceDefinition : ScriptableObject
 {
 	[Range(0f, 100f)] public float SpawnProbability = 80f;
 	[Range(0f, 20f)] public float SpawnRate = 2f;
-	[SerializeField] List<WeightedOreChance> _possibleOrePrefabs = new List<WeightedOreChance>();
-
-	/// <summary> get primary resource type (highest weight) </summary>
-	public ResourceType GetPrimaryResourceType()
-	{
-		if (_possibleOrePrefabs == null || _possibleOrePrefabs.Count == 0) return ResourceType.INVALID;
-		return _possibleOrePrefabs[0].OrePrefab.ResourceType;
-	}
-	/// <summary> weighted random ore prefab selection </summary>
-	public OrePiece GetOrePrefab(bool canProduceGems)
-	{
-		if (_possibleOrePrefabs == null || _possibleOrePrefabs.Count == 0) return null;
-		var list = _possibleOrePrefabs;
-		if (!canProduceGems)
-			list = _possibleOrePrefabs.FindAll(o => o.OrePrefab.PieceType != PieceType.Gem);
-		return UtilsPhaseC.WeightedRandom(list, o => o.Weight)?.OrePrefab;
-	}
+	public List<WeightedOreChance> PossibleOrePrefabs = new List<WeightedOreChance>();
 }
 
 <!-- ==== FILE: learn/phase-c(New)/Scripts/3-MonoBehaviours/AutoMiner.cs ==== -->
@@ -12951,7 +12978,7 @@ public class AutoMiner : MonoBehaviour
 		if (Singleton<OreLimitManager>.Ins.ShouldBlockOreSpawning()) return;
 		if (Random.Range(0f, 100f) > _spawnProbability) return;
 		OrePiece prefab = _resourceDefinition != null
-			? _resourceDefinition.GetOrePrefab(true)
+			? UtilsPhaseC.PickOrePrefab(_resourceDefinition.PossibleOrePrefabs, true)
 			: _fallbackOrePrefab;
 		if (prefab != null)
 			Singleton<OrePiecePoolManager>.Ins.SpawnPooledOre(prefab, _oreSpawnPoint.position, _oreSpawnPoint.rotation);
@@ -13142,6 +13169,7 @@ public class OrePiece : BaseSellableItem
 	[SerializeField] bool _useRandomMesh = true;
 	[SerializeField] bool _useRandomScale = true;
 	[SerializeField] Vector3 _scaleVariance = new Vector3(0.25f, 0.25f, 0.25f);
+	[SerializeField] Sprite _inventoryIcon;
 	[Header("Conversion Prefabs (Phase E)")]
 	[SerializeField] GameObject _crushedPrefab;
 	[SerializeField] GameObject _polishedPrefab;
@@ -13169,6 +13197,8 @@ public class OrePiece : BaseSellableItem
 
 	/// <summary> sell value with random multiplier </summary>
 	public override float GetSellValue() => Mathf.Round(BaseSellValue * randomPriceMultiplier * 100f) / 100f;
+	/// <summary> inventory icon for ToolResourceScanner display </summary>
+	public Sprite GetIcon() => _inventoryIcon;
 
 	/// <summary> return to pool (replaces Destroy) </summary>
 	public void Delete()
@@ -13365,6 +13395,14 @@ public static class UtilsPhaseC
 			if (roll <= cumulative) return item;
 		}
 		return items[items.Count - 1];
+	}
+
+	/// <summary> pick weighted ore prefab from a list, optionally filtering out gems </summary>
+	public static OrePiece PickOrePrefab(List<WeightedOreChance> list, bool canProduceGems)
+	{
+		if (list == null || list.Count == 0) return null;
+		var filtered = canProduceGems ? list : list.FindAll(o => o.OrePrefab.PieceType != PieceType.Gem);
+		return WeightedRandom(filtered, o => o.Weight)?.OrePrefab;
 	}
 }
 
@@ -14048,7 +14086,7 @@ M/N → menu toggle";
 		}
 		else if (INPUT.K.InstantDown(KeyCode.I))
 		{
-			Debug.Log($"OrePiece count: {OrePiece.AllOrePieces.Count}".colorTag("cyan"));
+			Debug.Log($"OrePiece active: {OrePiece.AllOrePieces.Count}, pooled: {Singleton<OrePiecePoolManager>.Ins.GetInactiveCount()}".colorTag("cyan"));
 		}
 		else if (INPUT.K.InstantDown(KeyCode.O))
 		{
@@ -14681,4 +14719,3 @@ The PlayerController is a textbook God Object but splitting it would be a refact
 - **Status tracking is critical:** Added a Current Status table showing exactly what exists (typed, generated, planned). This is the first thing the user sees — no ambiguity about where things stand.
 - **Avoided inflating hours for scene work:** Scene setup time is real but unpredictable (depends on Unity Editor speed, prefab complexity). Captured it as a risk factor rather than padding every phase estimate.
 - **Phase E is fastest scripts-per-hour despite highest count:** 32 scripts but all follow the same trigger I/O machine pattern. Estimated 16h = 0.5h/script — lower than average because repetition.
-
