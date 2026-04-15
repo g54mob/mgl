@@ -1261,43 +1261,91 @@ This is a **well-structured indie game codebase** that demonstrates solid Unity 
 <!-- ==== FILE: learn/Estimate.md ==== -->
 # Estimate — Hand-Typing Timeline
 
-> Based on Phase A taking ~3 days (~14 hours) including architecture design.
-> Architecture is now locked (GOAL.md). Patterns repeat across phases.
+> Calibrated from actual data: Phase A = 14h (22 scripts + architecture design), Phase A½ = 3h (4 scripts + scene work).
+> Architecture is locked (GOAL.md). Patterns proven across Phase A + B.
+> Script counts include all Gap Audit Critical + Important items from PhaseMap.md + StructureMap.md.
 > Schedule: 4 hours/weekday, 8 hours/weekend = ~36 hours/week.
 
 ---
 
-## Per Phase
+## Current Status
 
-| Phase | Scripts | Difficulty | What's new | Est. Hours | Est. Days |
-|-------|---------|-----------|-----------|-----------|-----------|
-| **A** | 22 | Easy | Designed entire architecture: DataService, Orchestrator, SubManager, Field_, GameEvents, vertical slice tests | 14h | 3 days ✅ |
-| **A½** | 3 | Easy | 2 MonoBehaviours + partial GameEvents + scene work | 3h | < 1 day |
-| **B** | 35 | Hard | PlayerController split (888→4 scripts), inventory DataService, tool inheritance chain, 7 tools, partial GameEvents, zero FindObjectOfType | 28h | 6-7 days |
-| **C** | ~22 | Medium | Object pooling (OrePiecePoolManager), weighted drops, IDamageable, OreDataService | 15h | 3-4 days |
-| **D** | ~18 | Hard | Ghost preview, grid snap, conveyor snap detection, BuildingDataService | 18h | 4-5 days |
-| **E** | ~25 | Medium | Repetitive — machines follow same trigger I/O pattern. Each is one MonoBehaviour. | 12h | 3 days |
-| **F** | ~22 | Medium | QuestDataService, QuestOrchestrator, quest requirements (polymorphic) | 15h | 3-4 days |
-| **G** | ~18 | Hard | SaveDataService, ISaveLoadable interface wiring across ALL phases | 22h | 5-6 days |
-| **H** | ~16 | Easy | SoundManager, SettingsManager, SettingsOrchestrator — familiar patterns | 10h | 2-3 days |
-| **I** | ~20 | Easy | ContractDataService — follows quest pattern. Main menu scene. | 10h | 2-3 days |
-| **J** | ~12 | Easy | DebugManager, VersionManager — simple singletons | 6h | 1-2 days |
-| **Total** | **~213** | | | **~153h** | |
+| Asset | Status | Details |
+|-------|--------|---------|
+| `handTyped(latest)/phase-a` | ✅ **Typed** | 26 scripts + 1 DEBUG_Check. User's ground-truth code. |
+| `handTyped(latest)/phase-a-1` | ✅ **Typed** | 4 scripts (GameEvents, CameraShaker, StartingElevator, ElevatorTest). |
+| `phase-All/` | ✅ **Typed** | 4 shared scripts (Singleton, GameEvents, EconomyManager, UIManager). |
+| `phase-a-1(New)/` | ✅ **Generated** | Agent output: 4 .cs + GUIDE.md. User hand-typed from this. |
+| `phase-b(New)/` | ✅ **Generated** | Agent output: 32 .cs + GUIDE.md + FLOW.md + 4 Manual/*.md. **Not yet hand-typed.** |
+| Phase C–J | ❌ **Not generated** | Need agent generation → then hand-typing. |
+
+**Completed: ~17h (Phase A 14h + Phase A½ 3h). Next: hand-type Phase B from generated code.**
 
 ---
 
-## Why It's Faster Now (After Phase A + B Architecture)
+## Per Phase — Actual Script Counts
+
+> Counts from StructureMap per-phase hierarchy + Gap Audit Critical/Important additions.
+> "Scripts" = .cs files to hand-type (includes tests). Manual test .md files listed separately.
+
+| Phase | Base | +Gap | **Total .cs** | Manual .md | Difficulty | What's New / Hard | Est. Hours | Est. Days |
+|-------|------|------|--------------|-----------|-----------|-------------------|-----------|-----------|
+| **A** | 22 | — | **26** | 2 | Easy | Architecture design (one-time cost) | 14h | 3 ✅ Done |
+| **A½** | 2 | — | **4** | 1 | Easy | Scene work (mine environment) | 3h | <1 ✅ Done |
+| **B** | 24 | +8 | **32** | 4 | Hard | 888→4 split, tool inheritance (8 tools), InventoryDataService, drag-drop, SpringJoint grab | 24h | 6 days |
+| **C** | 14 | +2 | **16** | 3 | Medium | Object pooling, weighted drops, IDamageable, DamageableOrePiece | 12h | 3 days |
+| **D** | 15 | +7 | **22** | 3 | Hard | Ghost preview, grid snap, conveyor snap, chute system, robot arm | 20h | 5 days |
+| **E** | 27 | +5 | **32** | 3 | Medium | Repetitive trigger I/O pattern, but high count. ToolCastingMold + DrillBit are new tools | 16h | 4 days |
+| **F** | 18 | +4 | **22** | 3 | Medium | 2 DataServices, 3 Orchestrators, polymorphic quest requirements | 16h | 4 days |
+| **G** | 8 | +10 | **18** | 1 | Hard | Save/load touches ALL phases. 10 save-data entities. ISaveLoadable wiring | 22h | 5-6 days |
+| **H** | 12 | +3 | **15** | 2 | Easy | SoundManager pool, SettingsOrchestrator (15+ callbacks), Input System rebinding | 10h | 2-3 days |
+| **I** | 18 | +2 | **20** | 2 | Easy | ContractDataService (follows quest pattern). Main menu + world events | 12h | 3 days |
+| **J** | 9 | — | **9** | 0 | Easy | Debug singletons, demo mode, mesh generators | 5h | 1-2 days |
+| | | | **216** | **24** | | | **154h** | |
+
+### Gap Audit Additions (included above)
+
+| Phase | +Scripts | Key Additions |
+|-------|---------|--------------|
+| B (+8) | RigidbodyDraggerController, ToolHardHat, UIEventRelay, + merges into BaseHeldTool (Equip/UnEquip), ToolMagnet (DetachBody+cooldown), InventoryOrchestrator (info panel), PlayerMovement (noclip), UtilsPhaseB (SetLayerRecursively) |
+| C (+2) | DamageableOrePiece, OreLimitState enum |
+| D (+7) | ChuteHatch, ChuteTop, RobotGrabberArm, ConveyorBatchRendering, ConveyorBeltShaker, ConveyorBeltShakerHorizontal, ConveyorBlockerT2 |
+| E (+5) | ToolCastingMold, RapidAutoMinerDrillBit, CoalGaugeNeedle, DepositBoxCrusher, PackagerMachineInteractor |
+| F (+4) | QuestTreeQuestInfoUI, ResearchTreeSelectedResearchInfoUI, QuestPreviewRewardEntry, ShopItemQuestRequirementType |
+| G (+10) | BaseHeldToolSaveData, ToolMagnetSaveData, ToolBuilderSaveData, RapidAutoMinerDrillBitToolSaveData, AutoMinerSaveData, BuildingCrateSaveData, CastingFurnaceSaveData, RoutingConveyorSaveData, DetonatorExplosionSaveData, EditableSignSaveData |
+| H (+3) | PlayerInputActions, BaseSettingOption, UIButtonSounds |
+| I (+2) | DetonatorExplosionState enum, MenuData |
+
+---
+
+## Calibration — Why These Numbers
+
+**Data point:** Phase A = 26 scripts in 14h (includes ~4h architecture design). Pure typing+testing rate = ~10h / 26 scripts = **~23 min/script average**.
+
+| Script Complexity | Examples | Avg Time |
+|-------------------|---------|----------|
+| **Simple** (enums, stubs, interfaces, SOs, entities) | GlobalEnumsB, SavableObjectID, SO_FootstepSoundDef, OreLimitState | ~15 min |
+| **Medium** (DataService, DataWrapper, Field_, Utils, tests) | InventoryDataService, WShopItem, Field_InventorySlot, PhaseBLOG | ~30 min |
+| **Complex** (MonoBehaviours, Orchestrators, Managers, Player*) | PlayerMovement, ToolMagnet, InventoryOrchestrator, CastingFurnace | ~60 min |
+
+Phase B breakdown: ~10 simple × 15min + ~12 medium × 30min + ~10 complex × 60min = 2.5 + 6 + 10 = 18.5h + ~5h scene/testing = **~24h**
+
+**Agent generation saves ~30% vs designing from scratch** — code is ready to reference, GUIDE.md has typing order, FLOW.md explains connections. But you still read every line, type it, and test it.
+
+---
+
+## Why It's Faster Now
 
 | Advantage | Impact |
 |-----------|--------|
 | **Architecture locked** | No more multi-day design sessions. GOAL.md defines everything. |
-| **Patterns repeat** | Phase E machines = same as Phase C. Phase I contracts = same as Phase F quests. Just different data. |
-| **DataService first** | Type DataService → test with `DEBUG_Check` (plain C# `new` instance) → then wire UI. Bugs caught early. |
-| **Orchestrator pattern** | Every UI system follows same: SubManager (toggle) → Orchestrator (wire Field_) → DataService (data). Copy the shape, change the content. |
-| **partial GameEvents** | Each phase adds events in its own `0-Core/GameEvents.cs`. No merge conflicts. No modifying Phase A. |
-| **OwnerCamRay / protected helpers** | Tools are ~10 lines each. Base class does the heavy lifting. |
-| **Vertical slice tests** | Test each system independently. Never wonder "did I break something else?" |
-| **Zero FindObjectOfType** | No hidden dependencies. Inspector refs + GameEvents only. |
+| **Agent generates first** | Full code + GUIDE + FLOW ready before you type. ~30% faster than Phase A's design-while-typing. |
+| **Patterns repeat** | Phase E machines = same trigger I/O as Phase C. Phase I contracts = same as Phase F quests. |
+| **DataService first** | Type DataService → test with `DEBUG_Check` → then wire UI. Bugs caught early. |
+| **Orchestrator pattern** | SubManager (toggle) → Orchestrator (wire Field_) → DataService (data). Copy shape, change content. |
+| **partial GameEvents** | Each phase extends in its own file. No merge conflicts. |
+| **Tool inheritance** | Base class does heavy lifting. Concrete tools are ~10-30 lines each. |
+| **Vertical slice tests** | Each system testable independently. Never wonder "did I break something else?" |
 
 ---
 
@@ -1311,43 +1359,77 @@ Weekly total: ~36 hours
 
 ## Timeline
 
-| Week | Phases | Hours | Milestone |
-|------|--------|-------|-----------|
-| 1 | A½ + B (start) | 31h | Mine environment + player movement + grab working |
-| 2 | B (finish) | 28h | Full player: movement + camera + grab + tools + inventory |
-| 3 | C + D (start) | 30h | Mining works, ore spawns, conveyors carry ore |
-| 4 | D (finish) + E (start) | 30h | Building placement + first machines (crusher, furnace) |
-| 5 | E (finish) + F | 27h | Full factory pipeline + quest system |
-| 6 | G | 22h | Save/load working — game persists |
-| 7 | H + I + J | 26h | Sound, settings, contracts, menus, debug — feature complete |
+| Week | Phases | Scripts | Hours | Milestone |
+|------|--------|---------|-------|-----------|
+| — | A + A½ | 30 | 17h | ✅ Done. Shop, interaction, economy, elevator, mine environment. |
+| 1 | B (start) | 20 | 36h | Player movement + camera + grab + inventory working |
+| 2 | B (finish) | 12 | 24h | All 8 tools + highlighting + tests. Full player system. |
+| 3 | C | 16 | 12h | Mining + ore nodes + pooling + seller machine |
+| 3-4 | D (start) | 12 | 20h | Building placement + ghost preview + grid snap |
+| 4 | D (finish) | 10 | — | Conveyors carry ore end-to-end |
+| 5 | E | 32 | 16h | Full factory pipeline (repetitive pattern — fastest scripts-per-hour) |
+| 5-6 | F | 22 | 16h | Quest + research system |
+| 6-7 | G | 18 | 22h | Save/load working — game persists across sessions |
+| 7-8 | H | 15 | 10h | Full audio + settings + keybinds |
+| 8 | I | 20 | 12h | Contracts + world events + main menu |
+| 8 | J | 9 | 5h | Debug + demo + polish — **feature complete** |
 
-**Total: ~7 weeks. ~153 hours of hand-typing.**
+**Typing: ~8 weeks. ~154h of hand-typing + testing.**
+**Manual testing: 24 .md test guides, ~1h each = ~24h additional.**
+**Grand total: ~178h to feature-complete.**
 
 ---
 
-## What Slows Things Down
+## Risk Factors
 
-- **Phase B** — hardest. 35 scripts. 888-line split. Tool inheritance. Inventory system. But architecture is proven.
-- **Phase G** — trickiest. Save/load touches every system. ISaveLoadable interface wiring across all phases.
-- **Hand-typing** — slower than copy-paste, but you understand every line. Pays off when debugging.
+| Risk | Phase | Impact | Mitigation |
+|------|-------|--------|------------|
+| **Phase B complexity** | B | Hardest phase: 32 scripts, 888-line split, SpringJoint physics, drag-drop | Agent generated full code + 4 manual test guides |
+| **Phase G cross-cutting** | G | Save/load touches every earlier phase (ISaveLoadable interfaces, save-data entities) | Interface stubs planted in Phase B. Each system adds its own ISaveLoadable. |
+| **Phase E volume** | E | Most scripts (32) but lowest complexity-per-script | Repetitive trigger I/O pattern. Fastest phase by scripts/hour. |
+| **Phase D new patterns** | D | Ghost preview + grid snap + conveyor snap = no prior pattern to copy | BuildingDataService isolates pure math. BuildingManager handles Unity lifecycle. |
+| **Scene setup time** | All | Not captured in script hours — prefab hierarchies, inspector wiring, layers/tags | Manual test .md guides have step-by-step setup instructions |
+
+---
+
+## Script Counts — Grand Summary
+
+| Category | Count | Source |
+|----------|-------|--------|
+| **Total .cs scripts** | 216 | StructureMap base (169) + Gap Audit Critical+Important (+41) + phase-All (4) + root DEBUG_Check (2) |
+| **Manual test guides** | 24 | StructureMap "All Manual Tests" table |
+| **SO_ types** | 12 | Across A, B, C, D, F, H, I |
+| **Field_ types** | 13 | Across A, B, F, G, H, I |
+| **DataServices** | 8 | A, B, C, D, F(×2), G, I |
+| **Orchestrators** | 8 | A, B, F(×3), G, H, I |
+| **Managers (singletons)** | 17 | Across all phases |
+| **SubManagers** | 6 | A(2), B(1), F(1), H(2), I(1) |
+| **Vertical Slice Tests (.cs)** | 15+ | Data-level (DEBUG_Check) + UI-level per system |
+| **Original source files** | ~270 | Scripts/Assembly-CSharp/ — 100% fidelity target |
 
 ---
 
 ## The Payoff
 
 ```
-Week 4-5: fully playable mining/factory stimulation
+Week 4-5: fully playable mining/factory simulation
   → mine ore nodes with pickaxe
   → ore flows through conveyors automatically
   → furnaces smelt by majority type
   → machines shape, polish, sort, package
   → seller machine converts to money
   → quest system guides progression
+
+Week 8: feature-complete game
+  → save/load persists everything
+  → full audio + configurable settings
+  → contracts loop + main menu
+  → debug tools for testing
+  → 216 scripts, 24 manual tests, zero tight coupling
   → every system tested independently via vertical slice
-  → zero tight coupling — add/remove any system without breaking others
 ```
 
-That's the moment it clicks — and the architecture proves itself.
+That's when it clicks — and the architecture proves itself.
 
 <!-- ==== FILE: learn/GOAL.md ==== -->
 # GOAL
@@ -1403,6 +1485,14 @@ End goal: **main source (100%) behavior** with this architecture — consistent,
 Numbered for Unity project panel sorting. One-liner purpose per folder.
 
 ```
+Scripts/phase-All/                      → "shared scripts that grow across phases — never duplicated"
+├── 0-Core/
+│   ├── Singleton.cs                    → "generic singleton base — first instance wins"
+│   └── GameEvents.cs                   → "core events shared across ALL phases (OnCloseAllSubManagers, LogSubscribersCount)"
+└── 1-Managers/
+    ├── UIManager.cs                    → "reports menu state + closes all panels + routes keyboard with priority"
+    └── EconomyManager.cs               → "owns money"
+
 Scripts/phase-X/
 │
 ├── 0-Core/                     → "everything depends on me, I have zero game logic"
@@ -1463,13 +1553,28 @@ Is it a display-only prefab handle?    → 2-Data/Field_*.cs
 Is it a contract with no implementation?→ 2-Data/Interface/
 Is it a runtime wrapper around an SO?  → 2-Data/DataWrapper/
 Does it manage a collection?           → 2-Data/DataService/
-Is it an enum?                         → 2-Data/Enum/
+Is it an enum?                         → 2-Data/Enums/GlobalEnumsX.cs
 Is it a small serializable struct/class?→ 2-Data/Entities/
 Does it wire Field_ + AddListener?     → 3-MonoBehaviours/Orchestrator/
 Does it have game logic in the scene?  → 3-MonoBehaviours/
 Is it a static helper or LOG formatter?→ 4-Utils/
 Is it a test?                          → 5-Tests/
 ```
+
+### Manager vs MonoBehaviour — The `Singleton<T>` Rule
+
+**If a script extends `Singleton<T>`, it goes in `1-Managers/`.** No exceptions. This takes precedence over PhaseMap.md listings.
+
+The deciding question: **"Does this script own shared state that other scripts query?"**
+
+| Goes in `1-Managers/` | Goes in `3-MonoBehaviours/` |
+|---|---|
+| Extends `Singleton<T>` | Does NOT extend `Singleton<T>` |
+| Other scripts read its state (`.Ins.GetX()`) | Only manages its own GO |
+| One instance in the scene | Multiple instances allowed |
+| EconomyManager, UIManager, OreManager, OrePiecePoolManager, OreLimitManager, ParticleManager | OreNode, OrePiece, AutoMiner, SellerMachine, PhysicsLimitUIWarning |
+
+**Common mistake:** PhaseMap.md may list a singleton under `3-MonoBehaviours/` because the file list was written before folder rules were finalized. **Always cross-check against this rule.** GOAL.md is the authority — PhaseMap is the roadmap.
 
 ---
 
@@ -1794,13 +1899,26 @@ Connect via GameEvents → full phase works
 
 **Manual Test Guides (`5-Tests/Manual/*.md`):**
 When a system requires visual/hands-on verification (UI flows, 3D animations, physics, visual effects, audio), create a `.md` file in `5-Tests/Manual/` with:
-- **Setup Guide** — step-by-step Unity Editor instructions: prefab hierarchy with every component/RectTransform/Image setting, wiring tables, animation controller setup, layers/tags
-- **Manual Test Flow** — numbered DO/EXPECT steps covering the full user journey (initial state → actions → edge cases)
+
+- **Prerequisites** — exactly which singletons, prefabs, and test scripts must exist in the scene
+- **Setup Guide** — beginner-level step-by-step Unity Editor instructions:
+  - Every GO to create, what to name it, where to parent it
+  - Every component to add, with exact `[SerializeField]` values and wiring (which field → which GO)
+  - Prefab hierarchy: every child GO with its components, RectTransform anchors/sizes, Image colors, raycastTarget flags
+  - Inspector values: defaults, ranges, layer masks, tags
+  - Wiring tables: `| Field | Drag From |` format for complex components
+  - Final hierarchy tree showing parent-child relationships
+- **Manual Test Flow** — numbered DO/EXPECT steps:
+  - Each step: one player action (press key, wait, drag, click)
+  - Each EXPECT: exactly what the screen/console should show — bold for visual changes, `code` for console messages
+  - Cover: initial state → primary action → edge cases → error conditions
 - **Summary Checklist** — pass/fail items at the end
+
+**The Manual/*.md must be comprehensive enough for a beginner** who has never used Unity to follow. Assume zero prior knowledge of the system being tested. Every inspector field, every component, every wiring reference must be explicit. See `phase-b(New)/Scripts/5-Tests/Manual/InventoryUITest.md` as the gold standard — it has a 9-step UI setup guide with Canvas settings, prefab hierarchies, 16 DO/EXPECT test steps, and 18 checklist items.
 
 These are purely hand-tested — no script automates them. The `.md` is the test. One file per system.
 
-**When building any phase, always ask:** "Are there any systems in this phase that need visual/hands-on verification?" If yes, create a `Manual/*.md` for each. Analyse the main source for UI panels, animations, physics visuals, and any complex inspector setup that a `.cs` test can't verify. Include full setup guide + DO/EXPECT flow + checklist inside each `.md`. See `phase-b(New)/Scripts/5-Tests/Manual/InventoryUITest.md` as the reference example. See PhaseMap.md + StructureMap.md for the full list of required manual tests per phase.
+**When building any phase, always ask:** "Are there any systems in this phase that need visual/hands-on verification?" If yes, create a `Manual/*.md` for each. Analyse the main source for UI panels, animations, physics visuals, and any complex inspector setup that a `.cs` test can't verify. See PhaseMap.md + StructureMap.md for the full list of required manual tests per phase.
 
 ----
 
@@ -1834,6 +1952,10 @@ Every phase folder has a `GUIDE.md` with:
 - **Scene setup** (step-by-step — every GO, every component, every `[SerializeField]` wiring)
 - **Modifications to Earlier Phases** (table: File | How | Change | Why)
 - **Source vs Phase diff** (what original did vs what we changed)
+- **Systems & Testability** (at the end):
+  - **Individual Systems** table — each system's name, scripts, and how it's decoupled (which GameEvents)
+  - **Testability Matrix** table — which `.cs` test and `Manual/*.md` covers each system, and what other systems it does/doesn't need
+  - Final count: X systems, Y scripts, Z `.cs` tests, W manual tests. Zero tight coupling.
 
 Every phase folder also has a `FLOW.md` with:
 - **System Map** — ASCII box diagram showing all systems in that phase, what each owns, how they connect
@@ -2117,6 +2239,7 @@ For each phase, the agent must produce:
    - Scene Setup (full — GOs, components, wiring checklist)
    - Modifications to Earlier Phases (table: File | How | Change | Why)
    - Source vs Phase diff (what original did vs what we changed)
+   - Systems & Testability (at end): Individual Systems table (name, scripts, decoupling events) + Testability Matrix (which test covers what, dependencies). Final count line.
 
 1b. **FLOW.md** with:
    - **System Map** — ASCII box diagram: all systems, what each owns, connections via GameEvents/SerializeField
@@ -2141,14 +2264,22 @@ For each phase, the agent must produce:
    - Minimal bootstrap — systems handle their own Update()
    - Fire GameEvents to trigger actions (never call methods directly)
 
-4. **Manual Test Guides (`5-Tests/Manual/*.md`)** for any system needing visual/hands-on verification (UI, animations, physics, effects, audio):
-   - **Setup Guide** — step-by-step prefab creation: Canvas/GO hierarchy, every component with settings, RectTransform anchors/sizes, Image colors, raycastTarget flags, wiring tables, animation controller setup
-   - **Manual Test Flow** — numbered DO/EXPECT steps: what to click/press and exactly what should appear on screen at each moment
+4. **Manual Test Guides (`5-Tests/Manual/*.md`)** — **comprehensive, beginner-level** for any system needing visual/hands-on verification (UI, animations, physics, effects, audio):
+   - **Prerequisites** — exactly which singletons, prefabs, test scripts needed
+   - **Setup Guide** — beginner-level step-by-step Unity Editor instructions:
+     - Every GO: name, parent, components, `[SerializeField]` wiring (`| Field | Drag From |` table)
+     - Prefab hierarchies: every child with RectTransform, Image, tag, layer, default values
+     - Final hierarchy tree showing parent-child layout
+   - **Manual Test Flow** — numbered DO/EXPECT steps:
+     - One action per step (press key, wait Xs, drag here, click there)
+     - EXPECT: **bold** for visual changes, `code` for console messages
+     - Cover: initial state → primary actions → edge cases → error conditions
    - **Summary Checklist** — pass/fail items
-   - One `.md` per system. These are hand-tested — no script. The `.md` IS the test.
-   - **Always analyse the main source for each phase** and ask: "Does this system have UI panels, animations, physics visuals, or dense inspector setup that a `.cs` test can't verify?" If yes → create a `Manual/*.md`.
-   - Reference example: `phase-b(New)/Scripts/5-Tests/Manual/InventoryUITest.md`
-   - Full list of required manual tests: see PhaseMap.md + StructureMap.md `All Manual Tests` table.
+   - **Must be comprehensive enough for a beginner** — assume zero prior knowledge. Every field, every component, every wiring explicit. No "see GUIDE.md" shortcuts — the Manual/*.md is self-contained.
+   - One `.md` per system. The `.md` IS the test. No script.
+   - **Always analyse main source** for each phase: "Does this system have UI, animations, physics visuals, or dense inspector setup?" If yes → `Manual/*.md`.
+   - Gold standard: `phase-b(New)/Scripts/5-Tests/Manual/InventoryUITest.md` (9-step setup, 16 DO/EXPECT, 18 checklist)
+   - Full list: PhaseMap.md + StructureMap.md `All Manual Tests` table.
 
 ---
 
@@ -2171,8 +2302,10 @@ For each phase, the agent must produce:
 ## Key Rules (Quick Reference)
 
 - **Check Gap Audit before building any phase.** Both `PhaseMap.md` and `StructureMap.md` have a "Gap Audit" section at the end listing missing files/features per phase with priority ratings. Include all **Critical** and **Important** items. **Polish** items go in `#region extra` blocks.
+- **PhaseMap/StructureMap are NOT exhaustive.** Always cross-reference every original source file (`Scripts/Assembly-CSharp/`) for the phase. If the source has functionality not listed in PhaseMap or StructureMap, **include it anyway** — create new files, add `#region extra` blocks, or document as a Gap Audit addition. The main source is the ultimate source of truth for 100% fidelity.
 - **One sentence per script.** If it doesn't fit, split it.
 - **GlobalEnumsX.cs** — all enums for a phase go in ONE file: `2-Data/Enums/GlobalEnumsX.cs` (e.g. `GlobalEnumsB.cs`). No separate file per enum. Use `InteractionType` enum instead of magic strings for interaction names.
+- **`phase-All/`** — scripts shared across ALL phases live here (Singleton, UIManager, EconomyManager, core GameEvents). Never duplicated into phase folders. UIManager grows 1-2 lines per phase (keyboard routing). See GOAL.md folder structure.
 - **Prefix = no logic.** `SO_` = pure data. `Field_` = display only. `W` = session wrapper.
 - **GameEvents for cross-system.** `[SerializeField]` for same-GO. Owner chain for parent-child.
 - **DataService = pure C#.** If it needs Unity physics/lifecycle, keep in MonoBehaviour.
@@ -7314,10 +7447,8 @@ phase-b(New)/
 │   │   └── ISaveLoadableObject.cs          → "I can be saved/loaded (stub)"
 │   ├── DataService/
 │   │   └── InventoryDataService.cs         → "I manage all inventory slots" (nested: Slot)
-│   └── Entities/
-│       ├── MagnetToolSelectionMode.cs      → "I list magnet grab modes"
-│       ├── SavableObjectID.cs              → "I identify savable objects (stub)"
-│       └── HighlightStyle.cs               → "I define a fresnel highlight preset"
+│   └── Enums/
+│       └── GlobalEnumsB.cs                 → "all Phase B enums: InteractionType, MagnetToolSelectionMode, SavableObjectID"
 ├── 3-MonoBehaviours/
 │   ├── Orchestrator/
 │   │   └── InventoryOrchestrator.cs        → "I wire inventory slot Field_ instances"
@@ -7369,9 +7500,7 @@ phase-b(New)/
 | `IIconItem.cs` | I'm a contract for items with inventory icons |
 | `ISaveLoadableObject.cs` | I'm a stub contract for save/load (expanded Phase G) |
 | `InventoryDataService.cs` | I manage all inventory slots — add/remove/switch/stack |
-| `MagnetToolSelectionMode.cs` | I list magnet grab filter modes |
-| `SavableObjectID.cs` | I identify savable objects (stub — expanded Phase G) |
-| `HighlightStyle.cs` | I define a fresnel highlight preset (color, power, intensity) |
+| `GlobalEnumsB.cs` | I hold all Phase B enums: InteractionType, MagnetToolSelectionMode, SavableObjectID |
 | `InventoryOrchestrator.cs` | I wire Field_InventorySlot instances to InventoryDataService |
 | `PlayerMovement.cs` | I handle walk, sprint, duck, jump, slope sliding |
 | `PlayerCamera.cs` | I handle mouse look, FOV, camera bobbing, viewmodel bobbing |
@@ -7402,79 +7531,77 @@ phase-b(New)/
 ## Hand-Typing Order (Compile Groups)
 
 ### Group 1 — Pure Data (compiles alone, zero Unity dependency)
-1. `MagnetToolSelectionMode.cs`
-2. `SavableObjectID.cs`
-3. `HighlightStyle.cs`
-4. `IIconItem.cs`
-5. `ISaveLoadableObject.cs`
+1. `GlobalEnumsB.cs`
+2. `IIconItem.cs`
+3. `ISaveLoadableObject.cs`
 
 **STOP — compile. Zero errors expected.**
 
 ### Group 2 — DataService
-6. `InventoryDataService.cs`
+4. `InventoryDataService.cs`
 
 **STOP — compile. Run DEBUG_CheckB to verify add/remove/switch.**
 
 ### Group 3 — SO + Field
-7. `SO_FootstepSoundDefinition.cs`
-8. `Field_InventorySlot.cs`
+5. `SO_FootstepSoundDefinition.cs`
+6. `Field_InventorySlot.cs`
 
 **STOP — compile.**
 
 ### Group 4 — Physics Chain
-9. `BasePhysicsObject.cs`
-10. `BaseSellableItem.cs`
-11. `PhysicsSoundPlayer.cs`
-12. `PhysicsGib.cs`
+7. `BasePhysicsObject.cs`
+8. `BaseSellableItem.cs`
+9. `PhysicsSoundPlayer.cs`
+10. `PhysicsGib.cs`
 
 **STOP — compile.**
 
 ### Group 5 — Tools
-13. `BaseHeldTool.cs`
-14. `ToolPickaxe.cs`
-15. `ToolMagnet.cs`
-16. `ToolHammer.cs`
-17. `ToolMiningHat.cs`
-18. `ToolSupportsWrench.cs`
-19. `ToolResourceScanner.cs`
-20. `ToolBuilder.cs`
-21. `ToolHardHat.cs`
+11. `BaseHeldTool.cs`
+12. `ToolPickaxe.cs`
+13. `ToolMagnet.cs`
+14. `ToolHammer.cs`
+15. `ToolMiningHat.cs`
+16. `ToolSupportsWrench.cs`
+17. `ToolResourceScanner.cs`
+18. `ToolBuilder.cs`
+19. `ToolHardHat.cs`
 
 **STOP — compile.**
 
 ### Group 6 — GameEvents + Utils + UIRelay
-22. `GameEvents.cs` (partial)
-23. `UtilsPhaseB.cs`
-24. `PhaseBLOG.cs`
-25. `UIEventRelay.cs`
+20. `GameEvents.cs` (partial)
+21. `UtilsPhaseB.cs`
+22. `PhaseBLOG.cs`
+23. `UIEventRelay.cs`
 
 **STOP — compile.**
 
 ### Group 7 — Player Scripts
-26. `PlayerMovement.cs`
-27. `PlayerCamera.cs`
-28. `PlayerGrab.cs`
-29. `RigidbodyDraggerController.cs`
-30. `PlayerFootsteps.cs`
-31. `PlayerSpawnPoint.cs`
-32. `FresnelHighlighter.cs`
+24. `PlayerMovement.cs`
+25. `PlayerCamera.cs`
+26. `PlayerGrab.cs`
+27. `RigidbodyDraggerController.cs`
+28. `PlayerFootsteps.cs`
+29. `PlayerSpawnPoint.cs`
+30. `FresnelHighlighter.cs`
 
 **STOP — compile. Run PlayerMovementTest.**
 
 ### Group 8 — Orchestrator + SubManager
-33. `InventoryOrchestrator.cs`
-34. `InventoryUI.cs`
+31. `InventoryOrchestrator.cs`
+32. `InventoryUI.cs`
 
 **STOP — compile. Run InventoryTest.**
 
 ### Group 9 — Tests
-35. `DEBUG_CheckB.cs`
-36. `PlayerMovementTest.cs`
-37. `PlayerGrabTest.cs`
-38. `InventoryTest.cs`
-39. `ToolActionTest.cs`
+33. `DEBUG_CheckB.cs`
+34. `PlayerMovementTest.cs`
+35. `PlayerGrabTest.cs`
+36. `InventoryTest.cs`
+37. `ToolActionTest.cs`
 
-**STOP — compile. Run all 5 vertical slice tests + 3 manual tests.**
+**STOP — compile. Run all 5 vertical slice tests + 4 manual tests.**
 
 ---
 
@@ -7484,7 +7611,7 @@ phase-b(New)/
 
 ### 1. DEBUG_CheckB — InventoryDataService (Data-Level)
 
-**Internal prerequisites:** `InventoryDataService.cs`, `HighlightStyle.cs`
+**Internal prerequisites:** `InventoryDataService.cs`, `GlobalEnumsB.cs`
 **External prerequisites:** Empty scene, one GO with `DEBUG_CheckB`
 **NOT required:** Player, tools, UI, shop, interaction — nothing
 **Controls:**
@@ -7850,6 +7977,37 @@ Root **must** have an `Image` component with `raycastTarget = true` for drag-dro
 | Inventory panel | `InventoryUIManager` (singleton, 187 lines, mixed concerns) | `InventoryUI` (SubManager, lifecycle only) + `InventoryOrchestrator` | Separation |
 | Keybinds | `PlayerInputActions` (Input System) | `Input.GetKeyDown` / `INPUT.K.InstantDown` | Keybind rebinding is Phase H |
 
+---
+
+## Systems & Testability
+
+### Individual Systems
+
+| # | System | Scripts | Decoupled Via |
+|---|--------|---------|---------------|
+| 1 | **Player Movement** | `PlayerMovement`, `PlayerCamera`, `PlayerFootsteps`, `PlayerSpawnPoint` | `OnMenuStateChanged`, `OnCamViewPunch` |
+| 2 | **Player Grab** | `PlayerGrab`, `RigidbodyDraggerController` | `OnMenuStateChanged`, `OnToolEquipped` |
+| 3 | **Inventory** | `InventoryUI`, `InventoryOrchestrator`, `InventoryDataService`, `Field_InventorySlot`, `UIEventRelay` | `OnToolPickupRequested`, `OnToolEquipped`, `OnToolSwitched`, `OnItemPickedUp`, `OnItemDropped`, `OnOpenInventoryView`, `OnCloseInventoryView` |
+| 4 | **Tools** | `BaseHeldTool`, `ToolPickaxe`, `ToolMagnet`, `ToolHammer`, `ToolMiningHat`, `ToolSupportsWrench`, `ToolResourceScanner`, `ToolBuilder`, `ToolHardHat` | `RaiseToolPickupRequested` (fires on Take), Owner chain (set via event) |
+| 5 | **Physics** | `BasePhysicsObject`, `BaseSellableItem`, `PhysicsSoundPlayer`, `PhysicsGib` | None — inheritance chain, self-contained |
+| 6 | **Fresnel Highlight** | `FresnelHighlighter` | Standalone — raycasts from camera, no events needed |
+| 7 | **UI Management** | `UIManager` (phase-All) | `OnMenuStateChanged`, `OnCloseAllSubManagers`, `OnOpenInventoryView` |
+
+### Testability Matrix
+
+| System | `.cs` Test | `Manual/*.md` | Needs other systems? |
+|--------|-----------|---------------|---------------------|
+| Inventory (data) | `DEBUG_CheckB` | — | **Nothing** — plain C# `new` |
+| Player Movement | `PlayerMovementTest` | — | No inventory, no tools |
+| Player Grab | `PlayerGrabTest` | `GrabRopeTest.md` | No inventory, no tools |
+| Inventory (UI) | `InventoryTest` | `InventoryUITest.md` | No player movement, no grab |
+| Tools | `ToolActionTest` | `ToolViewModelTest.md` | Needs player + inventory (tools equip via inventory) |
+| Fresnel Highlight | — | `FresnelHighlightTest.md` | Needs player (camera raycast) |
+| Player Camera | — | — | Covered by PlayerMovementTest (same GO) |
+| PlayerFootsteps | — | — | Sound stubs — testable after Phase H |
+
+**7 systems, 37 scripts, 5 `.cs` tests, 4 manual tests. Zero tight coupling between systems.**
+
 <!-- ==== FILE: learn/phase-b(New)/Scripts/0-Core/GameEvents.cs ==== -->
 using System;
 using System.Linq;
@@ -8157,26 +8315,6 @@ public class InventoryDataService
 	#endregion
 }
 
-<!-- ==== FILE: learn/phase-b(New)/Scripts/2-Data/Entities/HighlightStyle.cs ==== -->
-/// <summary>
-/// REPLACED — use HighlightPlus.HighlightProfile (ScriptableObject) instead.
-/// Create profiles in Unity: Create → Highlight Plus → Profile.
-/// Assign them as [SerializeField] HighlightProfile on FresnelHighlighter.
-///
-/// Original presets (create as HighlightProfile assets):
-///   ToolPreset       → outline cyan (0.25, 0.85, 1), width 1, no see-through
-///   GrabbablePreset  → outline cyan (0.25, 0.85, 1), width 1, no see-through
-///   BuildingPreset   → outline cyan, width 1.2 (Phase D)
-///   WrenchEnable     → outline green (0.3, 1, 0.3) (Phase D)
-///   WrenchDisable    → outline red (1, 0.3, 0.3) (Phase D)
-///
-/// This file kept as documentation only. Can be deleted.
-/// </summary>
-public static class HighlightStyle_REPLACED
-{
-	// see FresnelHighlighter.cs for HighlightProfile [SerializeField] references
-}
-
 <!-- ==== FILE: learn/phase-b(New)/Scripts/2-Data/Enums/GlobalEnumsB.cs ==== -->
 /// <summary>
 /// all enums introduced in Phase B — one file, one place
@@ -8342,20 +8480,25 @@ public class SO_FootstepSoundDefinition : ScriptableObject
 <!-- ==== FILE: learn/phase-b(New)/Scripts/3-MonoBehaviours/FresnelHighlighter.cs ==== -->
 using System.Collections.Generic;
 using UnityEngine;
-using HighlightPlus;
+// ──────────────────────────────────────────────────────────────
+// HIGHLIGHT PLUS: uncomment the line below once the package is imported
+// using HighlightPlus;
+// ──────────────────────────────────────────────────────────────
 
 /// <summary>
 /// outlines whatever the player looks at — powered by Highlight Plus asset
+/// Compiles without the package. Uncomment all [HP] sections after import.
 /// </summary>
 public class FresnelHighlighter : MonoBehaviour
 {
 	#region Inspector Fields
-	[Header("Profiles (Create: Create → Highlight Plus → Profile)")]
-	[SerializeField] HighlightProfile _toolProfile;
-	[SerializeField] HighlightProfile _grabbableProfile;
-	[SerializeField] HighlightProfile _buildingProfile;
-	[SerializeField] HighlightProfile _wrenchEnableProfile;
-	[SerializeField] HighlightProfile _wrenchDisableProfile;
+	// ── [HP] uncomment these once HighlightPlus is imported ──
+	// [Header("Profiles (Create → Highlight Plus → Profile)")]
+	// [SerializeField] HighlightProfile _toolProfile;
+	// [SerializeField] HighlightProfile _grabbableProfile;
+	// [SerializeField] HighlightProfile _buildingProfile;
+	// [SerializeField] HighlightProfile _wrenchEnableProfile;
+	// [SerializeField] HighlightProfile _wrenchDisableProfile;
 
 	[Header("Raycast")]
 	[SerializeField] Camera _cam;
@@ -8364,34 +8507,38 @@ public class FresnelHighlighter : MonoBehaviour
 	#endregion
 
 	#region private API
-	readonly List<HighlightEffect> activeEffects = new List<HighlightEffect>();
+	// ── [HP] uncomment once HighlightPlus is imported ──
+	// readonly List<HighlightEffect> activeEffects = new List<HighlightEffect>();
+	//
+	// void HighlightObject(GameObject obj, HighlightProfile profile)
+	// {
+	// 	var effect = obj.GetComponent<HighlightEffect>();
+	// 	if (effect == null) effect = obj.AddComponent<HighlightEffect>();
+	// 	effect.ProfileLoad(profile);
+	// 	effect.SetHighlighted(true);
+	// 	activeEffects.Add(effect);
+	// }
+	// void ClearAll()
+	// {
+	// 	foreach (var effect in activeEffects)
+	// 		if (effect != null) effect.SetHighlighted(false);
+	// 	activeEffects.Clear();
+	// }
 
-	void HighlightObject(GameObject obj, HighlightProfile profile)
-	{
-		var effect = obj.GetComponent<HighlightEffect>();
-		if (effect == null) effect = obj.AddComponent<HighlightEffect>();
-		effect.ProfileLoad(profile);
-		effect.SetHighlighted(true);
-		activeEffects.Add(effect);
-	}
-	void ClearAll()
-	{
-		foreach (var effect in activeEffects)
-			if (effect != null) effect.SetHighlighted(false);
-		activeEffects.Clear();
-	}
 	void OutlineLookedAtThing()
 	{
 		if (!Physics.Raycast(_cam.transform.position, _cam.transform.forward, out RaycastHit hit, _interactRange, _interactLayerMask))
 			return;
+
+		// ── [HP] uncomment the highlight calls once HighlightPlus is imported ──
 		if (hit.collider.GetComponentInParent<BaseHeldTool>() != null)
 		{
-			HighlightObject(hit.collider.gameObject, _toolProfile);
+			// HighlightObject(hit.collider.gameObject, _toolProfile);
 			return;
 		}
 		if (hit.collider.CompareTag("Grabbable"))
 		{
-			HighlightObject(hit.collider.gameObject, _grabbableProfile);
+			// HighlightObject(hit.collider.gameObject, _grabbableProfile);
 			return;
 		}
 		// Phase A: ComputerTerminal, ContractsTerminal → _toolProfile
@@ -8402,7 +8549,8 @@ public class FresnelHighlighter : MonoBehaviour
 	#region Unity Life Cycle
 	private void Update()
 	{
-		ClearAll();
+		// ── [HP] uncomment ClearAll once HighlightPlus is imported ──
+		// ClearAll();
 		OutlineLookedAtThing();
 	}
 	#endregion
@@ -9453,32 +9601,29 @@ public class PlayerMovement : Singleton<PlayerMovement>
 }
 
 <!-- ==== FILE: learn/phase-b(New)/Scripts/3-MonoBehaviours/Player/PlayerSpawnPoint.cs ==== -->
+using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// marks where the player spawns — static random picker
+/// marks where the player spawns — self-registers, zero FindObjectOfType
 /// </summary>
 public class PlayerSpawnPoint : MonoBehaviour
 {
 	#region private API
-	static PlayerSpawnPoint[] allPoints;
+	static List<PlayerSpawnPoint> ALL = new List<PlayerSpawnPoint>();
 	#endregion
 
 	#region public API
 	/// <summary> returns a random spawn point position </summary>
 	public static Vector3 GetRandomSpawnPoint()
 	{
-		if (allPoints == null || allPoints.Length == 0)
-			allPoints = FindObjectsOfType<PlayerSpawnPoint>();
-		return allPoints[Random.Range(0, allPoints.Length)].transform.position;
+		return ALL[Random.Range(0, ALL.Count)].transform.position;
 	}
 	#endregion
 
 	#region Unity Life Cycle
-	private void Awake()
-	{
-		allPoints = null; // reset cache on scene load
-	}
+	private void OnEnable() => ALL.Add(this);
+	private void OnDisable() => ALL.Remove(this);
 	#endregion
 }
 
@@ -10384,23 +10529,51 @@ In Unity Project panel: Create → Highlight Plus → Profile
 | `_wrenchEnableProfile` | HP_WrenchEnable asset (Phase D, can leave empty) |
 | `_wrenchDisableProfile` | HP_WrenchDisable asset (Phase D, can leave empty) |
 
-### Step 3 — Test Objects in Scene
+### Step 3 — Player GO (if not already set up)
 
-Place these in front of player spawn:
+Use the player setup from GrabRopeTest.md Steps 1-6. Key requirement: `PlayerMovement` with `_playerCam` wired to Camera child. FresnelHighlighter needs the Camera for raycasting.
 
-1. **Tool on ground** — any BaseHeldTool prefab (e.g. ToolPickaxe)
-   - Has WorldModel with Collider, layer "Interact"
-   
-2. **Grabbable cube** — Cube with Rigidbody
-   - Tag: "Grabbable"
-   - Layer: "Interact"
+### Step 4 — Test Objects in Scene
 
-3. **Non-interactable wall** — Cube, layer "Default" (NOT "Interact")
-   - No tag, no Rigidbody
+Create 4 test objects. Place all in front of player spawn, within 2m reach:
 
-4. **Non-grabbable interactable** — Cube, layer "Interact"
-   - No "Grabbable" tag, no BaseHeldTool
-   - Tests: should NOT highlight (no matching type)
+**Object A — Tool on ground:**
+1. Use any BaseHeldTool prefab (e.g. ToolPickaxe from ToolViewModelTest)
+2. Must have: WorldModel with `Collider`, layer `"Interact"`
+3. Place on ground
+
+**Object B — Grabbable cube:**
+1. GameObject → 3D Object → Cube
+2. Add `Rigidbody` (mass 1)
+3. Tag: `"Grabbable"`
+4. Layer: `"Interact"`
+
+**Object C — Non-interactable wall:**
+1. GameObject → 3D Object → Cube (scale up to 3,3,1)
+2. Layer: `"Default"` ← NOT "Interact"
+3. No tag, no Rigidbody
+4. Tests: FresnelHighlighter raycast won't hit this (wrong layer mask)
+
+**Object D — Interactable but no matching type:**
+1. GameObject → 3D Object → Cube
+2. Layer: `"Interact"`
+3. No `"Grabbable"` tag, no `BaseHeldTool` component
+4. Tests: raycast hits but no highlight applied (no matching type check)
+
+### Final Scene Hierarchy
+
+```
+Scene Root
+├── Player (PlayerMovement, PlayerCamera)
+│   └── Camera (Camera, FresnelHighlighter)
+├── UIManager (phase-All)
+├── ToolPickaxe_01 (on ground, layer Interact — Object A)
+├── GrabbableCube (Rigidbody, tag Grabbable, layer Interact — Object B)
+├── Wall (layer Default, no tag — Object C)
+├── InteractCube (layer Interact, no tag, no BaseHeldTool — Object D)
+├── Floor (Plane, layer Ground)
+└── PlayerSpawnPoint
+```
 
 ---
 
@@ -10534,29 +10707,121 @@ Place these in front of player spawn:
 
 ## Prerequisites
 
-- Player GO with: PlayerMovement, PlayerCamera, PlayerGrab
-- Camera child GO with Camera component
-- HoldPosition child GO (in front of camera, ~1m forward)
-- RigidbodyDragger child GO (starts **inactive**):
-  - Rigidbody (isKinematic = true)
-  - RigidbodyDraggerController (wire `_playerGrab` → PlayerGrab on parent)
-- LineRenderer on Player GO:
-  - Material: simple unlit white/grey
-  - Start Width: 0.02, End Width: 0.02
-  - Positions: 2 (set at runtime)
-- 4-5 cubes in scene:
-  - Rigidbody (mass ~1, no constraints)
-  - Collider (BoxCollider)
-  - Tag: "Grabbable"
-  - Layer: "Interact"
-- PlayerGrab wiring:
-  - `_cam` → Camera
-  - `_holdPos` → HoldPosition
-  - `_dragger` → RigidbodyDragger GO
-  - `_rope` → LineRenderer
-  - `_interactRange` → 2
-  - `_interactLayerMask` → "Interact" layer
-- PlayerGrabTest or PlayerMovementTest script on a GO (for M/N menu sim)
+- UIManager + EconomyManager singletons (phase-All)
+- PlayerGrabTest script on a GO (for M/N menu sim keys)
+
+---
+
+## Setup Guide — Step by Step
+
+### Step 1 — Player GO
+
+1. Create Empty GO → name `Player`
+2. Add components: `CharacterController`, `PlayerMovement`, `PlayerCamera`, `PlayerGrab`
+3. `PlayerMovement` wiring:
+
+| Field | Value / Drag From |
+|-------|-------------------|
+| `_cc` | CharacterController (self) |
+| `_playerCam` | Camera child (Step 2) |
+| `_viewModelContainer` | ViewModelContainer child (Step 3) |
+| `_groundLayer` | "Ground" layer |
+| `_walkSpeed` | 4 |
+| `_sprintSpeed` | 6 |
+
+### Step 2 — Camera (child of Player)
+
+1. Create Empty child of Player → name `Camera`
+2. Add `Camera` component
+3. `PlayerCamera` wiring on Player:
+
+| Field | Drag From |
+|-------|-----------|
+| `_cam` | Camera child |
+| `_movement` | PlayerMovement (on parent) |
+
+### Step 3 — ViewModelContainer (child of Camera)
+
+1. Create Empty child of Camera → name `ViewModelContainer`
+2. No components needed — tools parent here when equipped
+
+### Step 4 — HoldPosition (child of Camera)
+
+1. Create Empty child of Camera → name `HoldPosition`
+2. Position: `(0, 0, 1)` local — 1m in front of camera
+3. This is where grabbed objects are pulled toward
+
+### Step 5 — RigidbodyDragger (child of Player)
+
+1. Create Empty child of Player → name `RigidbodyDragger`
+2. Add `Rigidbody` component: **isKinematic = true**
+3. Add `RigidbodyDraggerController` component
+4. Wire: `_playerGrab` → PlayerGrab on Player
+5. **Set inactive** in Inspector (starts hidden)
+
+### Step 6 — LineRenderer (on Player GO)
+
+1. Select Player GO → Add Component → `LineRenderer`
+2. Settings:
+   - Material: Default-Line or any unlit material
+   - Start Width: `0.02`, End Width: `0.02`
+   - Positions: 2 (set at runtime, don't worry about initial values)
+   - Use World Space: true
+
+### Step 7 — PlayerGrab Wiring
+
+On Player GO → `PlayerGrab` component:
+
+| Field | Drag From |
+|-------|-----------|
+| `_cam` | Camera child |
+| `_holdPos` | HoldPosition child |
+| `_dragger` | RigidbodyDragger child |
+| `_rope` | LineRenderer (on Player) |
+| `_interactRange` | 2 |
+| `_interactLayerMask` | "Interact" layer |
+| `_movement` | PlayerMovement (on self) |
+
+### Step 8 — Grabbable Cubes
+
+Create 4-5 cubes:
+
+1. GameObject → 3D Object → Cube
+2. Add `Rigidbody` (mass 1, no constraints, gravity ON)
+3. Tag: `"Grabbable"`
+4. Layer: `"Interact"`
+5. Position on the floor in front of player spawn
+
+### Step 9 — PlayerGrabTest Script
+
+1. Create Empty GO → name `PlayerGrabTest`
+2. Add `PlayerGrabTest` component (provides M/N keys for menu sim)
+
+### Step 10 — Floor
+
+- GameObject → 3D Object → Plane at y=0
+- Layer: `"Ground"`
+
+### Final Scene Hierarchy
+
+```
+Scene Root
+├── Player (CharacterController, PlayerMovement, PlayerCamera, PlayerGrab)
+│   ├── Camera (Camera component)
+│   │   ├── ViewModelContainer
+│   │   └── HoldPosition (local pos 0,0,1)
+│   ├── RigidbodyDragger (inactive, Rigidbody isKinematic, RigidbodyDraggerController)
+│   └── LineRenderer (width 0.02)
+├── UIManager (phase-All)
+├── EconomyManager (phase-All)
+├── PlayerGrabTest
+├── GrabbableCube_01 (Rigidbody, tag Grabbable, layer Interact)
+├── GrabbableCube_02
+├── GrabbableCube_03
+├── GrabbableCube_04
+├── Floor (Plane, layer Ground)
+└── PlayerSpawnPoint
+```
 
 ---
 
@@ -11168,14 +11433,44 @@ Canvas
 
 ## Prerequisites
 
-- Full player setup (PlayerMovement + PlayerCamera on Player GO)
-- InventoryOrchestrator wired with hotbar
-- 4 tool prefabs in scene: Pickaxe (with Animator + Attack1 state), Magnet (with `_pullOrigin`, `_selectionModeText`), Hammer, MiningHat (with `_worldModelLight` + `_viewModelLight`)
-- ToolActionTest script on a GO (for pickup keys)
+- Phase B scene with Player GO fully wired (see InventoryUITest.md → or GUIDE.md Scene Setup)
+- InventoryOrchestrator + InventoryUI wired with hotbar panel
+- EconomyManager + UIManager singletons (phase-All)
 
 ---
 
-## Setup Checklist (per tool prefab)
+## Setup Guide — Step by Step
+
+### Step 1 — Player GO (if not already set up)
+
+Create the full player hierarchy per GUIDE.md Scene Setup items 1-12. Key components needed for this test:
+- `PlayerMovement` (Singleton) on root → with `_playerCam`, `_viewModelContainer`, `_cc`
+- `PlayerCamera` on root → with `_cam`, `_movement`, `_viewModelContainer`
+- `PlayerGrab` on root → with `_cam`, `_movement` (subscribes to OnToolEquipped)
+- **ViewModelContainer** child of Camera → tools parent here when equipped
+
+### Step 2 — Inventory (if not already set up)
+
+- **HotbarPanel** on Canvas with `HorizontalLayoutGroup`
+- **InventoryOrchestrator** GO → wired per InventoryUITest.md Step 7
+- **InventoryUI** GO → wired to Orchestrator
+
+### Step 3 — ToolActionTest Script
+
+1. Create Empty GO → name `ToolActionTest`
+2. Add `ToolActionTest` component
+3. Wire `_testTools` list with 4 tool prefab instances in scene (order: Pickaxe, Magnet, Hammer, MiningHat)
+
+### Step 4 — Grabbable Cubes (for magnet test)
+
+- 5-6 cubes with `Rigidbody`, tag `"Grabbable"`, layer `"Interact"`
+- Place near player spawn
+
+### Step 5 — Tool Prefabs (create 4, place on ground)
+
+Each tool needs the WorldModel/ViewModel hierarchy below. **Save each as prefab** then place instances in the scene.
+
+## Tool Prefab Hierarchies
 
 ```
 ToolPickaxe (root, has ToolPickaxe component)
@@ -11226,6 +11521,41 @@ ToolMiningHat (root, has ToolMiningHat component)
 Wire on ToolMiningHat:
   _worldModelLight → WorldModel/WorldModelLight
   _viewModelLight → ViewModel/ViewModelLight
+```
+
+### ToolActionTest Wiring Table
+
+| Field | Drag From |
+|-------|-----------|
+| `_testTools[0]` | ToolPickaxe instance in scene |
+| `_testTools[1]` | ToolMagnet instance in scene |
+| `_testTools[2]` | ToolHammer instance in scene |
+| `_testTools[3]` | ToolMiningHat instance in scene |
+
+### Final Scene Hierarchy
+
+```
+Scene Root
+├── Player (PlayerMovement, PlayerCamera, PlayerGrab, PlayerFootsteps)
+│   ├── Camera (Camera component)
+│   │   └── ViewModelContainer (tools parent here)
+│   ├── HoldPosition
+│   ├── RigidbodyDragger (inactive)
+│   └── LineRenderer
+├── Canvas
+│   ├── HotbarPanel (10 slots)
+│   └── InventoryUI (self-disables)
+├── InventoryOrchestrator
+├── UIManager (phase-All)
+├── EconomyManager (phase-All)
+├── ToolActionTest (_testTools wired to 4 tool instances)
+├── ToolPickaxe_01 (on ground, WorldModel visible)
+├── ToolMagnet_01 (on ground)
+├── ToolHammer_01 (on ground)
+├── ToolMiningHat_01 (on ground)
+├── GrabbableCube × 5 (Rigidbody, tag Grabbable, layer Interact)
+├── Floor (Plane)
+└── PlayerSpawnPoint
 ```
 
 ---
@@ -11542,6 +11872,2190 @@ R → magnet drop, Q → cycle mode, G → drop tool";
 		else if (INPUT.K.InstantDown(KeyCode.U) && _testTools.Count > 1) GameEvents.RaiseToolPickupRequested(_testTools[1]);
 		else if (INPUT.K.InstantDown(KeyCode.I) && _testTools.Count > 2) GameEvents.RaiseToolPickupRequested(_testTools[2]);
 		else if (INPUT.K.InstantDown(KeyCode.O) && _testTools.Count > 3) GameEvents.RaiseToolPickupRequested(_testTools[3]);
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-c(New)/FLOW.md ==== -->
+# Phase C — Data Flow
+
+> How data moves between scripts. Every connection is either a **GameEvent** or a `[SerializeField]`. Zero direct cross-system calls.
+> Format: **conversation-style plain English** with `code references` and **bold** for key moments.
+
+---
+
+## System Map
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      MINING SYSTEM                           │
+│                                                             │
+│  OreNode (IDamageable)                                       │
+│    ├── TakeDamage → BreakNode → spawn OrePieces via pool    │
+│    └── Fires: RaiseOreMined                                 │
+│                                                             │
+│  OrePiece (BaseSellableItem)                                 │
+│    ├── Self-registers in static AllOrePieces list            │
+│    ├── SellAfterDelay → fires RaiseOreSold                  │
+│    └── TryConvertToCrushed (ToolPickaxe integration)        │
+│                                                             │
+│  DamageableOrePiece (OrePiece + IDamageable)                 │
+│    └── Takes collision damage → CompleteClusterBreaking      │
+└─────────────────────────────────────────────────────────────┘
+         │                              ▲
+         │ SpawnPooledOre               │ ReturnToPool
+         ▼                              │
+┌─────────────────────────────────────────────────────────────┐
+│                    POOL + LIMIT SYSTEM                        │
+│                                                             │
+│  OrePiecePoolManager (Singleton)                             │
+│    ├── Dictionary<OrePieceKey, Queue<OrePiece>>             │
+│    ├── SpawnPooledOre → dequeue or Instantiate              │
+│    └── ReturnToPool → reset + enqueue                       │
+│                                                             │
+│  OreLimitManager (Singleton)                                 │
+│    ├── Counts non-sleeping OrePieces every 15s              │
+│    ├── Fires: RaiseOreLimitChanged                          │
+│    └── GetAutoMinerSpawnTimeMultiplier (read by AutoMiner)  │
+│                                                             │
+│  PhysicsLimitUIWarning                                       │
+│    └── Subscribes: OnOreLimitChanged → show/hide warning    │
+└─────────────────────────────────────────────────────────────┘
+         │
+         │ Reads: ShouldBlockOreSpawning, GetAutoMinerSpawnTimeMultiplier
+         ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    AUTO MINING SYSTEM                         │
+│                                                             │
+│  AutoMiner                                                   │
+│    ├── Rotates continuously, timer-based ore spawning       │
+│    ├── Reads: OreLimitManager for throttle                  │
+│    └── Uses: SO_AutoMinerResourceDefinition for weighted drops│
+│                                                             │
+│  SO_AutoMinerResourceDefinition                              │
+│    └── SpawnProbability, SpawnRate, weighted ore prefab list │
+└─────────────────────────────────────────────────────────────┘
+         │
+         │ OrePiece enters trigger
+         ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    SELLING SYSTEM                             │
+│                                                             │
+│  SellerMachine                                               │
+│    ├── OnTriggerEnter → OrePiece.SellAfterDelay()           │
+│    └── BaseSellableItem → direct EconomyManager.AddMoney    │
+│                                                             │
+│  EconomyManager (phase-All)                                  │
+│    └── AddMoney → RaiseMoneyChanged                         │
+└─────────────────────────────────────────────────────────────┘
+         │
+         │ RaiseOreSold
+         ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    DATA SYSTEM                                │
+│                                                             │
+│  OreManager (Singleton)                                      │
+│    ├── Owns OreDataService                                  │
+│    └── Round-robin cleanup of invalid ore in Update         │
+│                                                             │
+│  OreDataService (pure C#)                                    │
+│    ├── Build(List<ResourceDescription>)                     │
+│    └── GetResourceColor, GetColoredFormattedString, etc.    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Flow 1 — Mining an Ore Node (Pickaxe Hit)
+
+The player **equips the Pickaxe** and **holds left-click** near an `OreNode`. `ToolPickaxe.PrimaryFireHeld()` triggers `SwingPickaxe()`, which starts a coroutine with a **0.2s delay** before raycasting.
+
+After the delay, `PerformAttack` raycasts from the camera. The ray **hits the OreNode's collider**. The pickaxe gets `IDamageable` from the hit collider and calls `TakeDamage(damage, hitPoint)`.
+
+`OreNode.TakeDamage()` subtracts damage from `_health`. If health is still above zero, *nothing else happens* (a sound stub plays in Phase H). If health **reaches zero**, `BreakNode(hitPosition)` fires.
+
+Inside `BreakNode`: it picks a random drop count between `_minDrops` and `_maxDrops` (e.g. 2-4). For each drop, it calls `UtilsPhaseC.WeightedRandom()` on `_possibleDrops` to pick an `OrePiece` prefab, then spawns it via `Singleton<OrePiecePoolManager>.Ins.SpawnPooledOre(prefab, pos, rotation)`. Each spawned piece gets **random velocity** (upward + lateral spread) and **random angular velocity** — they fly out and bounce.
+
+`ParticleManager.CreateParticle()` spawns a **break particle burst** at the hit point. Then `GameEvents.RaiseOreMined(resourceType, position)` fires — *Phase F's quest system will subscribe to this*.
+
+Finally, `Destroy(gameObject)` removes the node permanently.
+
+---
+
+## Flow 2 — Ore Piece Lifecycle (Spawn → Pool → Sell)
+
+When `OrePiecePoolManager.SpawnPooledOre()` is called, it looks up the `OrePieceKey` (ResourceType + PieceType + IsPolished) in its dictionary of queues. If a **recycled piece exists** in the queue, it dequeues it, repositions it, and `SetActive(true)`. If the queue is empty, it **Instantiates** a new piece from the registered prefab.
+
+On `SetActive(true)`, `OrePiece.OnEnable()` fires and **adds itself** to the static `AllOrePieces` list. `OrePiece.Start()` picks a **random mesh** from `_possibleMeshes`, applies it to `MeshFilter` and `MeshCollider`, applies **random scale variance**, and sets a `randomPriceMultiplier` between 0.9 and 1.1.
+
+The piece **lives in the world** as a physics object — it can be grabbed (Phase B SpringJoint), pulled by magnet (Phase B ToolMagnet), or pushed onto conveyors (Phase D).
+
+When the piece enters a `SellerMachine` trigger, `OnTriggerEnter` calls `orePiece.SellAfterDelay(2f)`. This **detaches from magnet** if held, tags as `"MarkedForDestruction"` (so other triggers ignore it), then starts a **2-second coroutine**. After the delay, `EconomyManager.AddMoney(sellValue)` is called and `GameEvents.RaiseOreSold(price, type, pieceType)` fires.
+
+`OrePiece.Delete()` calls `OrePiecePoolManager.ReturnToPool(this)`. The pool **deactivates** the piece, resets velocity/drag/rotation, clears baskets and magnet references, re-tags as `"Grabbable"`, and **enqueues** it back into the pool. `OnDisable()` removes it from `AllOrePieces`.
+
+---
+
+## Flow 3 — Ore Limit Throttling
+
+`OreLimitManager.Update()` runs a check **every 15 seconds**. It counts how many `OrePiece` in `AllOrePieces` have **non-sleeping Rigidbodies** (actively moving).
+
+If the count exceeds `_movingObjectLimit + 200` → state becomes `Blocked`. Between `+100` and `+200` → `HighlyLimited`. Between limit and `+100` → `SlightlyLimited`. Below limit → `Regular`.
+
+When the state **changes**, `GameEvents.RaiseOreLimitChanged(state)` fires. `PhysicsLimitUIWarning` is subscribed — it **shows/hides** the soft limit or hard limit warning text on the UI.
+
+`AutoMiner` reads `OreLimitManager.GetAutoMinerSpawnTimeMultiplier()` each spawn cycle — at `SlightlyLimited` the spawn interval is **25% longer**, at `Blocked` it's **doubled**. If `ShouldBlockOreSpawning()` returns true, `AutoMiner.TrySpawnOre()` **skips entirely**.
+
+---
+
+## Flow 4 — Auto Miner Spawning
+
+`AutoMiner.Update()` runs every frame when `_enabled` is true. It rotates the `_rotator` child at a speed based on `_spawnRate * _oresPerRotation`. A timer counts down — when it hits zero, `TrySpawnOre()` fires.
+
+Inside `TrySpawnOre`: it checks `OreLimitManager.ShouldBlockOreSpawning()` — if blocked, *returns immediately*. Then a random roll against `_spawnProbability` (default 80%) — if it fails, *no spawn*. If both pass, it calls `_resourceDefinition.GetOrePrefab(canProduceGems)` which uses `UtilsPhaseC.WeightedRandom()` to pick a prefab, then `OrePiecePoolManager.SpawnPooledOre(prefab, spawnPoint)`.
+
+The timer resets to `_spawnRate * OreLimitManager.GetAutoMinerSpawnTimeMultiplier()` — **throttled** during high load.
+
+---
+
+## Flow 5 — OreManager Cleanup
+
+`OreManager.Update()` checks **one ore piece per frame** via round-robin index. If the piece is `null` (destroyed externally), it removes it from `AllOrePieces`. If the piece's position is below `y = -1000` (fell out of world), it calls `piece.Delete()` — returning it to the pool.
+
+This prevents leaked ore pieces from accumulating forever.
+
+---
+
+## Event Registry — Phase C
+
+| Event | Fired By | Subscribed By |
+|-------|----------|---------------|
+| `OnOreMined(ResourceType, Vector3)` | `OreNode.BreakNode()` | Phase F: QuestManager (mining quests), tests |
+| `OnOreSold(float, ResourceType, PieceType)` | `OrePiece.DelayThenSell()`, `SellerMachine` | Phase F: QuestManager (resource deposits), tests |
+| `OnOreLimitChanged(OreLimitState)` | `OreLimitManager.SetState()` | `PhysicsLimitUIWarning` (show/hide), tests |
+| `OnMoneyChanged(float)` | `EconomyManager.AddMoney()` (phase-All) | MoneyHUD (Phase A), InventoryOrchestrator (Phase B), tests |
+
+<!-- ==== FILE: learn/phase-c(New)/GUIDE.md ==== -->
+# Phase C — Mining & Ore System (14%)
+
+## What It Looks Like When Running
+
+```
+You walk into a mine tunnel from the starting room.
+Glowing ore nodes embedded in the walls/floor — different
+colors for Iron (grey), Gold (yellow), Copper (orange), Coal (black).
+
+Equip pickaxe from hotbar → hold left-click:
+  - Swing animation plays
+  - 0.2s delay, then raycast hits the node
+  - Particle sparks fly from impact point
+  - Node health decreases
+  - After 3-4 hits, node shatters:
+    → 2-4 ore pieces fly out with random velocity
+    → Pieces bounce and roll on the ground (Rigidbody physics)
+    → Break particle burst plays
+    → Node disappears permanently
+
+Ore pieces on the ground:
+  - Grabbable with hand (right-click SpringJoint from Phase B)
+  - Pullable with magnet tool (Phase B)
+  - Each has ResourceType (Iron, Gold, etc.) + PieceType (Ore, Crushed, etc.)
+  - Random mesh variant + slight scale variation for visual variety
+  - Random price multiplier (0.9x–1.1x)
+
+AutoMiner placed at a node → rotates continuously, spawns ore
+on a timer. Probability-based (80% default). Rate adjustable.
+
+SellerMachine (trigger volume) → ore enters → waits 2s →
+money increases → ore returns to pool.
+
+With 500+ ore pieces active, OreLimitManager kicks in:
+  - UI warning appears
+  - Auto-miner spawn rate slows down
+  - At limit+ moving objects, spawning blocks entirely
+
+OrePiecePoolManager recycles all ore — zero Instantiate/Destroy
+after initial pool warmup. Smooth performance.
+```
+
+---
+
+## Folder Structure
+
+```
+phase-c(New)/
+├── 0-Core/
+│   └── GameEvents.cs                       (partial: OnOreMined, OnOreSold, OnOreLimitChanged)
+├── 1-Managers/
+│   ├── OreManager.cs                       → "I clean up invalid ore pieces (round-robin)"
+│   ├── OrePiecePoolManager.cs              → "I recycle ore objects to avoid GC spikes"
+│   ├── OreLimitManager.cs                  → "I throttle spawning when too many physics objects exist"
+│   └── ParticleManager.cs                  → "I spawn particle prefabs at world positions"
+├── 2-Data/
+│   ├── SO_AutoMinerResourceDefinition.cs   → "I configure auto-miner spawn rate + weighted ore drops"
+│   ├── Interface/
+│   │   └── IDamageable.cs                  → "I can take damage at a position"
+│   ├── DataService/
+│   │   └── OreDataService.cs               → "I manage resource descriptions + sell values + formatting"
+│   └── Enums/
+│       └── GlobalEnumsC.cs                 → "all Phase C enums: ResourceType, PieceType, OreLimitState"
+├── 3-MonoBehaviours/
+│   ├── OreNode.cs                          → "I'm a breakable rock that drops ore pieces when mined"
+│   ├── OrePiece.cs                         → "I'm a physical resource object with type + piece type"
+│   ├── DamageableOrePiece.cs               → "I'm an OrePiece that breaks on collision damage"
+│   ├── AutoMiner.cs                        → "I spawn ore on a timer at a node"
+│   ├── SellerMachine.cs                    → "I sell ore that enters my trigger for money"
+│   └── PhysicsLimitUIWarning.cs            → "I show/hide ore limit warning text"
+├── 4-Utils/
+│   ├── UtilsPhaseC.cs                      → "I hold WeightedRandom<T> + ore helpers"
+│   └── PhaseCLOG.cs                        → "I format resource snapshots"
+└── 5-Tests/
+    ├── DEBUG_CheckC.cs                      → "I test OreDataService (plain C#)"
+    ├── OreTest.cs                           → "I test spawn/mine/sell flow"
+    └── Manual/
+        ├── MiningFlowTest.md               (manual: hit node → particles → shatter → ore pieces fly)
+        ├── AutoMinerVisualTest.md          (manual: rotator spins, ore spawns on timer)
+        └── SellerMachineTest.md            (manual: ore enters trigger → waits → money increases)
+```
+
+---
+
+## Script Purpose — One Sentence Each
+
+| Script | Purpose |
+|--------|---------|
+| `GameEvents.cs` | I deliver Phase C messages (ore mined, ore sold, ore limit changed) |
+| `OreManager.cs` | I clean up invalid ore pieces via round-robin check |
+| `SO_AutoMinerResourceDefinition.cs` | I configure auto-miner spawn rate + weighted ore drops |
+| `IDamageable.cs` | I'm a contract for anything that takes damage at a position |
+| `OreDataService.cs` | I manage resource descriptions, sell values, and formatted strings |
+| `GlobalEnumsC.cs` | I hold all Phase C enums: ResourceType, PieceType, OreLimitState |
+| `OreNode.cs` | I'm a breakable rock that drops ore pieces when mined |
+| `OrePiece.cs` | I'm a physical resource object with type + piece type |
+| `DamageableOrePiece.cs` | I'm an OrePiece that breaks when hit hard enough (collision damage) |
+| `OrePiecePoolManager.cs` | I recycle ore objects to avoid GC spikes |
+| `OreLimitManager.cs` | I throttle spawning when too many physics objects exist |
+| `AutoMiner.cs` | I spawn ore on a timer at a node |
+| `SellerMachine.cs` | I sell ore that enters my trigger for money |
+| `ParticleManager.cs` | I spawn particle prefabs at world positions |
+| `PhysicsLimitUIWarning.cs` | I show/hide ore limit warning text |
+| `UtilsPhaseC.cs` | I hold WeightedRandom generic selector + ore helpers |
+| `PhaseCLOG.cs` | I format resource description snapshots for test logging |
+
+---
+
+## Hand-Typing Order (Compile Groups)
+
+### Group 1 — Pure Data (compiles alone)
+1. `GlobalEnumsC.cs`
+2. `IDamageable.cs`
+
+**STOP — compile. Zero errors expected.**
+
+### Group 2 — Entities + SO
+3. `SO_AutoMinerResourceDefinition.cs`
+
+**STOP — compile.**
+
+### Group 3 — Utils + DataService
+4. `UtilsPhaseC.cs`
+5. `PhaseCLOG.cs`
+6. `OreDataService.cs`
+
+**STOP — compile. Run DEBUG_CheckC to verify resource lookups.**
+
+### Group 4 — GameEvents
+7. `GameEvents.cs` (partial)
+
+**STOP — compile.**
+
+### Group 5 — Core MonoBehaviours
+8. `ParticleManager.cs`
+9. `OrePiece.cs`
+10. `DamageableOrePiece.cs`
+11. `OreNode.cs`
+12. `OrePiecePoolManager.cs`
+13. `OreLimitManager.cs`
+14. `PhysicsLimitUIWarning.cs`
+15. `AutoMiner.cs`
+16. `SellerMachine.cs`
+
+**STOP — compile.**
+
+### Group 6 — Manager
+17. `OreManager.cs`
+
+**STOP — compile. Run OreTest.**
+
+### Group 7 — Tests
+18. `DEBUG_CheckC.cs`
+19. `OreTest.cs`
+
+**STOP — compile. Run all tests + 3 manual tests.**
+
+---
+
+## Vertical Slice Tests (`.cs` — automated bootstrap)
+
+### 1. DEBUG_CheckC — OreDataService (Data-Level)
+
+**Internal prerequisites:** `OreDataService.cs`, `GlobalEnumsC.cs`
+**External prerequisites:** Empty scene, one GO with `DEBUG_CheckC`
+**NOT required:** Player, tools, nodes, pool — nothing
+**Controls:**
+- `Space` → Build + log resource descriptions
+- `U` → GetColoredResourceTypeString(Iron)
+- `I` → GetDefaultSellValue(Iron, Ore, false)
+- `O` → Log full snapshot
+
+**Checklist:**
+- [ ] Build stores resource descriptions
+- [ ] GetResourceDescription returns correct entry
+- [ ] GetResourceColor returns matching Color
+- [ ] GetColoredResourceTypeString wraps in color tag
+- [ ] GetColoredFormattedResourcePieceString maps piece type labels
+- [ ] Snapshot logs all resource data
+
+### 2. OreTest — Spawn/Mine/Sell Flow (UI-Level)
+
+**Internal prerequisites:** All Phase C scripts + `GameEvents.cs`
+**External prerequisites:**
+- Scene with floor, a few OreNode prefabs, ParticleManager singleton, OrePiecePoolManager singleton, OreLimitManager singleton, OreManager singleton
+- SellerMachine trigger volume
+- OreNode prefabs with: ResourceType, Health, _possibleDrops, _models
+- OrePiece prefabs registered in OrePiecePoolManager
+**NOT required:** Player (use test controls), inventory, shop
+**Controls:**
+- `Space` → damage nearest OreNode by 50
+- `U` → spawn an OrePiece at cursor
+- `I` → log all OrePiece count
+- `O` → log OreDataService snapshot
+- `M/N` → menu toggle (sim)
+
+**Checklist:**
+- [ ] Space damages node → health decreases
+- [ ] Node at 0 health → shatters → 2-4 ore pieces fly out
+- [ ] Ore pieces have random mesh + random scale
+- [ ] Particles spawn at break point
+- [ ] Ore pieces are grabbable (tag "Grabbable")
+- [ ] SellerMachine: ore enters trigger → waits → money increases
+- [ ] OrePiecePoolManager recycles: disabled ore returns to pool
+- [ ] OreLimitManager: at limit → RaiseOreLimitChanged fires
+- [ ] PhysicsLimitUIWarning: shows/hides based on limit state
+- [ ] Console logs every GameEvents fire
+
+---
+
+## Manual Tests (`5-Tests/Manual/*.md` — hands-on, no script)
+
+| # | File | What to verify |
+|---|------|---------------|
+| 1 | `MiningFlowTest.md` | Hit node → particles → health bar → shatter → ore pieces fly + bounce + settle |
+| 2 | `AutoMinerVisualTest.md` | Rotator spins, ore spawns on timer, probability-based, rate adjustable |
+| 3 | `SellerMachineTest.md` | Ore enters trigger → waits → money increases → ore returns to pool |
+
+---
+
+## Art & Scene Work (Non-Script)
+
+### Particle Prefabs
+
+| Asset | Where Used | Description |
+|-------|-----------|-------------|
+| `OreNodeHitParticle` | ToolPickaxe hit | Sparks at impact point |
+| `BreakOreNodeParticle` | OreNode.BreakNode | Burst of particles on shatter |
+| `GenericHitImpactParticle` | ToolPickaxe non-damageable hit | Small impact puff |
+
+### Audio Clips (Phase H stubs)
+
+| Clip | Triggered By | When |
+|------|-------------|------|
+| `Node_TakeDamage` | `OreNode.TakeDamage()` | Each pickaxe hit |
+| `Node_Break` | `OreNode.BreakNode()` | Node shatters |
+| `Ore_Crush` | `OrePiece.TryConvertToCrushed()` | Ore crushed by pickaxe |
+| `Ore_Sell` | `OrePiece.SellAfterDelay()` | Ore sold at machine |
+
+### OreNode Prefab
+
+```
+OreNode (root)
+├── Model_Variant_0 (mesh, one active at random)
+├── Model_Variant_1
+├── Model_Variant_2
+└── Collider (MeshCollider or BoxCollider)
+
+Components on root:
+  - OreNode: ResourceType, Health, MinDrops, MaxDrops, _possibleDrops, _models[]
+```
+
+### OrePiece Prefab
+
+```
+OrePiece (root)
+├── MeshFilter + MeshRenderer (random mesh assigned in Start)
+├── MeshCollider (sharedMesh updated to match)
+└── Rigidbody (mass ~0.5, no constraints)
+
+Components on root:
+  - OrePiece: ResourceType, PieceType, BaseSellValue, CrushedPrefab, _possibleMeshes[]
+  - Tag: "Grabbable", Layer: "Interact"
+```
+
+### Layers & Tags
+
+| Name | Type | Used By |
+|------|------|---------|
+| `Grabbable` | Tag | OrePiece (from Phase B) |
+| `MarkedForDestruction` | Tag | OrePiece during sell delay |
+| `Interact` | Layer | OrePiece, OreNode |
+
+---
+
+## Scene Setup
+
+### Full Phase C Scene (extends Phase B scene)
+
+1. **ParticleManager** singleton GO — assign 3 particle prefabs
+2. **OrePiecePoolManager** singleton GO — assign all OrePiece prefabs list
+3. **OreLimitManager** singleton GO — `_movingObjectLimit` [SerializeField]
+4. **OreManager** singleton GO — assign `_allResourceDescriptions` list
+5. **PhysicsLimitUIWarning** GO on Canvas — `_softLimitObject`, `_hardLimitObject`
+6. **OreNode** prefabs placed in scene — walls/floor, various ResourceTypes
+7. **SellerMachine** GO with trigger collider (IsTrigger=true)
+8. **AutoMiner** GO (optional) — `_resourceDefinition` SO, `Rotator` child, `OreSpawnPoint` child
+
+---
+
+## Modifications to Earlier Phases
+
+| File (Phase) | How | Change | Why |
+|-------------|-----|--------|-----|
+| `GameEvents.cs` (A) | **partial extend** in `phase-c/0-Core/GameEvents.cs` | Add `OnOreMined`, `OnOreSold`, `OnOreLimitChanged` | No modification to Phase A's file |
+| `ToolPickaxe.cs` (B) | **direct modify** | Add `IDamageable.TakeDamage` call in `PerformAttack` after raycast hit | Pickaxe now damages OreNodes |
+| `ToolPickaxe.cs` (B) | **direct modify** | Add crushed ore conversion: `TryConvertToCrushed()` check | Pickaxe breaks ore into crushed |
+
+---
+
+## Source vs Phase Diff
+
+| What | Original Did | What We Did | Why |
+|------|-------------|-------------|-----|
+| Resource descriptions | `[Serializable] ResourceDescription` on OreManager | `OreDataService` manages list, OreManager delegates | Pure C# testable via `new` |
+| Weighted selection | Duplicated in OreNode, AutoMinerResourceDef, OrePiece (3 places) | `UtilsPhaseC.WeightedRandom<T>()` — single generic utility | DRY |
+| OrePiece.SellAfterDelay | Calls `QuestManager.OnResourceDeposited()` directly | Fires `GameEvents.RaiseOreSold()` — QuestManager subscribes in Phase F | Decoupled |
+| OreLimitManager | Reads `SettingsManager.Instance.MovingPhysicsObjectLimit` | Uses `[SerializeField] int _movingObjectLimit` | Settings is Phase H |
+| PhysicsLimitUIWarning | Static `_instance` pattern + static `SwitchState()` | Subscribes to `GameEvents.OnOreLimitChanged` | Decoupled, no static instance |
+| AutoMiner | Implements IInteractable + ICustomSaveDataProvider + references BuildingObject | Simplified: rotate + timer + spawn only. Phase D adds building integration | Phase scope |
+| OreManager sell/volume lookups | Queries `SavingLoadingManager.AllOrePiecePrefabs` | Queries `OreDataService` | Save system is Phase G |
+
+---
+
+## Systems & Testability
+
+### Individual Systems
+
+| # | System | Scripts | Decoupled Via |
+|---|--------|---------|---------------|
+| 1 | **Mining** | `OreNode`, `IDamageable`, `ParticleManager` | `OnOreMined` (fires on node break) |
+| 2 | **Ore Lifecycle** | `OrePiece`, `DamageableOrePiece`, `OrePiecePoolManager` | Self-registration (`AllOrePieces` list), pool return |
+| 3 | **Selling** | `SellerMachine` | `OnOreSold` (fires on sell), EconomyManager.AddMoney |
+| 4 | **Auto Mining** | `AutoMiner`, `SO_AutoMinerResourceDefinition` | Reads OreLimitManager for throttle |
+| 5 | **Limit Management** | `OreLimitManager`, `PhysicsLimitUIWarning` | `OnOreLimitChanged` (fires on state change) |
+| 6 | **Data** | `OreDataService`, `OreManager` | None — pure C# / singleton read |
+
+### Testability Matrix
+
+| System | `.cs` Test | `Manual/*.md` | Needs other systems? |
+|--------|-----------|---------------|---------------------|
+| Data (OreDataService) | `DEBUG_CheckC` | — | **Nothing** — plain C# `new` |
+| Mining + Selling + Pool | `OreTest` | `MiningFlowTest.md`, `SellerMachineTest.md` | Needs ParticleManager, OrePiecePoolManager, EconomyManager |
+| Auto Mining | `OreTest` | `AutoMinerVisualTest.md` | Needs OrePiecePoolManager, OreLimitManager |
+| Limit + Warning | `OreTest` | — | Standalone — counts OrePiece.AllOrePieces |
+
+**6 systems, 19 scripts, 2 `.cs` tests, 3 manual tests. Zero tight coupling between systems.**
+
+<!-- ==== FILE: learn/phase-c(New)/Scripts/0-Core/GameEvents.cs ==== -->
+using System;
+using UnityEngine;
+
+/// <summary>
+/// partial extend for phase-c — no modification to phase-a GameEvents
+/// </summary>
+public static partial class GameEvents
+{
+	// when ore node was mined (broken) >>
+	public static event Action<ResourceType, Vector3> OnOreMined;
+	public static void RaiseOreMined(ResourceType type, Vector3 position)
+	{
+		LogSubscribersCount(nameof(OnOreMined), OnOreMined);
+		GameEvents.OnOreMined? // if there is any subscribers
+			.Invoke(type, position);
+	}
+	// << when ore node was mined
+
+	// when ore piece was sold >>
+	public static event Action<float, ResourceType, PieceType> OnOreSold;
+	public static void RaiseOreSold(float price, ResourceType type, PieceType pieceType)
+	{
+		LogSubscribersCount(nameof(OnOreSold), OnOreSold);
+		GameEvents.OnOreSold? // if there is any subscribers
+			.Invoke(price, type, pieceType);
+	}
+	// << when ore piece was sold
+
+	// when ore limit state changed >>
+	public static event Action<OreLimitState> OnOreLimitChanged;
+	public static void RaiseOreLimitChanged(OreLimitState state)
+	{
+		LogSubscribersCount(nameof(OnOreLimitChanged), OnOreLimitChanged);
+		GameEvents.OnOreLimitChanged? // if there is any subscribers
+			.Invoke(state);
+	}
+	// << when ore limit state changed
+}
+
+<!-- ==== FILE: learn/phase-c(New)/Scripts/1-Managers/OreLimitManager.cs ==== -->
+using System.Collections.Generic;
+using UnityEngine;
+
+/// <summary>
+/// throttles spawning when too many physics objects exist
+/// </summary>
+public class OreLimitManager : Singleton<OreLimitManager>
+{
+	#region Inspector Fields
+	[SerializeField] int _movingObjectLimit = 500;
+	#endregion
+
+	#region private API
+	OreLimitState currentState;
+	float timeSinceLastCheck;
+	#endregion
+
+	#region public API
+	/// <summary> true if spawning should be blocked entirely </summary>
+	public bool ShouldBlockOreSpawning() => currentState == OreLimitState.Blocked;
+	/// <summary> spawn time multiplier based on limit state </summary>
+	public float GetAutoMinerSpawnTimeMultiplier()
+	{
+		switch (currentState)
+		{
+			case OreLimitState.SlightlyLimited: return 1.25f;
+			case OreLimitState.HighlyLimited: return 1.5f;
+			case OreLimitState.Blocked: return 2f;
+			default: return 1f;
+		}
+	}
+	#endregion
+
+	#region Unity Life Cycle
+	private void Update()
+	{
+		timeSinceLastCheck += Time.deltaTime;
+		if (timeSinceLastCheck < 15f) return;
+		timeSinceLastCheck = 0f;
+		if (_movingObjectLimit >= 10000)
+		{
+			SetState(OreLimitState.Regular);
+			return;
+		}
+		int softLimit = _movingObjectLimit + 100;
+		int hardLimit = _movingObjectLimit + 200;
+		int movingCount = 0;
+		var allOre = OrePiece.AllOrePieces;
+		for (int i = 0; i < allOre.Count; i++)
+		{
+			if (allOre[i].Rb != null && !allOre[i].Rb.IsSleeping())
+			{
+				movingCount++;
+				if (movingCount > hardLimit) break;
+			}
+		}
+		if (movingCount > hardLimit) SetState(OreLimitState.Blocked);
+		else if (movingCount > softLimit) SetState(OreLimitState.HighlyLimited);
+		else if (movingCount > _movingObjectLimit) SetState(OreLimitState.SlightlyLimited);
+		else SetState(OreLimitState.Regular);
+	}
+	void SetState(OreLimitState state)
+	{
+		if (currentState == state) return;
+		currentState = state;
+		// purpose: PhysicsLimitUIWarning shows/hides warning text
+		GameEvents.RaiseOreLimitChanged(currentState);
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-c(New)/Scripts/1-Managers/OreManager.cs ==== -->
+using System.Collections.Generic;
+using UnityEngine;
+
+/// <summary>
+/// cleans up invalid ore pieces via round-robin check — owns OreDataService
+/// </summary>
+public class OreManager : Singleton<OreManager>
+{
+	#region Inspector Fields
+	[SerializeField] List<ResourceDescription> _allResourceDescriptions;
+	#endregion
+
+	#region private API
+	OreDataService oreDataService = new OreDataService();
+	int currentOreIndex;
+	#endregion
+
+	#region public API
+	/// <summary> expose data service for external queries </summary>
+	public OreDataService DataService => oreDataService;
+	#endregion
+
+	#region Unity Life Cycle
+	protected override void Awake()
+	{
+		base.Awake();
+		oreDataService.Build(_allResourceDescriptions);
+	}
+	private void Update()
+	{
+		var allOre = OrePiece.AllOrePieces;
+		if (allOre.Count == 0) { currentOreIndex = 0; return; }
+		if (currentOreIndex >= allOre.Count) currentOreIndex = 0;
+		var piece = allOre[currentOreIndex];
+		if (piece == null)
+		{
+			OrePiece.AllOrePieces.Remove(piece);
+			return;
+		}
+		if (piece.transform.position.y < -1000f)
+			piece.Delete();
+		currentOreIndex++;
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-c(New)/Scripts/1-Managers/OrePiecePoolManager.cs ==== -->
+using System.Collections.Generic;
+using UnityEngine;
+
+/// <summary>
+/// recycles ore objects to avoid GC spikes — dictionary of queues by OrePieceKey
+/// </summary>
+public class OrePiecePoolManager : Singleton<OrePiecePoolManager>
+{
+	#region Inspector Fields
+	[SerializeField] List<OrePiece> _allOrePiecePrefabs = new List<OrePiece>();
+	#endregion
+
+	#region private API
+	readonly Dictionary<OrePieceKey, Queue<OrePiece>> pools = new Dictionary<OrePieceKey, Queue<OrePiece>>();
+	readonly Dictionary<OrePieceKey, OrePiece> prefabByKey = new Dictionary<OrePieceKey, OrePiece>();
+	Transform root;
+	#endregion
+
+	#region public API
+	/// <summary> spawn from pool or instantiate — by prefab </summary>
+	public OrePiece SpawnPooledOre(OrePiece prefab, Vector3 position = default, Quaternion rotation = default)
+	{
+		return SpawnPooledOre(prefab.ResourceType, prefab.PieceType, prefab.IsPolished, position, rotation);
+	}
+	/// <summary> spawn from pool or instantiate — by type </summary>
+	public OrePiece SpawnPooledOre(ResourceType resourceType, PieceType pieceType, bool isPolished, Vector3 position = default, Quaternion rotation = default)
+	{
+		var key = new OrePieceKey(resourceType, pieceType, isPolished);
+		if (!prefabByKey.TryGetValue(key, out var prefab))
+		{
+			Debug.LogError($"No OrePiece prefab for key: {key}");
+			return null;
+		}
+		if (!pools.TryGetValue(key, out var queue))
+		{
+			queue = new Queue<OrePiece>();
+			pools[key] = queue;
+		}
+		OrePiece piece;
+		if (queue.Count > 0) piece = queue.Dequeue();
+		else
+		{
+			piece = Object.Instantiate(prefab, root);
+			piece.gameObject.name = prefab.gameObject.name + " [Pooled]";
+		}
+		piece.transform.SetParent(null, false);
+		piece.transform.SetPositionAndRotation(position, rotation);
+		piece.gameObject.SetActive(true);
+		return piece;
+	}
+	/// <summary> try spawn — accepts GameObject, checks for OrePiece component </summary>
+	public OrePiece TrySpawnPooledOre(GameObject prefab, Vector3 position = default, Quaternion rotation = default)
+	{
+		var orePiece = prefab.GetComponent<OrePiece>();
+		if (orePiece != null) return SpawnPooledOre(orePiece, position, rotation);
+		Object.Instantiate(prefab, position, rotation);
+		return null;
+	}
+	/// <summary> return ore to pool — reset state, deactivate </summary>
+	public void ReturnToPool(OrePiece piece)
+	{
+		if (piece == null || !piece.gameObject.activeSelf) return;
+		var key = new OrePieceKey(piece.ResourceType, piece.PieceType, piece.IsPolished);
+		if (!pools.TryGetValue(key, out var queue))
+		{
+			queue = new Queue<OrePiece>();
+			pools[key] = queue;
+		}
+		piece.gameObject.SetActive(false);
+		if (piece.Rb != null)
+		{
+			piece.Rb.linearVelocity = Vector3.zero;
+			piece.Rb.angularVelocity = Vector3.zero;
+			piece.Rb.Sleep();
+			piece.Rb.linearDamping = BasePhysicsObject.STANDARD_LINEAR_DAMPING;
+			piece.Rb.angularDamping = BasePhysicsObject.STANDARD_ANGULAR_DAMPING;
+		}
+		piece.transform.SetLocalPositionAndRotation(Vector3.zero, Quaternion.identity);
+		piece.BasketsThisIsInside.Clear();
+		piece.SievePercent = 0f;
+		piece.CurrentMagnetTool = null;
+		piece.gameObject.tag = "Grabbable";
+		piece.transform.SetParent(root, false);
+		queue.Enqueue(piece);
+	}
+	#endregion
+
+	#region Unity Life Cycle
+	protected override void Awake()
+	{
+		base.Awake();
+		root = new GameObject("[OrePiecePools]").transform;
+		root.SetParent(transform);
+		prefabByKey.Clear();
+		foreach (var prefab in _allOrePiecePrefabs)
+		{
+			if (prefab == null) continue;
+			var key = new OrePieceKey(prefab.ResourceType, prefab.PieceType, prefab.IsPolished);
+			if (prefabByKey.ContainsKey(key))
+				Debug.LogWarning($"Duplicate OrePiece prefab key: {key}. Keeping first.");
+			else
+				prefabByKey[key] = prefab;
+		}
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-c(New)/Scripts/1-Managers/ParticleManager.cs ==== -->
+using UnityEngine;
+
+/// <summary>
+/// spawns particle prefabs at world positions — singleton
+/// </summary>
+public class ParticleManager : Singleton<ParticleManager>
+{
+	#region Inspector Fields
+	[SerializeField] public GameObject GenericHitImpactParticle;
+	[SerializeField] public GameObject OreNodeHitParticlePrefab;
+	[SerializeField] public GameObject BreakOreNodeParticlePrefab;
+	#endregion
+
+	#region public API
+	/// <summary> spawn a particle at position + rotation </summary>
+	public void CreateParticle(GameObject prefab, Vector3 position, Quaternion rotation = default)
+	{
+		if (prefab == null) return;
+		var go = Object.Instantiate(prefab, position, rotation);
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-c(New)/Scripts/2-Data/DataService/OreDataService.cs ==== -->
+using System;
+using System.Linq;
+using System.Collections.Generic;
+
+using UnityEngine;
+using SPACE_UTIL;
+
+/// <summary>
+/// purely C# — manages resource descriptions, sell values, formatted strings
+/// </summary>
+public class OreDataService
+{
+	#region private API
+	List<ResourceDescription> RESOURCE_DESC = new List<ResourceDescription>();
+	#endregion
+
+	#region public API
+	/// <summary> store resource descriptions </summary>
+	public void Build(List<ResourceDescription> descriptions)
+	{
+		RESOURCE_DESC = descriptions;
+	}
+	/// <summary> lookup by type </summary>
+	public ResourceDescription GetResourceDescription(ResourceType type)
+	{
+		return RESOURCE_DESC.find(r => r.ResourceType == type);
+	}
+	/// <summary> returns display color for a resource </summary>
+	public Color GetResourceColor(ResourceType type)
+	{
+		var desc = GetResourceDescription(type);
+		return desc != null ? desc.DisplayColor : Color.white;
+	}
+	/// <summary> rich text colored resource name </summary>
+	public string GetColoredResourceTypeString(ResourceType type)
+	{
+		string hex = ColorUtility.ToHtmlStringRGB(GetResourceColor(type));
+		return $"<color=#{hex}>{type}</color>";
+	}
+	/// <summary> full formatted name with piece type label mapping </summary>
+	public string GetColoredFormattedResourcePieceString(ResourceType resourceType, PieceType pieceType, bool requirePolished = false)
+	{
+		string hex = ColorUtility.ToHtmlStringRGB(GetResourceColor(resourceType));
+		string pieceName = pieceType.ToString();
+		string resName = resourceType.ToString();
+		// label overrides
+		if (pieceType == PieceType.DrillBit) pieceName = "Drill Bit";
+		if (pieceType == PieceType.ThreadedRod) pieceName = "Threaded Rod";
+		if (pieceType == PieceType.OreCluster) pieceName = "Ore Cluster";
+		if (pieceType == PieceType.JunkCast) pieceName = "Junk Cast";
+		if (pieceType == PieceType.Pipe && resourceType == ResourceType.Slag) resName = "Junk";
+		string polished = requirePolished ? "Polished " : "";
+		if (pieceType == PieceType.Crushed)
+			return $"<color=#{hex}>{polished}{pieceName} {resName}</color>";
+		return $"<color=#{hex}>{polished}{resName} {pieceName}</color>";
+	}
+	#endregion
+
+	#region snapShot
+	/// <summary> PhaseCLOG formatter </summary>
+	public string GetSnapshot(string header = "ore data snapshot")
+	{
+		return $@"
+{'='.repeat(4) + header + '='.repeat(4)}
+// RESOURCE_DESC
+{PhaseCLOG.LIST_RESOURCE_DESC__TO__JSON(RESOURCE_DESC)}";
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-c(New)/Scripts/2-Data/Entities/OrePieceEntry.cs ==== -->
+using System;
+using UnityEngine;
+
+/// <summary>
+/// save data for one ore piece in the world — Phase G uses this
+/// </summary>
+[Serializable]
+public class OrePieceEntry
+{
+	public ResourceType ResourceType;
+	public PieceType PieceType;
+	public float PolishedPercent;
+	public Vector3 Position;
+	public Vector3 Rotation;
+	public Vector3 Scale;
+	public int MeshID;
+}
+
+<!-- ==== FILE: learn/phase-c(New)/Scripts/2-Data/Entities/OrePieceKey.cs ==== -->
+using System;
+
+/// <summary>
+/// composite key for ore pool lookup — ResourceType + PieceType + IsPolished
+/// </summary>
+[Serializable]
+public struct OrePieceKey : IEquatable<OrePieceKey>
+{
+	public ResourceType ResourceType;
+	public PieceType PieceType;
+	public bool IsPolished;
+
+	public OrePieceKey(ResourceType resourceType, PieceType pieceType, bool isPolished)
+	{
+		ResourceType = resourceType;
+		PieceType = pieceType;
+		IsPolished = isPolished;
+	}
+	public override int GetHashCode()
+	{
+		return ((17 * 31 + ResourceType.GetHashCode()) * 31 + PieceType.GetHashCode()) * 31 + IsPolished.GetHashCode();
+	}
+	public override bool Equals(object obj) => obj is OrePieceKey other && Equals(other);
+	public bool Equals(OrePieceKey other)
+	{
+		return ResourceType == other.ResourceType && PieceType == other.PieceType && IsPolished == other.IsPolished;
+	}
+}
+
+<!-- ==== FILE: learn/phase-c(New)/Scripts/2-Data/Entities/ResourceDescription.cs ==== -->
+using System;
+using UnityEngine;
+
+/// <summary>
+/// pairs a ResourceType with its display color — embedded in OreManager inspector
+/// </summary>
+[Serializable]
+public class ResourceDescription
+{
+	public ResourceType ResourceType;
+	public Color DisplayColor;
+}
+
+<!-- ==== FILE: learn/phase-c(New)/Scripts/2-Data/Entities/WeightedNodeDrop.cs ==== -->
+using System;
+
+/// <summary>
+/// weighted ore drop entry for OreNode — embedded in inspector list
+/// </summary>
+[Serializable]
+public class WeightedNodeDrop
+{
+	public OrePiece OrePrefab;
+	public float Weight = 100f;
+}
+
+<!-- ==== FILE: learn/phase-c(New)/Scripts/2-Data/Entities/WeightedOreChance.cs ==== -->
+using System;
+
+/// <summary>
+/// weighted ore chance entry for AutoMiner + OrePiece sieving/cluster
+/// </summary>
+[Serializable]
+public class WeightedOreChance
+{
+	public OrePiece OrePrefab;
+	public float Weight = 100f;
+}
+
+<!-- ==== FILE: learn/phase-c(New)/Scripts/2-Data/Enums/GlobalEnumsC.cs ==== -->
+/// <summary>
+/// all enums introduced in Phase C — one file, one place
+/// </summary>
+
+/// <summary> ore resource type </summary>
+public enum ResourceType
+{
+	INVALID = 0,
+	Iron = 1,
+	Coal = 2,
+	Gold = 3,
+	Slag = 4,
+	Diamond = 5,
+	Emerald = 6,
+	Copper = 7,
+	Broken = 8,
+	Ruby = 9,
+	Steel = 10,
+	Celestite = 11,
+	Quartz = 12,
+	Amethyst = 13,
+	Mystery = 14
+}
+
+/// <summary> ore piece shape/state type </summary>
+public enum PieceType
+{
+	INVALID = 0,
+	Ore = 1,
+	Crushed = 2,
+	Ingot = 3,
+	Plate = 4,
+	Gem = 5,
+	Pipe = 6,
+	Rod = 7,
+	DrillBit = 8,
+	ThreadedRod = 9,
+	Gear = 10,
+	OreCluster = 11,
+	JunkCast = 12,
+	Geode = 13
+}
+
+/// <summary> ore limit throttle state </summary>
+public enum OreLimitState
+{
+	Regular = 0,
+	SlightlyLimited = 1,
+	HighlyLimited = 2,
+	Blocked = 3
+}
+
+<!-- ==== FILE: learn/phase-c(New)/Scripts/2-Data/Interface/IDamageable.cs ==== -->
+using UnityEngine;
+
+/// <summary>
+/// contract for anything that takes damage at a position
+/// </summary>
+public interface IDamageable
+{
+	void TakeDamage(float damage, Vector3 position);
+}
+
+<!-- ==== FILE: learn/phase-c(New)/Scripts/2-Data/SO_AutoMinerResourceDefinition.cs ==== -->
+using System.Collections.Generic;
+using UnityEngine;
+
+/// <summary>
+/// configures auto-miner spawn rate + weighted ore drops
+/// </summary>
+[CreateAssetMenu(menuName = "SO/SO_AutoMinerResourceDefinition", fileName = "SO_AutoMinerResourceDefinition")]
+public class SO_AutoMinerResourceDefinition : ScriptableObject
+{
+	[Range(0f, 100f)] public float SpawnProbability = 80f;
+	[Range(0f, 20f)] public float SpawnRate = 2f;
+	[SerializeField] List<WeightedOreChance> _possibleOrePrefabs = new List<WeightedOreChance>();
+
+	/// <summary> get primary resource type (highest weight) </summary>
+	public ResourceType GetPrimaryResourceType()
+	{
+		if (_possibleOrePrefabs == null || _possibleOrePrefabs.Count == 0) return ResourceType.INVALID;
+		return _possibleOrePrefabs[0].OrePrefab.ResourceType;
+	}
+	/// <summary> weighted random ore prefab selection </summary>
+	public OrePiece GetOrePrefab(bool canProduceGems)
+	{
+		if (_possibleOrePrefabs == null || _possibleOrePrefabs.Count == 0) return null;
+		var list = _possibleOrePrefabs;
+		if (!canProduceGems)
+			list = _possibleOrePrefabs.FindAll(o => o.OrePrefab.PieceType != PieceType.Gem);
+		return UtilsPhaseC.WeightedRandom(list, o => o.Weight)?.OrePrefab;
+	}
+}
+
+<!-- ==== FILE: learn/phase-c(New)/Scripts/3-MonoBehaviours/AutoMiner.cs ==== -->
+using UnityEngine;
+
+/// <summary>
+/// spawns ore on a timer at a node — rotates continuously, probability-based
+/// </summary>
+public class AutoMiner : MonoBehaviour
+{
+	#region Inspector Fields
+	[SerializeField] GameObject _rotator;
+	[SerializeField] Transform _oreSpawnPoint;
+	[SerializeField] bool _rotateY;
+	[SerializeField] bool _rotateZ;
+	[SerializeField] bool _enabled = true;
+	[SerializeField] int _oresPerRotation = 12;
+	[SerializeField] OrePiece _fallbackOrePrefab;
+	[SerializeField] SO_AutoMinerResourceDefinition _resourceDefinition;
+	[Header("Configured from Definition")]
+	[SerializeField] [Range(0f, 100f)] float _spawnProbability = 80f;
+	[SerializeField] [Range(0f, 20f)] float _spawnRate = 2f;
+	#endregion
+
+	#region private API
+	Vector3 rotationAxis;
+	float timeUntilNextSpawn;
+
+	void TrySpawnOre()
+	{
+		if (Singleton<OreLimitManager>.Ins.ShouldBlockOreSpawning()) return;
+		if (Random.Range(0f, 100f) > _spawnProbability) return;
+		OrePiece prefab = _resourceDefinition != null
+			? _resourceDefinition.GetOrePrefab(true)
+			: _fallbackOrePrefab;
+		if (prefab != null)
+			Singleton<OrePiecePoolManager>.Ins.SpawnPooledOre(prefab, _oreSpawnPoint.position, _oreSpawnPoint.rotation);
+	}
+	#endregion
+
+	#region Unity Life Cycle
+	private void Start()
+	{
+		timeUntilNextSpawn = _spawnRate;
+		rotationAxis = _rotateZ ? Vector3.back : (_rotateY ? Vector3.down : Vector3.right);
+		if (_resourceDefinition != null)
+		{
+			_spawnProbability = _resourceDefinition.SpawnProbability;
+			_spawnRate = _resourceDefinition.SpawnRate;
+		}
+	}
+	private void Update()
+	{
+		if (!_enabled || _spawnRate <= 0f) return;
+		float angle = 360f / (_spawnRate * _oresPerRotation) * Time.deltaTime;
+		_rotator.transform.Rotate(rotationAxis, angle);
+		timeUntilNextSpawn -= Time.deltaTime;
+		timeUntilNextSpawn = Mathf.Min(timeUntilNextSpawn, _spawnRate);
+		if (timeUntilNextSpawn <= 0f)
+		{
+			TrySpawnOre();
+			timeUntilNextSpawn += _spawnRate * Singleton<OreLimitManager>.Ins.GetAutoMinerSpawnTimeMultiplier();
+		}
+	}
+	#endregion
+
+	#region extra
+	// nice-to-have: Phase D adds IInteractable (Turn On/Off), ICustomSaveDataProvider, BuildingObject integration
+	// nice-to-have: Phase D adds Toggle(on/off) with light material swap + looping sound
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-c(New)/Scripts/3-MonoBehaviours/DamageableOrePiece.cs ==== -->
+using UnityEngine;
+
+/// <summary>
+/// OrePiece that breaks on collision damage — implements IDamageable
+/// </summary>
+public class DamageableOrePiece : OrePiece, IDamageable
+{
+	#region Inspector Fields
+	[Header("Damageable Settings")]
+	[SerializeField] float _health = 10f;
+	[SerializeField] float _minDamageVelocity = 30f;
+	[SerializeField] float _cooldown = 0.1f;
+	#endregion
+
+	#region private API
+	float lastPlayTime;
+	#endregion
+
+	#region public API — IDamageable
+	/// <summary> take damage — breaks into cluster pieces at 0 health </summary>
+	public void TakeDamage(float damage, Vector3 position)
+	{
+		_health -= damage;
+		if (_health <= 0f)
+		{
+			// Phase H: play break sound
+			Singleton<ParticleManager>.Ins.CreateParticle(
+				Singleton<ParticleManager>.Ins.BreakOreNodeParticlePrefab, transform.position);
+			CompleteClusterBreaking();
+			UtilsPhaseB.SimpleExplosion(transform.position, 0.5f, 2f, 0.1f);
+		}
+	}
+	#endregion
+
+	#region Unity Life Cycle
+	private void OnCollisionEnter(Collision collision)
+	{
+		if (collision.contactCount == 0 || Time.time - lastPlayTime < _cooldown) return;
+		lastPlayTime = Time.time;
+		float sqrVel = collision.relativeVelocity.sqrMagnitude;
+		if (sqrVel > _minDamageVelocity)
+		{
+			float damage = (sqrVel - _minDamageVelocity) * 0.1f;
+			TakeDamage(damage, transform.position);
+		}
+		// Phase H: play physics impact sound if close enough to player
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-c(New)/Scripts/3-MonoBehaviours/OreNode.cs ==== -->
+using System.Collections.Generic;
+using UnityEngine;
+
+using SPACE_UTIL;
+
+/// <summary>
+/// breakable rock that drops ore pieces when mined — implements IDamageable
+/// </summary>
+public class OreNode : MonoBehaviour, IDamageable
+{
+	#region Inspector Fields
+	[SerializeField] ResourceType _resourceType;
+	[SerializeField] float _health = 100f;
+	[SerializeField] int _minDrops = 2;
+	[SerializeField] int _maxDrops = 4;
+	[SerializeField] List<WeightedNodeDrop> _possibleDrops = new List<WeightedNodeDrop>();
+	[SerializeField] GameObject[] _models;
+	#endregion
+
+	#region public API
+	public ResourceType ResourceType => _resourceType;
+	#endregion
+
+	#region public API — IDamageable
+	/// <summary> take damage — breaks node at 0 health </summary>
+	public void TakeDamage(float damage, Vector3 position)
+	{
+		// Phase H: play take damage sound
+		_health -= damage;
+		if (_health <= 0f) BreakNode(position);
+	}
+	#endregion
+
+	#region private API
+	void BreakNode(Vector3 hitPosition)
+	{
+		int dropCount = Random.Range(_minDrops, _maxDrops + 1);
+		Vector3 spawnCenter = (transform.position + hitPosition) * 0.5f;
+		for (int i = 0; i < dropCount; i++)
+		{
+			Vector3 pos = spawnCenter + Random.insideUnitSphere * 0.15f;
+			OrePiece prefab = GetOrePrefab();
+			if (prefab == null) continue;
+			OrePiece spawned = Singleton<OrePiecePoolManager>.Ins.SpawnPooledOre(prefab, pos, Quaternion.identity);
+			if (spawned != null && spawned.Rb != null)
+			{
+				spawned.Rb.linearVelocity = new Vector3(Random.Range(-1.5f, 1.5f), Random.Range(2f, 4f), Random.Range(-1.5f, 1.5f));
+				spawned.Rb.angularVelocity = Random.insideUnitSphere * Random.Range(1f, 50f);
+			}
+		}
+		// Phase H: play break sound
+		Singleton<ParticleManager>.Ins.CreateParticle(
+			Singleton<ParticleManager>.Ins.BreakOreNodeParticlePrefab, hitPosition);
+		// purpose: quest system + other listeners react to mining
+		GameEvents.RaiseOreMined(_resourceType, transform.position);
+		// Phase G: MarkStaticPositionAsBroken for save/load
+		Destroy(gameObject);
+	}
+	OrePiece GetOrePrefab()
+	{
+		return UtilsPhaseC.WeightedRandom(_possibleDrops, d => d.Weight)?.OrePrefab;
+	}
+	#endregion
+
+	#region Unity Life Cycle
+	private void Start()
+	{
+		if (_models.Length > 0)
+		{
+			int chosen = Random.Range(0, _models.Length);
+			for (int i = 0; i < _models.Length; i++)
+				_models[i].SetActive(i == chosen);
+		}
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-c(New)/Scripts/3-MonoBehaviours/OrePiece.cs ==== -->
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+using SPACE_UTIL;
+
+/// <summary>
+/// physical resource object with type + piece type — extends BaseSellableItem
+/// </summary>
+public class OrePiece : BaseSellableItem
+{
+	#region Inspector Fields
+	[SerializeField] ResourceType _resourceType;
+	[SerializeField] PieceType _pieceType;
+	[SerializeField] bool _isPolished;
+	[SerializeField] Mesh[] _possibleMeshes;
+	[SerializeField] MeshFilter _meshFilter;
+	[SerializeField] MeshCollider _meshCollider;
+	[SerializeField] bool _useRandomMesh = true;
+	[SerializeField] bool _useRandomScale = true;
+	[SerializeField] Vector3 _scaleVariance = new Vector3(0.25f, 0.25f, 0.25f);
+	[Header("Conversion Prefabs (Phase E)")]
+	[SerializeField] GameObject _crushedPrefab;
+	[SerializeField] GameObject _polishedPrefab;
+	// Phase E: _ingotPrefab, _platePrefab, _pipePrefab, _rodPrefab, _threadedPrefab
+	#endregion
+
+	#region private API
+	float randomPriceMultiplier = 1f;
+	int meshID;
+	#endregion
+
+	#region public API
+	public ResourceType ResourceType => _resourceType;
+	public PieceType PieceType => _pieceType;
+	public bool IsPolished => _isPolished;
+	public float RandomPriceMultiplier { get => randomPriceMultiplier; set => randomPriceMultiplier = value; }
+	public int MeshID => meshID;
+	public float VolumeInsideBox = 0.1f;
+	[Obsolete] public float PolishedPercent;
+	public float SievePercent;
+	public ToolMagnet CurrentMagnetTool;
+	public HashSet<object> BasketsThisIsInside = new HashSet<object>(); // Phase E: HashSet<BaseBasket>
+
+	public static List<OrePiece> AllOrePieces = new List<OrePiece>();
+
+	/// <summary> sell value with random multiplier </summary>
+	public override float GetSellValue() => Mathf.Round(BaseSellValue * randomPriceMultiplier * 100f) / 100f;
+
+	/// <summary> return to pool (replaces Destroy) </summary>
+	public void Delete()
+	{
+		Singleton<OrePiecePoolManager>.Ins.ReturnToPool(this);
+	}
+	/// <summary> sell after delay — detach from magnet, mark for destruction, coroutine </summary>
+	public void SellAfterDelay(float delay = 2f)
+	{
+		if (CurrentMagnetTool != null) CurrentMagnetTool.DetachBody(Rb);
+		gameObject.tag = "MarkedForDestruction";
+		StartCoroutine(DelayThenSell(delay));
+	}
+	/// <summary> try crush into 2x crushed pieces — used by ToolPickaxe </summary>
+	public bool TryConvertToCrushed()
+	{
+		if (!gameObject.activeSelf || _crushedPrefab == null) return false;
+		for (int i = 0; i < 2; i++)
+			Singleton<OrePiecePoolManager>.Ins.TrySpawnPooledOre(_crushedPrefab, transform.position, transform.rotation);
+		// Phase H: play crush sound
+		Delete();
+		return true;
+	}
+	#endregion
+
+	#region extra
+	// nice-to-have: Phase E conversion methods — AddPolish, AddSieveValue, ConvertToPlate, ConvertToRod, etc.
+	// nice-to-have: CompleteClusterBreaking — used by DamageableOrePiece and ClusterBreaker machine
+	public void CompleteClusterBreaking() { /* Phase E */ }
+	#endregion
+
+	#region Unity Life Cycle
+	private void Start()
+	{
+		if (_possibleMeshes.Length > 0)
+		{
+			if (_useRandomMesh) meshID = UnityEngine.Random.Range(0, _possibleMeshes.Length);
+			if (_meshCollider != null) _meshCollider.sharedMesh = _possibleMeshes[meshID];
+			if (_meshFilter != null) _meshFilter.sharedMesh = _possibleMeshes[meshID];
+		}
+		if (_useRandomScale)
+		{
+			Vector3 s = transform.localScale;
+			s.x += UnityEngine.Random.Range(-_scaleVariance.x, _scaleVariance.x);
+			s.y += UnityEngine.Random.Range(-_scaleVariance.y, _scaleVariance.y);
+			s.z += UnityEngine.Random.Range(-_scaleVariance.z, _scaleVariance.z);
+			transform.localScale = s;
+		}
+		randomPriceMultiplier = UnityEngine.Random.Range(0.9f, 1.1f);
+	}
+	protected override void OnEnable()
+	{
+		base.OnEnable();
+		AllOrePieces.Add(this);
+	}
+	protected override void OnDisable()
+	{
+		base.OnDisable();
+		AllOrePieces.Remove(this);
+	}
+	IEnumerator DelayThenSell(float delay)
+	{
+		yield return new WaitForSeconds(delay);
+		if (this == null || !isActiveAndEnabled) yield break;
+		float price = GetSellValue();
+		Singleton<EconomyManager>.Ins.AddMoney(price);
+		// purpose: quest system tracks resource deposits (Phase F subscribes)
+		GameEvents.RaiseOreSold(price, _resourceType, _pieceType);
+		Delete();
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-c(New)/Scripts/3-MonoBehaviours/PhysicsLimitUIWarning.cs ==== -->
+using UnityEngine;
+
+/// <summary>
+/// shows/hides ore limit warning text — subscribes to OnOreLimitChanged
+/// </summary>
+public class PhysicsLimitUIWarning : MonoBehaviour
+{
+	#region Inspector Fields
+	[SerializeField] GameObject _softLimitObject;
+	[SerializeField] GameObject _hardLimitObject;
+	#endregion
+
+	#region Unity Life Cycle
+	private void Start()
+	{
+		// purpose: react to ore limit state changes from OreLimitManager
+		GameEvents.OnOreLimitChanged += HandleLimitChanged;
+		HandleLimitChanged(OreLimitState.Regular);
+	}
+	void HandleLimitChanged(OreLimitState state)
+	{
+		switch (state)
+		{
+			case OreLimitState.Regular:
+				gameObject.SetActive(false);
+				break;
+			case OreLimitState.SlightlyLimited:
+			case OreLimitState.HighlyLimited:
+				gameObject.SetActive(true);
+				_softLimitObject.SetActive(true);
+				_hardLimitObject.SetActive(false);
+				break;
+			case OreLimitState.Blocked:
+				gameObject.SetActive(true);
+				_softLimitObject.SetActive(false);
+				_hardLimitObject.SetActive(true);
+				break;
+		}
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-c(New)/Scripts/3-MonoBehaviours/SellerMachine.cs ==== -->
+using UnityEngine;
+
+/// <summary>
+/// sells ore that enters trigger for money — waits, then adds money + fires event
+/// </summary>
+public class SellerMachine : MonoBehaviour
+{
+	#region Unity Life Cycle
+	private void OnTriggerEnter(Collider other)
+	{
+		if (other.CompareTag("MarkedForDestruction") || other.attachedRigidbody == null) return;
+		OrePiece orePiece = other.GetComponentInParent<OrePiece>();
+		if (orePiece != null)
+		{
+			orePiece.SellAfterDelay();
+			return;
+		}
+		// Phase E: BoxObject sell
+		// var box = other.GetComponentInParent<BoxObject>();
+		// if (box != null) { SellBox(box); return; }
+		BaseSellableItem sellable = other.GetComponentInParent<BaseSellableItem>();
+		if (sellable != null)
+		{
+			Singleton<EconomyManager>.Ins.AddMoney(sellable.GetSellValue());
+			// purpose: quest system tracks sold items (Phase F)
+			GameEvents.RaiseOreSold(sellable.GetSellValue(), ResourceType.INVALID, PieceType.INVALID);
+			Object.Destroy(sellable.gameObject);
+		}
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-c(New)/Scripts/4-Utils/PhaseCLOG.cs ==== -->
+using System.Collections.Generic;
+using UnityEngine;
+using SPACE_UTIL;
+
+/// <summary>
+/// formats resource description snapshots for test logging
+/// </summary>
+public static class PhaseCLOG
+{
+	/// <summary> snapshot of all resource descriptions </summary>
+	public static string LIST_RESOURCE_DESC__TO__JSON(List<ResourceDescription> RESOURCE_DESC)
+	{
+		var snapshot = RESOURCE_DESC.map(rd => new
+		{
+			rd.ResourceType,
+			Color = $"#{ColorUtility.ToHtmlStringRGB(rd.DisplayColor)}",
+		});
+		return snapshot.ToNSJson(pretify: true);
+	}
+}
+
+<!-- ==== FILE: learn/phase-c(New)/Scripts/4-Utils/UtilsPhaseC.cs ==== -->
+using System;
+using System.Collections.Generic;
+using UnityEngine;
+
+/// <summary>
+/// weighted random selection + ore helpers — centralized, DRY
+/// </summary>
+public static class UtilsPhaseC
+{
+	/// <summary> generic weighted random — used by OreNode, AutoMiner, OrePiece sieving/cluster </summary>
+	public static T WeightedRandom<T>(List<T> items, Func<T, float> getWeight)
+	{
+		if (items == null || items.Count == 0) return default;
+		if (items.Count == 1) return items[0];
+		float total = 0f;
+		foreach (var item in items) total += getWeight(item);
+		float roll = UnityEngine.Random.value * total;
+		float cumulative = 0f;
+		foreach (var item in items)
+		{
+			cumulative += getWeight(item);
+			if (roll <= cumulative) return item;
+		}
+		return items[items.Count - 1];
+	}
+}
+
+<!-- ==== FILE: learn/phase-c(New)/Scripts/5-Tests/DEBUG_CheckC.cs ==== -->
+using System.Collections.Generic;
+using UnityEngine;
+using SPACE_UTIL;
+
+/// <summary>
+/// OreDataService plain C# test — zero scene dependency
+/// Prerequisites: OreDataService.cs, GlobalEnumsC.cs
+/// NOT required: Player, tools, nodes, pool — nothing
+/// How to test:
+///   Space → Build + log snapshot
+///   U → GetColoredResourceTypeString(Iron)
+///   I → GetDefaultSellValue test (needs OrePiece prefabs — limited without scene)
+///   O → Log full snapshot
+/// </summary>
+public class DEBUG_CheckC : MonoBehaviour
+{
+	#region Inspector Fields
+	[SerializeField] List<ResourceDescription> _testDescriptions;
+	#endregion
+
+	#region Unity Life Cycle
+	OreDataService ds = new OreDataService();
+	private void Update()
+	{
+		if (INPUT.K.InstantDown(KeyCode.Space))
+		{
+			ds.Build(_testDescriptions);
+			Debug.Log(ds.GetSnapshot("after Build()"));
+		}
+		else if (INPUT.K.InstantDown(KeyCode.U))
+		{
+			Debug.Log(ds.GetColoredResourceTypeString(ResourceType.Iron).colorTag("cyan"));
+			Debug.Log(ds.GetColoredFormattedResourcePieceString(ResourceType.Iron, PieceType.Ore));
+			Debug.Log(ds.GetColoredFormattedResourcePieceString(ResourceType.Gold, PieceType.DrillBit));
+			Debug.Log(ds.GetColoredFormattedResourcePieceString(ResourceType.Slag, PieceType.Pipe));
+		}
+		else if (INPUT.K.InstantDown(KeyCode.O))
+		{
+			LOG.AddLog(ds.GetSnapshot("full snapshot"), "json");
+		}
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-c(New)/Scripts/5-Tests/Manual/AutoMinerVisualTest.md ==== -->
+# Auto Miner Visual — Manual Test
+
+> Verifies: rotator spins, ore spawns on timer, probability-based, throttled by limit.
+
+---
+
+## Prerequisites
+
+- All singletons from MiningFlowTest setup (ParticleManager, OrePiecePoolManager, OreLimitManager, OreManager, EconomyManager)
+- OrePiece prefabs registered in pool
+
+---
+
+## Setup Guide
+
+### Step 1 — SO_AutoMinerResourceDefinition Asset
+
+1. In Project panel: Create → SO → SO_AutoMinerResourceDefinition
+2. Name it `AutoMiner_IronDef`
+3. Set:
+   - `SpawnProbability` = 80
+   - `SpawnRate` = 2
+   - `_possibleOrePrefabs` list:
+     - [0] OrePrefab = `OrePiece_Iron`, Weight = 80
+     - [1] OrePrefab = `OrePiece_Gold`, Weight = 20
+
+### Step 2 — AutoMiner Prefab
+
+```
+AutoMiner (root GO)
+│
+│  Components on root:
+│   - AutoMiner component:
+│       _rotator → Rotator child
+│       _oreSpawnPoint → SpawnPoint child
+│       _rotateY = true (or _rotateZ = true)
+│       _enabled = true
+│       _oresPerRotation = 12
+│       _resourceDefinition → AutoMiner_IronDef (from Step 1)
+│       _spawnProbability = (auto-set from definition in Start)
+│       _spawnRate = (auto-set from definition in Start)
+│       _fallbackOrePrefab → OrePiece_Iron (fallback if def is null)
+│
+├── Rotator (visual mesh — this spins)
+│   └── drill_mesh (MeshFilter + MeshRenderer)
+│
+└── SpawnPoint (empty GO positioned below the drill tip)
+    - This is where ore appears
+```
+
+Place in scene.
+
+### Step 3 — OreTest Script
+
+Use existing OreTest GO from MiningFlowTest. Assign `_cam` for U key spawns.
+
+### Final Hierarchy (add to MiningFlowTest scene)
+
+```
+Scene Root
+├── ... (singletons from MiningFlowTest)
+├── AutoMiner (placed on floor near OreNodes)
+├── OreTest
+└── Floor
+```
+
+---
+
+## 1. Initial State
+
+**DO:** Press Play, look at AutoMiner
+**EXPECT:**
+- Rotator child is **visible** (drill mesh)
+- No ore pieces near miner yet
+- No console errors
+
+---
+
+## 2. Rotator Spinning
+
+**DO:** Watch the Rotator for a few seconds
+**EXPECT:**
+- Rotator **spins continuously** around the configured axis (_rotateY → spins around Y)
+- Speed: `360° / (SpawnRate × OresPerRotation)` per second = `360° / (2 × 12)` = **15°/s**
+- Smooth rotation, no jitter
+
+---
+
+## 3. First Ore Spawn
+
+**DO:** Wait ~2 seconds (SpawnRate = 2)
+**EXPECT:**
+- **Ore piece appears** at SpawnPoint position
+- Falls via gravity onto floor
+- Piece is from the weighted drop list (likely Iron at 80% chance)
+
+---
+
+## 4. Continuous Spawning
+
+**DO:** Watch for 20 seconds (~10 spawn cycles)
+**EXPECT:**
+- New ore piece every ~2 seconds
+- **Not every cycle spawns** — ~80% spawn, ~20% skip (probability check)
+- Over 10 cycles: expect roughly 7-9 pieces (random)
+
+---
+
+## 5. Weighted Drop Verification
+
+**DO:** Inspect spawned pieces over 20+ spawns → count Iron vs Gold
+**EXPECT:**
+- **~80% Iron**, **~20% Gold** (matches weights 80:20)
+- Some variance is normal — weighted random, not exact ratio
+
+---
+
+## 6. Limit Throttling
+
+**DO:** Spawn many extra ore pieces via `U` key (50+ pieces) until OreLimitManager fires
+**EXPECT:**
+- Console: `[OreTest] LimitState: SlightlyLimited`
+- AutoMiner spawn interval **increases** — visually, ore appears *less frequently*
+- Rotator still spins at same speed (rotation is independent of spawn timer)
+
+**DO:** Keep spawning until Blocked state
+**EXPECT:**
+- Console: `[OreTest] LimitState: Blocked`
+- AutoMiner **stops spawning entirely** — no new ore appears
+- Rotator still spins (visual only)
+
+---
+
+## 7. Disabled State
+
+**DO:** Set `_enabled = false` on AutoMiner in Inspector during Play mode
+**EXPECT:**
+- Rotator **stops spinning**
+- No ore spawns
+- No errors
+
+**DO:** Set `_enabled = true` again
+**EXPECT:**
+- Rotator **resumes spinning**
+- Ore spawning resumes on next timer tick
+
+---
+
+## 8. Edge Case — No Resource Definition
+
+**DO:** Create an AutoMiner with `_resourceDefinition` = None, `_fallbackOrePrefab` = OrePiece_Iron
+**EXPECT:**
+- Miner uses `_fallbackOrePrefab` instead of weighted selection
+- All spawned pieces are Iron (no weighted variety)
+
+---
+
+## Summary Checklist
+
+- [ ] Rotator spins at correct speed on correct axis
+- [ ] Ore spawns at SpawnPoint every ~SpawnRate seconds
+- [ ] ~80% spawn probability — not every cycle produces ore
+- [ ] Weighted drops: ~80% Iron, ~20% Gold (matches SO definition)
+- [ ] OreLimitManager SlightlyLimited → slower spawn rate
+- [ ] OreLimitManager Blocked → zero spawning
+- [ ] Disabled → no spin, no spawn; re-enabled → resumes
+- [ ] No definition → uses fallback prefab
+- [ ] No console errors throughout
+
+<!-- ==== FILE: learn/phase-c(New)/Scripts/5-Tests/Manual/MiningFlowTest.md ==== -->
+# Mining Flow — Manual Test
+
+> Verifies: hit node → particles → health decrease → shatter → ore pieces fly + bounce + settle.
+
+---
+
+## Prerequisites
+
+- `OreTest.cs` script on a GO in scene (provides Space key to damage node)
+- `EconomyManager` singleton (from phase-All)
+
+---
+
+## Setup Guide — Step by Step
+
+### Step 1 — Singletons
+
+Create these Empty GOs in scene root. Each needs its singleton component:
+
+| GO Name | Component | Notes |
+|---------|-----------|-------|
+| `ParticleManager` | `ParticleManager` | Assign: `GenericHitImpactParticle`, `OreNodeHitParticlePrefab`, `BreakOreNodeParticlePrefab` (create 3 particle system prefabs or use placeholders) |
+| `OrePiecePoolManager` | `OrePiecePoolManager` | Assign: `_allOrePiecePrefabs` → list of all OrePiece prefabs (see Step 3) |
+| `OreLimitManager` | `OreLimitManager` | `_movingObjectLimit` = 500 (default) |
+| `OreManager` | `OreManager` | Assign: `_allResourceDescriptions` → list of ResourceDescription entries (see Step 2) |
+| `EconomyManager` | `EconomyManager` | `_defaultMoney` = 400 (from phase-All) |
+
+### Step 2 — Resource Descriptions
+
+On `OreManager` → `_allResourceDescriptions` list, add entries:
+
+| Index | ResourceType | DisplayColor |
+|-------|-------------|-------------|
+| 0 | Iron | Grey (0.6, 0.6, 0.6) |
+| 1 | Gold | Yellow (1, 0.84, 0) |
+| 2 | Coal | Dark Grey (0.2, 0.2, 0.2) |
+| 3 | Copper | Orange (0.85, 0.5, 0.2) |
+
+### Step 3 — OrePiece Prefab
+
+Create a prefab:
+
+```
+OrePiece_Iron (root GO)
+│
+│  Components on root:
+│   - Rigidbody (mass 0.5, no constraints, gravity ON)
+│   - OrePiece component:
+│       _resourceType = Iron
+│       _pieceType = Ore
+│       _isPolished = false
+│       BaseSellValue = 1.0
+│       _useRandomMesh = true
+│       _useRandomScale = true
+│       _scaleVariance = (0.25, 0.25, 0.25)
+│       _possibleMeshes = [assign 2-3 mesh variants]
+│       _meshFilter = this GO's MeshFilter
+│       _meshCollider = this GO's MeshCollider (optional)
+│   - MeshFilter
+│   - MeshRenderer (assign a material matching Iron color)
+│   - MeshCollider (convex = true) OR BoxCollider
+│   - Tag: "Grabbable"
+│   - Layer: "Interact"
+```
+
+Save as prefab → add to `OrePiecePoolManager._allOrePiecePrefabs` list.
+
+Repeat for Gold, Coal, Copper with different materials/colors.
+
+### Step 4 — WeightedNodeDrop Setup
+
+For each OrePiece prefab, you'll reference it in OreNode's `_possibleDrops` list (Step 5).
+
+### Step 5 — OreNode Prefab
+
+Create a prefab:
+
+```
+OreNode_Iron (root GO)
+│
+│  Components on root:
+│   - OreNode component:
+│       _resourceType = Iron
+│       _health = 100
+│       _minDrops = 2
+│       _maxDrops = 4
+│       _possibleDrops = [
+│           { OrePrefab = OrePiece_Iron, Weight = 100 }
+│       ]
+│       _models = [Model_0, Model_1, Model_2]
+│   - BoxCollider or MeshCollider (for pickaxe raycast to hit)
+│   - Layer: "Interact"
+│
+├── Model_0 (MeshFilter + MeshRenderer, rock mesh variant 1)
+├── Model_1 (different rock mesh variant)
+└── Model_2 (different rock mesh variant)
+```
+
+Place 2-3 OreNode prefabs in the scene (on floor or walls).
+
+### Step 6 — OreTest Script
+
+1. Create Empty GO → name `OreTest`
+2. Add `OreTest` component
+3. Wire:
+
+| Field | Drag From |
+|-------|-----------|
+| `_testNode` | One of the OreNode instances in scene |
+| `_testOrePrefab` | OrePiece_Iron prefab (from Project) |
+| `_cam` | Camera (for U key spawn position) |
+
+### Step 7 — Floor
+
+- Plane at y=0, layer "Default" — ore pieces land here
+
+### Final Scene Hierarchy
+
+```
+Scene Root
+├── EconomyManager
+├── ParticleManager
+├── OrePiecePoolManager
+├── OreLimitManager
+├── OreManager
+├── OreTest
+├── Floor (Plane)
+├── OreNode_Iron_01 (placed on floor)
+├── OreNode_Iron_02
+└── OreNode_Gold_01
+```
+
+---
+
+## 1. Initial State
+
+**DO:** Press Play
+**EXPECT:**
+- Each OreNode shows **one random model variant** (the others are hidden — `_models[i].SetActive(i == chosen)`)
+- No ore pieces on ground
+- No particles visible
+- Console: no errors
+
+---
+
+## 2. First Hit (Health Reduced)
+
+**DO:** Press `Space` (OreTest calls `_testNode.TakeDamage(50, position)`)
+**EXPECT:**
+- OreNode **still exists** — health was 100, now 50
+- **No ore pieces** yet — node didn't break
+- Console: no OnOreMined event (node not destroyed)
+
+---
+
+## 3. Breaking Hit (Health Reaches Zero)
+
+**DO:** Press `Space` again (another 50 damage → health = 0)
+**EXPECT:**
+- OreNode **disappears** from scene (Destroyed)
+- **2-4 ore pieces fly out** from a point between node center and hit position
+  - Each piece has **random velocity**: lateral ±1.5, upward 2-4
+  - Each piece has **random angular velocity** (tumbles)
+- Pieces **bounce and roll** on the floor (Rigidbody physics)
+- **Break particle burst** appears at hit point (BreakOreNodeParticlePrefab)
+- Console: `[OreTest] Mined: Iron at (x, y, z)`
+
+---
+
+## 4. Inspect Ore Piece
+
+**DO:** Pause the game → select an ore piece in Scene view → check Inspector
+**EXPECT:**
+- Tag: `"Grabbable"`
+- Layer: `"Interact"`
+- `OrePiece` component:
+  - `ResourceType` = Iron (matches the broken node)
+  - `PieceType` = Ore
+  - `BaseSellValue` = non-zero (e.g. 1.0)
+  - `RandomPriceMultiplier` = between 0.9 and 1.1
+- MeshFilter: one of the `_possibleMeshes` variants (random)
+- Transform.localScale: slightly varied from original (random scale)
+
+---
+
+## 5. Spawn Ore Directly
+
+**DO:** Unpause → press `U` (OreTest spawns ore at camera forward via pool)
+**EXPECT:**
+- New ore piece **appears** 2m in front of camera
+- Falls via gravity, bounces on floor
+- Console: no event (direct spawn doesn't fire OnOreMined)
+
+---
+
+## 6. Check Ore Count
+
+**DO:** Press `I`
+**EXPECT:**
+- Console: `OrePiece count: X` where X = number of active ore pieces in scene
+
+---
+
+## 7. Multiple Node Types
+
+**DO:** Assign `_testNode` to a Gold OreNode (or add a second OreTest with different node). Break it.
+**EXPECT:**
+- Gold ore pieces fly out (different material/color from Iron)
+- Console: `[OreTest] Mined: Gold at (x, y, z)`
+- No Iron pieces from a Gold node — drops match node's `_possibleDrops`
+
+---
+
+## 8. Edge Case — Empty Drops List
+
+**DO:** Create an OreNode with `_possibleDrops` = empty list. Break it.
+**EXPECT:**
+- Node breaks (disappears + particles)
+- **Zero ore pieces** spawn — `GetOrePrefab()` returns null, loop skips
+- No crash, no console errors
+
+---
+
+## Summary Checklist
+
+- [ ] OreNode shows one random model variant on Start
+- [ ] First hit (50 damage) reduces health but doesn't break
+- [ ] Second hit (0 health) → node destroyed
+- [ ] 2-4 ore pieces fly out with random velocity + angular velocity
+- [ ] Pieces have random mesh variant from `_possibleMeshes`
+- [ ] Pieces have slight random scale variation
+- [ ] Break particle burst at hit point
+- [ ] Console: `[OreTest] Mined: Iron at (x,y,z)`
+- [ ] U key spawns ore via pool (no event)
+- [ ] I key logs current ore count
+- [ ] Different node types produce matching ore types
+- [ ] Empty drops list → no crash, zero pieces
+- [ ] All ore pieces tagged "Grabbable", layer "Interact"
+
+<!-- ==== FILE: learn/phase-c(New)/Scripts/5-Tests/Manual/SellerMachineTest.md ==== -->
+# Seller Machine — Manual Test
+
+> Verifies: ore enters trigger → waits → money increases → ore returns to pool.
+
+---
+
+## Prerequisites
+
+- All singletons from MiningFlowTest setup
+- OrePiece prefabs registered in pool
+- OreTest script on a GO (for U key ore spawning)
+
+---
+
+## Setup Guide
+
+### Step 1 — SellerMachine GO
+
+1. Create Empty GO → name `SellerMachine`
+2. Add `BoxCollider`:
+   - **IsTrigger = true** ← critical
+   - Size: (2, 1, 2) — large enough for ore to roll/fall into
+3. Add `SellerMachine` component (no SerializeFields to wire)
+4. Position on the floor — visible and accessible
+
+Optional visual: add a child GO with a MeshRenderer (e.g. a funnel/hopper shape) so you can see where the trigger is.
+
+### Step 2 — Verify OreTest Wiring
+
+On `OreTest` component:
+
+| Field | Drag From |
+|-------|-----------|
+| `_testOrePrefab` | OrePiece_Iron prefab |
+| `_cam` | Camera (for U key spawn direction) |
+
+### Step 3 — Money Logging
+
+OreTest.Start already subscribes:
+```
+GameEvents.OnOreSold → logs "[OreTest] Sold: Iron Ore for $X.XX"
+GameEvents.OnMoneyChanged → logs "[OreTest] Money: $XXX.XX"
+```
+
+### Final Hierarchy (add to MiningFlowTest scene)
+
+```
+Scene Root
+├── ... (singletons from MiningFlowTest)
+├── SellerMachine (with trigger collider on floor)
+├── OreTest
+└── Floor
+```
+
+---
+
+## 1. Initial State
+
+**DO:** Press Play, open Console
+**EXPECT:**
+- SellerMachine trigger visible in **Scene view** as green wireframe box
+- Starting money: `$400.00` (EconomyManager default)
+- No ore pieces in scene
+- No console errors
+
+---
+
+## 2. Spawn Ore Near Seller
+
+**DO:** Press `U` to spawn an ore piece — aim so it lands **inside or near** the seller trigger
+**EXPECT:**
+- Ore piece **appears** 2m in front of camera
+- Falls via gravity toward the seller
+- If it lands inside the trigger → proceed to Step 3
+- If it misses → spawn another closer to the trigger
+
+---
+
+## 3. Ore Enters Trigger
+
+**DO:** Observe when ore piece enters the SellerMachine trigger collider
+**EXPECT:**
+- `OnTriggerEnter` fires on SellerMachine
+- Ore is **tagged "MarkedForDestruction"** immediately
+  - Check in Inspector during Play: tag changed from "Grabbable" to "MarkedForDestruction"
+- Other triggers will now **ignore** this ore (they check `CompareTag("MarkedForDestruction")`)
+- Ore is **still visible** — it hasn't sold yet (2s delay starts)
+
+---
+
+## 4. After 2-Second Delay
+
+**DO:** Wait 2 seconds after ore entered trigger
+**EXPECT:**
+- Ore piece **disappears** (returned to pool → `SetActive(false)`)
+- Console: `[OreTest] Sold: Iron Ore for $X.XX` (price = BaseSellValue × RandomPriceMultiplier)
+- Console: `[OreTest] Money: $40X.XX` (starting 400 + sell value)
+- Money on HUD updates (if MoneyHUD exists)
+
+---
+
+## 5. Multiple Ore Simultaneously
+
+**DO:** Spawn 3-4 ore pieces rapidly (press `U` multiple times) → let all enter trigger
+**EXPECT:**
+- Each piece is tagged "MarkedForDestruction" independently on trigger enter
+- Each sells after its own 2s delay (they don't batch)
+- Console shows **multiple** Sold messages — one per piece
+- Money increases **incrementally** per piece
+- `OrePiece.AllOrePieces` count decreases as each is returned to pool
+
+**DO:** Press `I` to check ore count after all sell
+**EXPECT:**
+- Count decreased by the number sold
+
+---
+
+## 6. Pool Recycling Verification
+
+**DO:** After selling 3+ ore, press `U` again to spawn new ore
+**EXPECT:**
+- New ore **reuses a pooled piece** — no new Instantiate (you can verify in Hierarchy: piece name ends with `[Pooled]`)
+- Pooled piece has its **original mesh + scale** from first spawn (pool reset doesn't re-randomize mesh/scale — `Start()` only runs once per Instantiate, not on pool recycle)
+
+---
+
+## 7. MarkedForDestruction Prevents Double-Sell
+
+**DO:** Spawn ore → let it enter seller trigger → immediately push it into a second seller trigger (if you have two)
+**EXPECT:**
+- Only **one** sell occurs — second trigger checks `CompareTag("MarkedForDestruction")` and returns early
+- No double money, no console double-log
+
+---
+
+## 8. Non-OrePiece Sellable (BaseSellableItem)
+
+**DO:** Create a simple GO with `BaseSellableItem` component (BaseSellValue = 5), Rigidbody, Collider, push it into seller
+**EXPECT:**
+- Item is **Destroyed** (not pooled — only OrePiece uses pool)
+- Money increases by 5
+- Console: `[OreTest] Sold: INVALID INVALID for $5.00` (INVALID because BaseSellableItem doesn't have ResourceType/PieceType)
+
+---
+
+## 9. Edge Case — Ore Already MarkedForDestruction
+
+**DO:** Manually tag an ore piece as "MarkedForDestruction" in Inspector → push into seller
+**EXPECT:**
+- `OnTriggerEnter` checks tag first → **returns immediately**
+- No sell, no money change, no console log
+
+---
+
+## Summary Checklist
+
+- [ ] Ore enters trigger → tagged "MarkedForDestruction" immediately
+- [ ] 2s delay before sell completes
+- [ ] Money increases by sell value (BaseSellValue × RandomPriceMultiplier)
+- [ ] Console: `OnOreSold` fires with correct ResourceType + PieceType
+- [ ] Console: `OnMoneyChanged` fires with new total
+- [ ] Ore returns to pool (disappears via SetActive false, not Destroyed)
+- [ ] Multiple ore sell independently (own 2s timers)
+- [ ] Pool recycles: next spawn reuses dequeued piece (name has [Pooled])
+- [ ] MarkedForDestruction prevents double-sell
+- [ ] Non-OrePiece sellable: Destroyed, not pooled
+- [ ] Pre-tagged MarkedForDestruction ore: ignored by seller
+- [ ] Zero console errors throughout
+
+<!-- ==== FILE: learn/phase-c(New)/Scripts/5-Tests/OreTest.cs ==== -->
+using System.Collections.Generic;
+using UnityEngine;
+using SPACE_UTIL;
+
+/// <summary>
+/// Spawn/mine/sell flow test — needs scene with OreNodes, Pool, Seller
+/// Prerequisites: All Phase C scripts + EconomyManager
+/// NOT required: Player (use test controls), inventory, shop
+/// How to test:
+///   Space → damage nearest OreNode by 50
+///   U → spawn OrePiece at camera forward
+///   I → log OrePiece.AllOrePieces count
+///   O → log OreDataService snapshot
+///   M/N → menu toggle (sim)
+/// </summary>
+public class OreTest : MonoBehaviour
+{
+	#region Inspector Fields
+	[SerializeField] OreNode _testNode;
+	[SerializeField] OrePiece _testOrePrefab;
+	[SerializeField] Camera _cam;
+	[TextArea(5, 10)]
+	string README = @"Space → damage testNode by 50
+U → spawn ore at camera forward
+I → log ore count
+O → log OreDataService snapshot
+M/N → menu toggle";
+	#endregion
+
+	#region Unity Life Cycle
+	private void Start()
+	{
+		// purpose: log when ore is mined
+		GameEvents.OnOreMined += (type, pos) => Debug.Log($"[OreTest] Mined: {type} at {pos}".colorTag("lime"));
+		// purpose: log when ore is sold
+		GameEvents.OnOreSold += (price, type, piece) => Debug.Log($"[OreTest] Sold: {type} {piece} for ${price}".colorTag("cyan"));
+		// purpose: log ore limit state changes
+		GameEvents.OnOreLimitChanged += (state) => Debug.Log($"[OreTest] LimitState: {state}".colorTag("orange"));
+		// purpose: log money changes
+		GameEvents.OnMoneyChanged += (money) => Debug.Log($"[OreTest] Money: {money.formatMoney()}".colorTag("lime"));
+	}
+	private void Update()
+	{
+		if (INPUT.K.InstantDown(KeyCode.Space) && _testNode != null)
+		{
+			_testNode.TakeDamage(50f, _testNode.transform.position);
+		}
+		else if (INPUT.K.InstantDown(KeyCode.U) && _testOrePrefab != null && _cam != null)
+		{
+			Vector3 pos = _cam.transform.position + _cam.transform.forward * 2f;
+			Singleton<OrePiecePoolManager>.Ins.SpawnPooledOre(_testOrePrefab, pos, Quaternion.identity);
+		}
+		else if (INPUT.K.InstantDown(KeyCode.I))
+		{
+			Debug.Log($"OrePiece count: {OrePiece.AllOrePieces.Count}".colorTag("cyan"));
+		}
+		else if (INPUT.K.InstantDown(KeyCode.O))
+		{
+			LOG.AddLog(Singleton<OreManager>.Ins.DataService.GetSnapshot("ore test"), "json");
+		}
+		else if (INPUT.K.InstantDown(KeyCode.M)) GameEvents.RaiseMenuStateChanged(true);
+		else if (INPUT.K.InstantDown(KeyCode.N)) GameEvents.RaiseMenuStateChanged(false);
 	}
 	#endregion
 }
@@ -12139,4 +14653,32 @@ The PlayerController is a textbook God Object but splitting it would be a refact
 - The key question is whether the architecture is over-engineered for a solo project or correctly scoped. My assessment: it's correctly scoped because the patterns are *uniform* — every phase follows the same SubManager→Orchestrator→DataService→Field_ triad. Uniformity reduces cognitive load despite the upfront cost.
 - Risks I considered but didn't inflate: GameEvents as a static bus can become a dumping ground (mitigated by partial classes per phase). The `isFirstEnable` pattern is a Unity-specific workaround that adds a state variable per SubManager (acceptable trade — it solves a real problem). `ALL_CAPS` collection names break C# convention but serve visual grep-ability (user's conscious choice, internally consistent).
 - I avoided being sycophantic. The user asked for honest thoughts, not validation.
+
+## New Agent: "Build phase-c(New) — Mining & Ore System"
+
+**What I thought:**
+- **OreDataService scoped to formatting only:** Original OreManager has sell value lookups that query `SavingLoadingManager.AllOrePiecePrefabs` — that's Phase G territory. OreDataService manages resource descriptions + color formatting + piece type label mapping. Sell values come from OrePiece.BaseSellValue directly. Phase G adds the prefab lookup system.
+- **WeightedRandom centralized:** Same algorithm appears in OreNode.GetOrePrefab, AutoMinerResourceDefinition.GetOrePrefab, OrePiece.CompleteSieving, OrePiece.SelectClusterBreakerPrefab — 4 duplicates. Extracted to `UtilsPhaseC.WeightedRandom<T>()` — one generic method, DRY.
+- **OrePiece scoped to Phase C core:** Original is 443 lines with Phase E conversion methods (ConvertToPlate, AddPolish, etc.). Included only Phase C essentials: mesh randomization, sell, crush, pool lifecycle. Phase E adds conversion methods.
+- **OrePiece.SellAfterDelay decoupled:** Original calls `QuestManager.OnResourceDeposited()` directly. Replaced with `GameEvents.RaiseOreSold()` — QuestManager subscribes in Phase F.
+- **OreLimitManager decoupled:** Original reads `SettingsManager.Instance.MovingPhysicsObjectLimit` (Phase H). Used `[SerializeField] int _movingObjectLimit`. Original calls static `PhysicsLimitUIWarning.SwitchState()`. Replaced with `GameEvents.RaiseOreLimitChanged()` — PhysicsLimitUIWarning subscribes.
+- **AutoMiner simplified:** Original implements IInteractable + ICustomSaveDataProvider + references BuildingObject/BuildingManager. Phase C AutoMiner is just rotate + timer + spawn. Phase D adds building integration + interaction. Noted in `#region extra`.
+- **DamageableOrePiece included from Gap Audit:** PhaseMap didn't list it but Gap Audit flagged it as Critical. OrePiece clusters that break on collision damage — extends OrePiece + IDamageable.
+- **OrePiecePoolManager uses OrePieceKey struct:** Same composite key pattern (ResourceType + PieceType + IsPolished) as the original. Dictionary of Queues for O(1) pool lookup.
+- **No WOrePiece:** PhaseMap listed it but OrePiece IS the runtime wrapper — no separate SO defining "what an ore piece IS." The prefab is both definition and instance.
+- **Self-registration pattern on OrePiece:** Static `AllOrePieces` list, OnEnable adds, OnDisable removes. Same pattern as PlayerSpawnPoint in Phase B.
+
+---
+
+## Prompt: "Analyse in depth GOAL.md, NewAgent.md, PhaseMap.md, StructureMap.md and generated phases — update Estimate.md entirely"
+
+**What I thought:**
+- **Counted actual files, not plan estimates:** handTyped(latest) = 30 .cs files (26 phase-a + 4 phase-a-1). phase-b(New) = 32 .cs scripts (more than StructureMap's 24 base — gap audit items already included). phase-All = 4 shared scripts. These real counts replace the vague "~35" from the original estimate.
+- **Gap Audit is +41 scripts total:** Carefully tallied Critical+Important items from PhaseMap Gap Audit section per phase (B+8, C+2, D+7, E+5, F+4, G+10, H+3, I+2). This bumps the StructureMap base of 169 to ~210+, plus phase-All and root tests = 216. Original estimate said ~213 — surprisingly close, but the distribution per phase was wrong.
+- **Calibration from actual data:** Phase A = 14h for 26 scripts including ~4h architecture design. Pure typing rate ~23 min/script. Used this to derive simple/medium/complex tiers (15/30/60 min) and cross-checked against Phase B breakdown.
+- **Agent generation saves ~30% design time but NOT typing time:** The user still reads every line and types it. GUIDE.md typing order + FLOW.md connections reduce cognitive load, but hands-on-keyboard time is fixed. Factored this into Phase B estimate (24h vs original 28h).
+- **Manual testing is separate budget:** 24 .md test guides × ~1h each = ~24h on top of scripting hours. Original estimate didn't account for this. Grand total: ~178h vs original ~153h.
+- **Status tracking is critical:** Added a Current Status table showing exactly what exists (typed, generated, planned). This is the first thing the user sees — no ambiguity about where things stand.
+- **Avoided inflating hours for scene work:** Scene setup time is real but unpredictable (depends on Unity Editor speed, prefab complexity). Captured it as a risk factor rather than padding every phase estimate.
+- **Phase E is fastest scripts-per-hour despite highest count:** 32 scripts but all follow the same trigger I/O machine pattern. Estimated 16h = 0.5h/script — lower than average because repetition.
 
