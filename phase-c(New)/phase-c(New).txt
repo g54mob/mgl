@@ -1,0 +1,2411 @@
+<!-- ==== FILE: phase-c(new)/FLOW.md ==== -->
+# Phase C — Data Flow
+
+> How data moves between scripts. Every connection is either a **GameEvent** or a `[SerializeField]`. Zero direct cross-system calls.
+> Format: **conversation-style plain English** with `code references` and **bold** for key moments.
+
+---
+
+## System Map
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      MINING SYSTEM                           │
+│                                                             │
+│  OreNode (IDamageable)                                       │
+│    ├── TakeDamage → BreakNode → spawn OrePieces via pool    │
+│    └── Fires: RaiseOreMined                                 │
+│                                                             │
+│  OrePiece (BaseSellableItem)                                 │
+│    ├── Self-registers in static AllOrePieces list            │
+│    ├── SellAfterDelay → fires RaiseOreSold                  │
+│    └── TryConvertToCrushed (ToolPickaxe integration)        │
+│                                                             │
+│  DamageableOrePiece (OrePiece + IDamageable)                 │
+│    └── Takes collision damage → CompleteClusterBreaking      │
+└─────────────────────────────────────────────────────────────┘
+         │                              ▲
+         │ SpawnPooledOre               │ ReturnToPool
+         ▼                              │
+┌─────────────────────────────────────────────────────────────┐
+│                    POOL + LIMIT SYSTEM                        │
+│                                                             │
+│  OrePiecePoolManager (Singleton)                             │
+│    ├── Dictionary<OrePieceKey, Queue<OrePiece>>             │
+│    ├── SpawnPooledOre → dequeue or Instantiate              │
+│    └── ReturnToPool → reset + enqueue                       │
+│                                                             │
+│  OreLimitManager (Singleton)                                 │
+│    ├── Counts non-sleeping OrePieces every 15s              │
+│    ├── Fires: RaiseOreLimitChanged                          │
+│    └── GetAutoMinerSpawnTimeMultiplier (read by AutoMiner)  │
+│                                                             │
+│  PhysicsLimitUIWarning                                       │
+│    └── Subscribes: OnOreLimitChanged → show/hide warning    │
+└─────────────────────────────────────────────────────────────┘
+         │
+         │ Reads: ShouldBlockOreSpawning, GetAutoMinerSpawnTimeMultiplier
+         ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    AUTO MINING SYSTEM                         │
+│                                                             │
+│  AutoMiner                                                   │
+│    ├── Rotates continuously, timer-based ore spawning       │
+│    ├── Reads: OreLimitManager for throttle                  │
+│    └── Uses: SO_AutoMinerResourceDefinition for weighted drops│
+│                                                             │
+│  SO_AutoMinerResourceDefinition                              │
+│    └── SpawnProbability, SpawnRate, weighted ore prefab list │
+└─────────────────────────────────────────────────────────────┘
+         │
+         │ OrePiece enters trigger
+         ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    SELLING SYSTEM                             │
+│                                                             │
+│  SellerMachine                                               │
+│    ├── OnTriggerEnter → OrePiece.SellAfterDelay()           │
+│    └── BaseSellableItem → direct EconomyManager.AddMoney    │
+│                                                             │
+│  EconomyManager (phase-All)                                  │
+│    └── AddMoney → RaiseMoneyChanged                         │
+└─────────────────────────────────────────────────────────────┘
+         │
+         │ RaiseOreSold
+         ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    DATA SYSTEM                                │
+│                                                             │
+│  OreManager (Singleton)                                      │
+│    ├── Owns OreDataService                                  │
+│    └── Round-robin cleanup of invalid ore in Update         │
+│                                                             │
+│  OreDataService (pure C#)                                    │
+│    ├── Build(List<ResourceDescription>)                     │
+│    └── GetResourceColor, GetColoredFormattedString, etc.    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Flow 1 — Mining an Ore Node (Pickaxe Hit)
+
+The player **equips the Pickaxe** and **holds left-click** near an `OreNode`. `ToolPickaxe.PrimaryFireHeld()` triggers `SwingPickaxe()`, which starts a coroutine with a **0.2s delay** before raycasting.
+
+After the delay, `PerformAttack` raycasts from the camera. The ray **hits the OreNode's collider**. The pickaxe gets `IDamageable` from the hit collider and calls `TakeDamage(damage, hitPoint)`.
+
+`OreNode.TakeDamage()` subtracts damage from `_health`. If health is still above zero, *nothing else happens* (a sound stub plays in Phase H). If health **reaches zero**, `BreakNode(hitPosition)` fires.
+
+Inside `BreakNode`: it picks a random drop count between `_minDrops` and `_maxDrops` (e.g. 2-4). For each drop, it calls `UtilsPhaseC.WeightedRandom()` on `_possibleDrops` to pick an `OrePiece` prefab, then spawns it via `Singleton<OrePiecePoolManager>.Ins.SpawnPooledOre(prefab, pos, rotation)`. Each spawned piece gets **random velocity** (upward + lateral spread) and **random angular velocity** — they fly out and bounce.
+
+`ParticleManager.CreateParticle()` spawns a **break particle burst** at the hit point. Then `GameEvents.RaiseOreMined(resourceType, position)` fires — *Phase F's quest system will subscribe to this*.
+
+Finally, `Destroy(gameObject)` removes the node permanently.
+
+---
+
+## Flow 2 — Ore Piece Lifecycle (Spawn → Pool → Sell)
+
+When `OrePiecePoolManager.SpawnPooledOre()` is called, it looks up the `OrePieceKey` (ResourceType + PieceType + IsPolished) in its dictionary of queues. If a **recycled piece exists** in the queue, it dequeues it, repositions it, and `SetActive(true)`. If the queue is empty, it **Instantiates** a new piece from the registered prefab.
+
+On `SetActive(true)`, `OrePiece.OnEnable()` fires and **adds itself** to the static `AllOrePieces` list. `OrePiece.Start()` picks a **random mesh** from `_possibleMeshes`, applies it to `MeshFilter` and `MeshCollider`, applies **random scale variance**, and sets a `randomPriceMultiplier` between 0.9 and 1.1.
+
+The piece **lives in the world** as a physics object — it can be grabbed (Phase B SpringJoint), pulled by magnet (Phase B ToolMagnet), or pushed onto conveyors (Phase D).
+
+When the piece enters a `SellerMachine` trigger, `OnTriggerEnter` calls `orePiece.SellAfterDelay(2f)`. This **detaches from magnet** if held, calls `SetTag(TagType.MarkedForDestruction)` (so other triggers skip it via `HasTag` check), then starts a **2-second coroutine**. After the delay, `EconomyManager.AddMoney(sellValue)` is called and `GameEvents.RaiseOreSold(price, type, pieceType)` fires.
+
+`OrePiece.Delete()` calls `OrePiecePoolManager.ReturnToPool(this)`. The pool **deactivates** the piece, resets velocity/drag/rotation, clears baskets and magnet references, re-tags via `SetTag(TagType.Grabbable)`, and **enqueues** it back into the pool. `OnDisable()` removes it from `AllOrePieces`.
+
+---
+
+## Flow 3 — Ore Limit Throttling
+
+`OreLimitManager.Update()` runs a check **every 15 seconds**. It counts how many `OrePiece` in `AllOrePieces` have **non-sleeping Rigidbodies** (actively moving).
+
+If the count exceeds `_movingObjectLimit + 200` → state becomes `Blocked`. Between `+100` and `+200` → `HighlyLimited`. Between limit and `+100` → `SlightlyLimited`. Below limit → `Regular`.
+
+When the state **changes**, `GameEvents.RaiseOreLimitChanged(state)` fires. `PhysicsLimitUIWarning` is subscribed — it **shows/hides** the soft limit or hard limit warning text on the UI.
+
+`AutoMiner` reads `OreLimitManager.GetAutoMinerSpawnTimeMultiplier()` each spawn cycle — at `SlightlyLimited` the spawn interval is **25% longer**, at `Blocked` it's **doubled**. If `ShouldBlockOreSpawning()` returns true, `AutoMiner.TrySpawnOre()` **skips entirely**.
+
+---
+
+## Flow 4 — Auto Miner Spawning
+
+`AutoMiner.Update()` runs every frame when `_enabled` is true. It rotates the `_rotator` child at a speed based on `_spawnRate * _oresPerRotation`. A timer counts down — when it hits zero, `TrySpawnOre()` fires.
+
+Inside `TrySpawnOre`: it checks `OreLimitManager.ShouldBlockOreSpawning()` — if blocked, *returns immediately*. Then a random roll against `_spawnProbability` (default 80%) — if it fails, *no spawn*. If both pass, it calls `UtilsPhaseC.PickOrePrefab(_resourceDefinition.PossibleOrePrefabs, true)` which reads the SO's public field list and uses `WeightedRandom` to pick a prefab, then `OrePiecePoolManager.SpawnPooledOre(prefab, spawnPoint)`. The SO itself has **zero methods** — AutoMiner reads its fields, UtilsPhaseC does the selection logic.
+
+The timer resets to `_spawnRate * OreLimitManager.GetAutoMinerSpawnTimeMultiplier()` — **throttled** during high load.
+
+---
+
+## Flow 5 — OreManager Cleanup
+
+`OreManager.Update()` checks **one ore piece per frame** via round-robin index. If the piece is `null` (destroyed externally), it removes it from `AllOrePieces`. If the piece's position is below `y = -1000` (fell out of world), it calls `piece.Delete()` — returning it to the pool.
+
+This prevents leaked ore pieces from accumulating forever.
+
+---
+
+## Event Registry — Phase C
+
+| Event | Fired By | Subscribed By |
+|-------|----------|---------------|
+| `OnOreMined(ResourceType, Vector3)` | `OreNode.BreakNode()` | Phase F: QuestManager (mining quests), tests |
+| `OnOreSold(float, ResourceType, PieceType)` | `OrePiece.DelayThenSell()`, `SellerMachine` | Phase F: QuestManager (resource deposits), tests |
+| `OnOreLimitChanged(OreLimitState)` | `OreLimitManager.SetState()` | `PhysicsLimitUIWarning` (show/hide), tests |
+| `OnMoneyChanged(float)` | `EconomyManager.AddMoney()` (phase-All) | MoneyHUD (Phase A), InventoryOrchestrator (Phase B), tests |
+
+<!-- ==== FILE: phase-c(new)/GUIDE.md ==== -->
+# Phase C — Mining & Ore System (14%)
+
+## What It Looks Like When Running
+
+```
+You walk into a mine tunnel from the starting room.
+Glowing ore nodes embedded in the walls/floor — different
+colors for Iron (grey), Gold (yellow), Copper (orange), Coal (black).
+
+Equip pickaxe from hotbar → hold left-click:
+  - Swing animation plays
+  - 0.2s delay, then raycast hits the node
+  - Particle sparks fly from impact point
+  - Node health decreases
+  - After 3-4 hits, node shatters:
+    → 2-4 ore pieces fly out with random velocity
+    → Pieces bounce and roll on the ground (Rigidbody physics)
+    → Break particle burst plays
+    → Node disappears permanently
+
+Ore pieces on the ground:
+  - Grabbable with hand (right-click SpringJoint from Phase B)
+  - Pullable with magnet tool (Phase B)
+  - Each has ResourceType (Iron, Gold, etc.) + PieceType (Ore, Crushed, etc.)
+  - Random mesh variant + slight scale variation for visual variety
+  - Random price multiplier (0.9x–1.1x)
+
+AutoMiner placed at a node → rotates continuously, spawns ore
+on a timer. Probability-based (80% default). Rate adjustable.
+
+SellerMachine (trigger volume) → ore enters → waits 2s →
+money increases → ore returns to pool.
+
+With 500+ ore pieces active, OreLimitManager kicks in:
+  - UI warning appears
+  - Auto-miner spawn rate slows down
+  - At limit+ moving objects, spawning blocks entirely
+
+OrePiecePoolManager recycles all ore — zero Instantiate/Destroy
+after initial pool warmup. Smooth performance.
+```
+
+---
+
+## Folder Structure
+
+```
+phase-c(New)/
+├── 0-Core/
+│   └── GameEvents.cs                       (partial: OnOreMined, OnOreSold, OnOreLimitChanged)
+├── 1-Managers/
+│   ├── OreManager.cs                       → "I clean up invalid ore pieces (round-robin)"
+│   ├── OrePiecePoolManager.cs              → "I recycle ore objects to avoid GC spikes"
+│   ├── OreLimitManager.cs                  → "I throttle spawning when too many physics objects exist"
+│   └── ParticleManager.cs                  → "I spawn particle prefabs at world positions"
+├── 2-Data/
+│   ├── SO_AutoMinerResourceDefinition.cs   → "I configure auto-miner spawn rate + weighted ore drops"
+│   ├── Interface/
+│   │   └── IDamageable.cs                  → "I can take damage at a position"
+│   ├── DataService/
+│   │   └── OreDataService.cs               → "I manage resource descriptions + sell values + formatting"
+│   └── Enums/
+│       └── GlobalEnumsC.cs                 → "all Phase C enums: ResourceType, PieceType, OreLimitState"
+├── 3-MonoBehaviours/
+│   ├── OreNode.cs                          → "I'm a breakable rock that drops ore pieces when mined"
+│   ├── OrePiece.cs                         → "I'm a physical resource object with type + piece type"
+│   ├── DamageableOrePiece.cs               → "I'm an OrePiece that breaks on collision damage"
+│   ├── AutoMiner.cs                        → "I spawn ore on a timer at a node"
+│   ├── SellerMachine.cs                    → "I sell ore that enters my trigger for money"
+│   └── PhysicsLimitUIWarning.cs            → "I show/hide ore limit warning text"
+├── 4-Utils/
+│   ├── UtilsPhaseC.cs                      → "I hold WeightedRandom<T> + ore helpers"
+│   └── PhaseCLOG.cs                        → "I format resource snapshots"
+└── 5-Tests/
+    ├── DEBUG_CheckC.cs                      → "I test OreDataService (plain C#)"
+    ├── OreTest.cs                           → "I test spawn/mine/sell flow"
+    └── Manual/
+        ├── MiningFlowTest.md               (manual: hit node → particles → shatter → ore pieces fly)
+        ├── AutoMinerVisualTest.md          (manual: rotator spins, ore spawns on timer)
+        └── SellerMachineTest.md            (manual: ore enters trigger → waits → money increases)
+```
+
+---
+
+## Script Purpose — One Sentence Each
+
+| Script | Purpose |
+|--------|---------|
+| `GameEvents.cs` | I deliver Phase C messages (ore mined, ore sold, ore limit changed) |
+| `OreManager.cs` | I clean up invalid ore pieces via round-robin check |
+| `SO_AutoMinerResourceDefinition.cs` | I hold auto-miner spawn rate + weighted ore drops (pure data, zero methods) |
+| `IDamageable.cs` | I'm a contract for anything that takes damage at a position |
+| `OreDataService.cs` | I manage resource descriptions, sell values, and formatted strings |
+| `GlobalEnumsC.cs` | I hold all Phase C enums: ResourceType, PieceType, OreLimitState |
+| `OreNode.cs` | I'm a breakable rock that drops ore pieces when mined |
+| `OrePiece.cs` | I'm a physical resource object with type + piece type |
+| `DamageableOrePiece.cs` | I'm an OrePiece that breaks when hit hard enough (collision damage) |
+| `OrePiecePoolManager.cs` | I recycle ore objects to avoid GC spikes |
+| `OreLimitManager.cs` | I throttle spawning when too many physics objects exist |
+| `AutoMiner.cs` | I spawn ore on a timer at a node |
+| `SellerMachine.cs` | I sell ore that enters my trigger for money |
+| `ParticleManager.cs` | I spawn particle prefabs at world positions |
+| `PhysicsLimitUIWarning.cs` | I show/hide ore limit warning text |
+| `UtilsPhaseC.cs` | I hold WeightedRandom generic selector + ore helpers |
+| `PhaseCLOG.cs` | I format resource description snapshots for test logging |
+
+---
+
+## Hand-Typing Order (Compile Groups)
+
+### Group 1 — Pure Data (compiles alone)
+1. `GlobalEnumsC.cs`
+2. `IDamageable.cs`
+
+**STOP — compile. Zero errors expected.**
+
+### Group 2 — Entities + SO
+3. `SO_AutoMinerResourceDefinition.cs`
+
+**STOP — compile.**
+
+### Group 3 — Utils + DataService
+4. `UtilsPhaseC.cs`
+5. `PhaseCLOG.cs`
+6. `OreDataService.cs`
+
+**STOP — compile. Run DEBUG_CheckC to verify resource lookups.**
+
+### Group 4 — GameEvents
+7. `GameEvents.cs` (partial)
+
+**STOP — compile.**
+
+### Group 5 — Managers (Singletons)
+8. `ParticleManager.cs`
+9. `OrePiecePoolManager.cs`
+10. `OreLimitManager.cs`
+11. `OreManager.cs`
+
+**STOP — compile.**
+
+### Group 6 — MonoBehaviours
+12. `OrePiece.cs`
+13. `DamageableOrePiece.cs`
+14. `OreNode.cs`
+15. `PhysicsLimitUIWarning.cs`
+16. `AutoMiner.cs`
+17. `SellerMachine.cs`
+
+**STOP — compile. Run OreTest.**
+
+### Group 7 — Tests
+18. `DEBUG_CheckC.cs`
+19. `OreTest.cs`
+
+**STOP — compile. Run all tests + 3 manual tests.**
+
+---
+
+## Vertical Slice Tests (`.cs` — automated bootstrap)
+
+### 1. DEBUG_CheckC — OreDataService (Data-Level)
+
+**Internal prerequisites:** `OreDataService.cs`, `GlobalEnumsC.cs`
+**External prerequisites:** Empty scene, one GO with `DEBUG_CheckC`
+**NOT required:** Player, tools, nodes, pool — nothing
+**Controls:**
+- `Space` → Build + log resource descriptions
+- `U` → GetColoredResourceTypeString(Iron)
+- `I` → GetDefaultSellValue(Iron, Ore, false)
+- `O` → Log full snapshot
+
+**Checklist:**
+- [ ] Build stores resource descriptions
+- [ ] GetResourceDescription returns correct entry
+- [ ] GetResourceColor returns matching Color
+- [ ] GetColoredResourceTypeString wraps in color tag
+- [ ] GetColoredFormattedResourcePieceString maps piece type labels
+- [ ] Snapshot logs all resource data
+
+### 2. OreTest — Spawn/Mine/Sell Flow (UI-Level)
+
+**Internal prerequisites:** All Phase C scripts + `GameEvents.cs`
+**External prerequisites:**
+- Scene with floor, a few OreNode prefabs, ParticleManager singleton, OrePiecePoolManager singleton, OreLimitManager singleton, OreManager singleton
+- SellerMachine trigger volume
+- OreNode prefabs with: ResourceType, Health, _possibleDrops, _models
+- OrePiece prefabs registered in OrePiecePoolManager
+**NOT required:** Player (use test controls), inventory, shop
+**Controls:**
+- `Space` → damage nearest OreNode by 50
+- `U` → spawn an OrePiece at cursor
+- `I` → log all OrePiece count
+- `O` → log OreDataService snapshot
+- `M/N` → menu toggle (sim)
+
+**Checklist:**
+- [ ] Space damages node → health decreases
+- [ ] Node at 0 health → shatters → 2-4 ore pieces fly out
+- [ ] Ore pieces have random mesh + random scale
+- [ ] Particles spawn at break point
+- [ ] Ore pieces are grabbable (tag "Grabbable")
+- [ ] SellerMachine: ore enters trigger → waits → money increases
+- [ ] OrePiecePoolManager recycles: disabled ore returns to pool
+- [ ] OreLimitManager: at limit → RaiseOreLimitChanged fires
+- [ ] PhysicsLimitUIWarning: shows/hides based on limit state
+- [ ] Console logs every GameEvents fire
+
+---
+
+## Manual Tests (`5-Tests/Manual/*.md` — hands-on, no script)
+
+| # | File | What to verify |
+|---|------|---------------|
+| 1 | `MiningFlowTest.md` | Hit node → particles → health bar → shatter → ore pieces fly + bounce + settle |
+| 2 | `AutoMinerVisualTest.md` | Rotator spins, ore spawns on timer, probability-based, rate adjustable |
+| 3 | `SellerMachineTest.md` | Ore enters trigger → waits → money increases → ore returns to pool |
+
+---
+
+## Art & Scene Work (Non-Script)
+
+### Particle Prefabs
+
+| Asset | Where Used | Description |
+|-------|-----------|-------------|
+| `OreNodeHitParticle` | ToolPickaxe hit | Sparks at impact point |
+| `BreakOreNodeParticle` | OreNode.BreakNode | Burst of particles on shatter |
+| `GenericHitImpactParticle` | ToolPickaxe non-damageable hit | Small impact puff |
+
+### Audio Clips (Phase H stubs)
+
+| Clip | Triggered By | When |
+|------|-------------|------|
+| `Node_TakeDamage` | `OreNode.TakeDamage()` | Each pickaxe hit |
+| `Node_Break` | `OreNode.BreakNode()` | Node shatters |
+| `Ore_Crush` | `OrePiece.TryConvertToCrushed()` | Ore crushed by pickaxe |
+| `Ore_Sell` | `OrePiece.SellAfterDelay()` | Ore sold at machine |
+
+### OreNode Prefab
+
+```
+OreNode (root)
+├── Model_Variant_0 (mesh, one active at random)
+├── Model_Variant_1
+├── Model_Variant_2
+└── Collider (MeshCollider or BoxCollider)
+
+Components on root:
+  - OreNode: ResourceType, Health, MinDrops, MaxDrops, _possibleDrops, _models[]
+```
+
+### OrePiece Prefab
+
+```
+OrePiece (root)
+├── MeshFilter + MeshRenderer (random mesh assigned in Start)
+├── MeshCollider (sharedMesh updated to match)
+└── Rigidbody (mass ~0.5, no constraints)
+
+Components on root:
+  - OrePiece: ResourceType, PieceType, BaseSellValue, CrushedPrefab, _possibleMeshes[]
+  - Tag: "Grabbable", Layer: "Interact"
+```
+
+### Layers & Tags
+
+| Name | Type | Used By |
+|------|------|---------|
+| `Grabbable` | Tag | OrePiece (from Phase B) |
+| `MarkedForDestruction` | Tag | OrePiece during sell delay |
+| `Interact` | Layer | OrePiece, OreNode |
+
+---
+
+## Scene Setup
+
+### Full Phase C Scene (extends Phase B scene)
+
+1. **ParticleManager** singleton GO — assign 3 particle prefabs
+2. **OrePiecePoolManager** singleton GO — assign all OrePiece prefabs list
+3. **OreLimitManager** singleton GO — `_movingObjectLimit` [SerializeField]
+4. **OreManager** singleton GO — assign `_allResourceDescriptions` list
+5. **PhysicsLimitUIWarning** GO on Canvas — `_softLimitObject`, `_hardLimitObject`
+6. **OreNode** prefabs placed in scene — walls/floor, various ResourceTypes
+7. **SellerMachine** GO with trigger collider (IsTrigger=true)
+8. **AutoMiner** GO (optional) — `_resourceDefinition` SO, `Rotator` child, `OreSpawnPoint` child
+
+---
+
+## Modifications to Earlier Phases
+
+| File (Phase) | How | Change | Why |
+|-------------|-----|--------|-----|
+| `GameEvents.cs` (A) | **partial extend** in `phase-c/0-Core/GameEvents.cs` | Add `OnOreMined`, `OnOreSold`, `OnOreLimitChanged` | No modification to Phase A's file |
+| `ToolPickaxe.cs` (B) | **direct modify** | Add `IDamageable.TakeDamage` call in `PerformAttack` after raycast hit | Pickaxe now damages OreNodes |
+| `ToolPickaxe.cs` (B) | **direct modify** | Add crushed ore conversion: `TryConvertToCrushed()` check | Pickaxe breaks ore into crushed |
+
+---
+
+## Source vs Phase Diff
+
+| What | Original Did | What We Did | Why |
+|------|-------------|-------------|-----|
+| Resource descriptions | `[Serializable] ResourceDescription` on OreManager | `OreDataService` manages list, OreManager delegates | Pure C# testable via `new` |
+| Weighted selection | Duplicated in OreNode, AutoMinerResourceDef, OrePiece (3 places) | `UtilsPhaseC.WeightedRandom<T>()` — single generic utility | DRY |
+| OrePiece.SellAfterDelay | Calls `QuestManager.OnResourceDeposited()` directly | Fires `GameEvents.RaiseOreSold()` — QuestManager subscribes in Phase F | Decoupled |
+| OreLimitManager | Reads `SettingsManager.Instance.MovingPhysicsObjectLimit` | Uses `[SerializeField] int _movingObjectLimit` | Settings is Phase H |
+| PhysicsLimitUIWarning | Static `_instance` pattern + static `SwitchState()` | Subscribes to `GameEvents.OnOreLimitChanged` | Decoupled, no static instance |
+| AutoMiner | Implements IInteractable + ICustomSaveDataProvider + references BuildingObject | Simplified: rotate + timer + spawn only. Phase D adds building integration | Phase scope |
+| OreManager sell/volume lookups | Queries `SavingLoadingManager.AllOrePiecePrefabs` | Queries `OreDataService` | Save system is Phase G |
+
+---
+
+## Systems & Testability
+
+### Individual Systems
+
+| # | System | Scripts | Decoupled Via |
+|---|--------|---------|---------------|
+| 1 | **Mining** | `OreNode`, `IDamageable`, `ParticleManager` | `OnOreMined` (fires on node break) |
+| 2 | **Ore Lifecycle** | `OrePiece`, `DamageableOrePiece`, `OrePiecePoolManager` | Self-registration (`AllOrePieces` list), pool return |
+| 3 | **Selling** | `SellerMachine` | `OnOreSold` (fires on sell), EconomyManager.AddMoney |
+| 4 | **Auto Mining** | `AutoMiner`, `SO_AutoMinerResourceDefinition` | Reads OreLimitManager for throttle |
+| 5 | **Limit Management** | `OreLimitManager`, `PhysicsLimitUIWarning` | `OnOreLimitChanged` (fires on state change) |
+| 6 | **Data** | `OreDataService`, `OreManager` | None — pure C# / singleton read |
+
+### Testability Matrix
+
+| System | `.cs` Test | `Manual/*.md` | Needs other systems? |
+|--------|-----------|---------------|---------------------|
+| Data (OreDataService) | `DEBUG_CheckC` | — | **Nothing** — plain C# `new` |
+| Mining + Selling + Pool | `OreTest` | `MiningFlowTest.md`, `SellerMachineTest.md` | Needs ParticleManager, OrePiecePoolManager, EconomyManager |
+| Auto Mining | `OreTest` | `AutoMinerVisualTest.md` | Needs OrePiecePoolManager, OreLimitManager |
+| Limit + Warning | `OreTest` | — | Standalone — counts OrePiece.AllOrePieces |
+
+**6 systems, 19 scripts, 2 `.cs` tests, 3 manual tests. Zero tight coupling between systems.**
+
+<!-- ==== FILE: phase-c(new)/Scripts/0-Core/GameEvents.cs ==== -->
+using System;
+using UnityEngine;
+
+/// <summary>
+/// partial extend for phase-c — no modification to phase-a GameEvents
+/// </summary>
+public static partial class GameEvents
+{
+	// when ore node was mined (broken) >>
+	public static event Action<ResourceType, Vector3> OnOreMined;
+	public static void RaiseOreMined(ResourceType type, Vector3 position)
+	{
+		LogSubscribersCount(nameof(OnOreMined), OnOreMined);
+		GameEvents.OnOreMined? // if there is any subscribers
+			.Invoke(type, position);
+	}
+	// << when ore node was mined
+
+	// when ore piece was sold >>
+	public static event Action<float, ResourceType, PieceType> OnOreSold;
+	public static void RaiseOreSold(float price, ResourceType type, PieceType pieceType)
+	{
+		LogSubscribersCount(nameof(OnOreSold), OnOreSold);
+		GameEvents.OnOreSold? // if there is any subscribers
+			.Invoke(price, type, pieceType);
+	}
+	// << when ore piece was sold
+
+	// when ore limit state changed >>
+	public static event Action<OreLimitState> OnOreLimitChanged;
+	public static void RaiseOreLimitChanged(OreLimitState state)
+	{
+		LogSubscribersCount(nameof(OnOreLimitChanged), OnOreLimitChanged);
+		GameEvents.OnOreLimitChanged? // if there is any subscribers
+			.Invoke(state);
+	}
+	// << when ore limit state changed
+}
+
+<!-- ==== FILE: phase-c(new)/Scripts/1-Managers/OreLimitManager.cs ==== -->
+using System.Collections.Generic;
+using UnityEngine;
+
+/// <summary>
+/// I throttle ore spawning when the physics engine has too many active objects. Every 15 seconds
+/// I count how many OrePieces have non-sleeping Rigidbodies. If the count exceeds _movingObjectLimit
+/// I escalate through states: Regular → SlightlyLimited (AutoMiner 25% slower) → HighlyLimited
+/// (50% slower) → Blocked (AutoMiner stops entirely). On state change I fire OnOreLimitChanged
+/// so PhysicsLimitUIWarning can show/hide the warning panel. First time a limit is hit, I log
+/// a one-time warning popup. AutoMiner reads my GetAutoMinerSpawnTimeMultiplier each spawn cycle.
+///
+/// Who uses me: AutoMiner (ShouldBlockOreSpawning, GetAutoMinerSpawnTimeMultiplier).
+/// Events I fire: OnOreLimitChanged(state).
+/// </summary>
+public class OreLimitManager : Singleton<OreLimitManager>
+{
+	#region Inspector Fields
+	[SerializeField] int _movingObjectLimit = 500;
+	#endregion
+
+	#region private API
+	OreLimitState currentState;
+	float timeSinceLastCheck;
+	#endregion
+
+	#region public API
+	/// <summary> true if spawning should be blocked entirely </summary>
+	public bool ShouldBlockOreSpawning() => currentState == OreLimitState.Blocked;
+	/// <summary> spawn time multiplier based on limit state </summary>
+	public float GetAutoMinerSpawnTimeMultiplier()
+	{
+		switch (currentState)
+		{
+			case OreLimitState.SlightlyLimited: return 1.25f;
+			case OreLimitState.HighlyLimited: return 1.5f;
+			case OreLimitState.Blocked: return 2f;
+			default: return 1f;
+		}
+	}
+	/// <summary> force immediate recheck — called when objects are bulk destroyed </summary>
+	public void OnObjectLimitChanged() => timeSinceLastCheck = 10f;
+	#endregion
+
+	#region private API
+	bool hasShownPopup;
+	void TryShowWarningPopup()
+	{
+		if (hasShownPopup) return;
+		hasShownPopup = true;
+		Debug.Log($"[OreLimitManager] Ore limit reached! Current limit: {_movingObjectLimit}".colorTag("orange"));
+		// Phase I: Singleton<UIManager>.Ins.ShowInfoMessagePopup("Ore Limit", message);
+	}
+	#endregion
+
+	#region Unity Life Cycle
+	/// <summary> Every 15 seconds, counts how many ore pieces have non-sleeping Rigidbodies.
+	/// Compares against _movingObjectLimit to determine throttle state (Regular → Blocked). </summary>
+	private void Update()
+	{
+		// → only check every 15 seconds to avoid per-frame overhead
+		timeSinceLastCheck += Time.deltaTime;
+		if (timeSinceLastCheck < 15f) return;
+		timeSinceLastCheck = 0f;
+		if (_movingObjectLimit >= 10000)
+		{
+			SetState(OreLimitState.Regular);
+			return;
+		}
+		int softLimit = _movingObjectLimit + 100;
+		int hardLimit = _movingObjectLimit + 200;
+		int movingCount = 0;
+		var allOre = OrePiece.AllOrePieces;
+		for (int i = 0; i < allOre.Count; i++)
+		{
+			if (allOre[i].Rb != null && !allOre[i].Rb.IsSleeping())
+			{
+				movingCount++;
+				if (movingCount > hardLimit) break;
+			}
+		}
+		if (movingCount > hardLimit) { SetState(OreLimitState.Blocked); TryShowWarningPopup(); }
+		else if (movingCount > softLimit) { SetState(OreLimitState.HighlyLimited); TryShowWarningPopup(); }
+		else if (movingCount > _movingObjectLimit) { SetState(OreLimitState.SlightlyLimited); TryShowWarningPopup(); }
+		else SetState(OreLimitState.Regular);
+	}
+	/// <summary> Only fires OnOreLimitChanged when the state actually changes — avoids spamming
+	/// the event every 15 seconds when the state hasn't moved. </summary>
+	void SetState(OreLimitState state)
+	{
+		if (currentState == state) return;
+		currentState = state;
+		// → fire event so PhysicsLimitUIWarning can show/hide the warning panel
+		// purpose: PhysicsLimitUIWarning shows/hides warning text
+		GameEvents.RaiseOreLimitChanged(currentState);
+	}
+	#endregion
+}
+
+<!-- ==== FILE: phase-c(new)/Scripts/1-Managers/OreManager.cs ==== -->
+using System.Collections.Generic;
+using UnityEngine;
+
+/// <summary>
+/// I'm the top-level manager for the ore system. On Awake I create and build an OreDataService
+/// with the resource descriptions list from the inspector. In Update I do round-robin cleanup —
+/// checking one ore piece per frame. If it's null (externally destroyed), I remove it from the
+/// list. If it fell below y=-1000 (out of world), I call Delete to return it to the pool.
+/// Other scripts access my DataService property for resource color lookups and formatted strings.
+///
+/// Who uses me: OreTest (DataService snapshot), ToolResourceScanner (color/name lookups).
+/// Events I fire: none. Events I subscribe to: none.
+/// </summary>
+public class OreManager : Singleton<OreManager>
+{
+	#region Inspector Fields
+	[SerializeField] List<ResourceDescription> _allResourceDescriptions;
+	#endregion
+
+	#region private API
+	OreDataService oreDataService = new OreDataService();
+	int currentOreIndex;
+	#endregion
+
+	#region public API
+	/// <summary> expose data service for external queries </summary>
+	public OreDataService DataService => oreDataService;
+	#endregion
+
+	#region Unity Life Cycle
+	/// <summary> Registers singleton, then builds OreDataService with the resource descriptions
+	/// list from the inspector so color lookups and formatted strings are ready immediately. </summary>
+	protected override void Awake()
+	{
+		base.Awake();
+		// → build OreDataService with inspector resource descriptions
+		oreDataService.Build(_allResourceDescriptions);
+	}
+	/// <summary> Checks one ore piece per frame via round-robin. If null (destroyed externally),
+	/// removes it from the list. If fallen below y=-1000 (out of world), returns it to pool. </summary>
+	private void Update()
+	{
+		var allOre = OrePiece.AllOrePieces;
+		if (allOre.Count == 0) { currentOreIndex = 0; return; }
+		if (currentOreIndex >= allOre.Count) currentOreIndex = 0;
+		var piece = allOre[currentOreIndex];
+		// → remove null entries (destroyed externally)
+		if (piece == null)
+		{
+			OrePiece.AllOrePieces.Remove(piece);
+			return;
+		}
+		// → return to pool if fallen out of world
+		if (piece.transform.position.y < -1000f)
+			piece.Delete();
+		currentOreIndex++;
+	}
+	#endregion
+}
+
+<!-- ==== FILE: phase-c(new)/Scripts/1-Managers/OrePiecePoolManager.cs ==== -->
+using System.Collections.Generic;
+using UnityEngine;
+
+/// <summary>
+/// I recycle ore objects so we never call Instantiate/Destroy after the initial pool warmup.
+/// When someone needs an ore piece, they call SpawnPooledOre — I check my dictionary of queues
+/// (keyed by ResourceType + PieceType + IsPolished). If a recycled piece exists, I dequeue it
+/// and reposition it. If the queue is empty, I Instantiate a new one from the registered prefab.
+/// When an ore piece is done (sold, fell out of world, etc.), OrePiece calls Delete → ReturnToPool
+/// which deactivates the GO, resets velocity/drag/tags, and enqueues it for next time.
+/// On Awake I register all prefabs from _allOrePiecePrefabs by their OrePieceKey.
+///
+/// Who uses me: OreNode (spawn drops), AutoMiner (timer spawn), OrePiece.Delete (return to pool).
+/// Events I fire: none. Events I subscribe to: none.
+/// </summary>
+public class OrePiecePoolManager : Singleton<OrePiecePoolManager>
+{
+	#region Inspector Fields
+	[SerializeField] List<OrePiece> _allOrePiecePrefabs = new List<OrePiece>();
+	#endregion
+
+	#region private API
+	readonly Dictionary<OrePieceKey, Queue<OrePiece>> pools = new Dictionary<OrePieceKey, Queue<OrePiece>>();
+	readonly Dictionary<OrePieceKey, OrePiece> prefabByKey = new Dictionary<OrePieceKey, OrePiece>();
+	Transform root;
+	#endregion
+
+	#region public API
+	/// <summary> Shorthand that extracts ResourceType/PieceType/IsPolished from the prefab and
+	/// calls the full SpawnPooledOre overload. Used by OreNode and AutoMiner. </summary>
+	public OrePiece SpawnPooledOre(OrePiece prefab, Vector3 position = default, Quaternion rotation = default)
+	{
+		return SpawnPooledOre(prefab.ResourceType, prefab.PieceType, prefab.IsPolished, position, rotation);
+	}
+	/// <summary> Main spawn method — looks up the OrePieceKey in the dictionary, dequeues a recycled
+	/// piece if available, otherwise Instantiates a new one from the registered prefab. Repositions
+	/// it and activates it. Returns the ready-to-use OrePiece. </summary>
+	public OrePiece SpawnPooledOre(ResourceType resourceType, PieceType pieceType, bool isPolished, Vector3 position = default, Quaternion rotation = default)
+	{
+		// → build composite key from type + piece + polished
+		var key = new OrePieceKey(resourceType, pieceType, isPolished);
+		// → find the registered prefab for this key
+		if (!prefabByKey.TryGetValue(key, out var prefab))
+		{
+			Debug.LogError($"No OrePiece prefab for key: {key}");
+			return null;
+		}
+		// → find or create the queue for this key
+		var queue = pools.GetOrCreate(key);
+		// → dequeue recycled piece or Instantiate new one
+		OrePiece piece;
+		if (queue.Count > 0) piece = queue.Dequeue();
+		else
+		{
+			piece = Object.Instantiate(prefab, root);
+			piece.gameObject.name = prefab.gameObject.name + " [Pooled]";
+		}
+		// → reposition and activate
+		piece.transform.SetParent(null, false);
+		piece.transform.SetPositionAndRotation(position, rotation);
+		piece.gameObject.SetActive(true);
+		return piece;
+	}
+	/// <summary> Accepts a GameObject (like _crushedPrefab from OrePiece). If it has an OrePiece
+	/// component, spawns via pool. If not, falls back to regular Instantiate. </summary>
+	public OrePiece TrySpawnPooledOre(GameObject prefab, Vector3 position = default, Quaternion rotation = default)
+	{
+		var orePiece = prefab.GetComponent<OrePiece>();
+		if (orePiece != null) return SpawnPooledOre(orePiece, position, rotation);
+		// → not an OrePiece — fallback to regular Instantiate (e.g. particle effect prefab)
+		Object.Instantiate(prefab, position, rotation);
+		return null;
+	}
+	/// <summary> Takes an ore piece that's done being used (sold, fell out of world, etc.) and
+	/// puts it back in the pool for reuse — deactivates it, resets all physics and state, re-tags
+	/// as Grabbable, and enqueues it so the next SpawnPooledOre can reuse it. </summary>
+	public void ReturnToPool(OrePiece piece)
+	{
+		if (piece == null || !piece.gameObject.activeSelf) return;
+		// → find or create queue for this ore type key
+		var key = new OrePieceKey(piece.ResourceType, piece.PieceType, piece.IsPolished);
+		var queue = pools.GetOrCreate(key);
+		// → deactivate GO + zero out velocity, put Rb to sleep, restore standard drag
+		piece.gameObject.SetActive(false);
+		if (piece.Rb != null)
+		{
+			piece.Rb.linearVelocity = Vector3.zero;
+			piece.Rb.angularVelocity = Vector3.zero;
+			piece.Rb.Sleep();
+			piece.Rb.linearDamping = BasePhysicsObject.STANDARD_LINEAR_DAMPING;
+			piece.Rb.angularDamping = BasePhysicsObject.STANDARD_ANGULAR_DAMPING;
+		}
+		// → reset all runtime state: position, rotation, baskets, sieve%, magnet ref, tag
+		piece.transform.SetLocalPositionAndRotation(Vector3.zero, Quaternion.identity);
+		piece.BasketsThisIsInside.Clear();
+		piece.SievePercent = 0f;
+		piece.CurrentMagnetTool = null;
+		piece.gameObject.SetTag(TagType.Grabbable);
+		// → parent under pool root + enqueue for next SpawnPooledOre call
+		piece.transform.SetParent(root, false);
+		queue.Enqueue(piece);
+	}
+	/// <summary> Returns how many ore pieces are sitting in pool queues waiting to be reused.
+	/// OreTest logs this alongside AllOrePieces.Count to show active vs pooled distribution. </summary>
+	public int GetInactiveCount()
+	{
+		int count = 0;
+		foreach (var queue in pools.Values) count += queue.Count;
+		return count;
+	}
+	#endregion
+
+	#region Unity Life Cycle
+	/// <summary> Creates the pool root GO, then registers every prefab in _allOrePiecePrefabs by
+	/// its OrePieceKey (ResourceType + PieceType + IsPolished) so SpawnPooledOre can look them up. </summary>
+	protected override void Awake()
+	{
+		base.Awake();
+		// → create a hidden root GO to parent inactive pooled pieces under
+		root = new GameObject("[OrePiecePools]").transform;
+		root.SetParent(transform);
+		// → register all prefabs by their composite key for O(1) lookup
+		prefabByKey.Clear();
+		foreach (var prefab in _allOrePiecePrefabs)
+		{
+			if (prefab == null) continue;
+			var key = new OrePieceKey(prefab.ResourceType, prefab.PieceType, prefab.IsPolished);
+			if (prefabByKey.ContainsKey(key))
+				Debug.LogWarning($"Duplicate OrePiece prefab key: {key}. Keeping first.");
+			else
+				prefabByKey[key] = prefab;
+		}
+	}
+	#endregion
+}
+
+<!-- ==== FILE: phase-c(new)/Scripts/1-Managers/ParticleManager.cs ==== -->
+using UnityEngine;
+
+/// <summary>
+/// I spawn particle effects at world positions. OreNode calls me for break particles when a
+/// node shatters, DamageableOrePiece calls me for cluster break particles, and ToolPickaxe
+/// can call me for hit impact sparks. I hold references to the prefabs (GenericHitImpactParticle,
+/// OreNodeHitParticlePrefab, BreakOreNodeParticlePrefab) as public fields so other scripts
+/// can pass them to CreateParticle. I just Instantiate — the particle systems auto-destroy.
+///
+/// Who uses me: OreNode (break burst), DamageableOrePiece (cluster break), ToolPickaxe (hit sparks).
+/// </summary>
+public class ParticleManager : Singleton<ParticleManager>
+{
+	#region Inspector Fields
+	[SerializeField] public GameObject GenericHitImpactParticle;
+	[SerializeField] public GameObject OreNodeHitParticlePrefab;
+	[SerializeField] public GameObject BreakOreNodeParticlePrefab;
+	#endregion
+
+	#region public API
+	/// <summary> spawn a particle at position + rotation </summary>
+	public void CreateParticle(GameObject prefab, Vector3 position, Quaternion rotation = default)
+	{
+		if (prefab == null) return;
+		var go = Object.Instantiate(prefab, position, rotation);
+	}
+	#endregion
+}
+
+<!-- ==== FILE: phase-c(new)/Scripts/2-Data/DataService/OreDataService.cs ==== -->
+using System;
+using System.Linq;
+using System.Collections.Generic;
+
+using UnityEngine;
+using SPACE_UTIL;
+
+/// <summary>
+/// I'm pure C# — testable via `new`, zero Unity dependency. OreManager creates me on Awake
+/// and calls Build() with the resource descriptions list from the inspector. I store them in
+/// RESOURCE_DESC and provide lookups: GetResourceDescription (by type), GetResourceColor,
+/// GetColoredResourceTypeString (wraps name in rich text color tag), and
+/// GetColoredFormattedResourcePieceString (full formatted name with piece type label mapping
+/// like "Drill Bit", "Threaded Rod", etc.). ToolResourceScanner and future UI displays use
+/// these for colored ore name text.
+///
+/// Who uses me: OreManager (Build + expose via DataService property), OreTest (snapshot).
+/// Events I fire: none. Pure data.
+/// </summary>
+public class OreDataService
+{
+	#region private API
+	List<ResourceDescription> RESOURCE_DESC = new List<ResourceDescription>();
+	#endregion
+
+	#region public API
+	/// <summary> Called by OreManager on Awake with the list from the inspector. Stores all
+	/// resource descriptions so I can look them up by ResourceType later. </summary>
+	public void Build(List<ResourceDescription> descriptions)
+	{
+		RESOURCE_DESC = descriptions;
+	}
+	/// <summary> Finds the ResourceDescription for the given type — returns the entry with
+	/// matching ResourceType, or null if not found. Used internally by GetResourceColor. </summary>
+	public ResourceDescription GetResourceDescription(ResourceType type)
+	{
+		return RESOURCE_DESC.find(r => r.ResourceType == type);
+	}
+	/// <summary> Returns the display color for a resource type (e.g. Iron = grey, Gold = yellow).
+	/// Falls back to white if the type isn’t in the list. Used by all colored text formatting. </summary>
+	public Color GetResourceColor(ResourceType type)
+	{
+		var desc = GetResourceDescription(type);
+		return desc != null ? desc.DisplayColor : Color.white;
+	}
+	/// <summary> Wraps the resource type name in a rich text color tag — e.g. Iron becomes
+	/// "<color=#999999>Iron</color>". Used by ToolResourceScanner and future UI displays. </summary>
+	public string GetColoredResourceTypeString(ResourceType type)
+	{
+		string hex = ColorUtility.ToHtmlStringRGB(GetResourceColor(type));
+		return $"<color=#{hex}>{type}</color>";
+	}
+	/// <summary> Full formatted ore name with piece type label — handles special labels like
+	/// "Drill Bit" for DrillBit, "Threaded Rod" for ThreadedRod, "Junk" for Slag Pipe. Optionally
+	/// prefixes "Polished" if requirePolished is true. Returns colored rich text. </summary>
+	public string GetColoredFormattedResourcePieceString(ResourceType resourceType, PieceType pieceType, bool requirePolished = false)
+	{
+		string hex = ColorUtility.ToHtmlStringRGB(GetResourceColor(resourceType));
+		string pieceName = pieceType.ToString();
+		string resName = resourceType.ToString();
+		// label overrides
+		if (pieceType == PieceType.DrillBit) pieceName = "Drill Bit";
+		if (pieceType == PieceType.ThreadedRod) pieceName = "Threaded Rod";
+		if (pieceType == PieceType.OreCluster) pieceName = "Ore Cluster";
+		if (pieceType == PieceType.JunkCast) pieceName = "Junk Cast";
+		if (pieceType == PieceType.Pipe && resourceType == ResourceType.Slag) resName = "Junk";
+		string polished = requirePolished ? "Polished " : "";
+		if (pieceType == PieceType.Crushed)
+			return $"<color=#{hex}>{polished}{pieceName} {resName}</color>";
+		return $"<color=#{hex}>{polished}{resName} {pieceName}</color>";
+	}
+	#endregion
+
+	#region snapShot
+	/// <summary> Formats all stored resource descriptions into a JSON snapshot string for
+	/// test logging — DEBUG_CheckC calls this to verify the data was built correctly. </summary>
+	public string GetSnapshot(string header = "ore data snapshot")
+	{
+		return $@"
+{'='.repeat(4) + header + '='.repeat(4)}
+// RESOURCE_DESC
+{PhaseCLOG.LIST_RESOURCE_DESC__TO__JSON(RESOURCE_DESC)}";
+	}
+	#endregion
+}
+
+<!-- ==== FILE: phase-c(new)/Scripts/2-Data/Entities/OrePieceEntry.cs ==== -->
+using System;
+using UnityEngine;
+
+/// <summary>
+/// Save data for one ore piece in the world. Phase G serializes every active OrePiece into
+/// one of these entries (ResourceType, PieceType, PolishedPercent, Position, Rotation, Scale,
+/// MeshID) and stores them in the save file. On load, OrePiecePoolManager recreates pieces
+/// from these entries. Not used until Phase G — exists now so the data shape is defined early.
+/// </summary>
+[Serializable]
+public class OrePieceEntry
+{
+	public ResourceType ResourceType;
+	public PieceType PieceType;
+	public float PolishedPercent;
+	public Vector3 Position;
+	public Vector3 Rotation;
+	public Vector3 Scale;
+	public int MeshID;
+}
+
+<!-- ==== FILE: phase-c(new)/Scripts/2-Data/Entities/OrePieceKey.cs ==== -->
+using System;
+
+/// <summary>
+/// Composite key for OrePiecePoolManager's dictionary of queues. Combines ResourceType +
+/// PieceType + IsPolished into one hashable struct. When spawning or returning ore, the pool
+/// creates an OrePieceKey to find the right queue. Two ore pieces with the same key are
+/// interchangeable in the pool (same prefab, same visual, just different position/velocity).
+/// </summary>
+[Serializable]
+public struct OrePieceKey : IEquatable<OrePieceKey>
+{
+	public ResourceType ResourceType;
+	public PieceType PieceType;
+	public bool IsPolished;
+
+	public OrePieceKey(ResourceType resourceType, PieceType pieceType, bool isPolished)
+	{
+		ResourceType = resourceType;
+		PieceType = pieceType;
+		IsPolished = isPolished;
+	}
+	public override int GetHashCode()
+	{
+		return ((17 * 31 + ResourceType.GetHashCode()) * 31 + PieceType.GetHashCode()) * 31 + IsPolished.GetHashCode();
+	}
+	public override bool Equals(object obj) => obj is OrePieceKey other && Equals(other);
+	public bool Equals(OrePieceKey other)
+	{
+		return ResourceType == other.ResourceType && PieceType == other.PieceType && IsPolished == other.IsPolished;
+	}
+}
+
+<!-- ==== FILE: phase-c(new)/Scripts/2-Data/Entities/ResourceDescription.cs ==== -->
+using System;
+using UnityEngine;
+
+/// <summary>
+/// Pairs a ResourceType with its display color for UI text. OreManager holds a list of these
+/// in the inspector — OreDataService.Build() stores them, then GetResourceColor(type) looks up
+/// the matching entry. Used by GetColoredResourceTypeString to wrap ore names in rich text color tags.
+/// </summary>
+[Serializable]
+public class ResourceDescription
+{
+	public ResourceType ResourceType;
+	public Color DisplayColor;
+}
+
+<!-- ==== FILE: phase-c(new)/Scripts/2-Data/Entities/WeightedNodeDrop.cs ==== -->
+using System;
+
+/// <summary>
+/// One entry in OreNode's _possibleDrops inspector list. Pairs an OrePiece prefab with a Weight
+/// value. When the node breaks, UtilsPhaseC.WeightedRandom picks one of these — higher weight
+/// = more likely to drop. For example: Iron Ore weight 80 + Gold Ore weight 20 = 80% Iron, 20% Gold.
+/// </summary>
+[Serializable]
+public class WeightedNodeDrop
+{
+	public OrePiece OrePrefab;
+	public float Weight = 100f;
+}
+
+<!-- ==== FILE: phase-c(new)/Scripts/2-Data/Entities/WeightedOreChance.cs ==== -->
+using System;
+
+/// <summary>
+/// Same as WeightedNodeDrop but used by AutoMiner (SO_AutoMinerResourceDefinition.PossibleOrePrefabs)
+/// and Phase E machines (OrePiece sieving, cluster breaking). Pairs an OrePiece prefab with a Weight.
+/// UtilsPhaseC.PickOrePrefab reads these lists and does the weighted random selection.
+/// </summary>
+[Serializable]
+public class WeightedOreChance
+{
+	public OrePiece OrePrefab;
+	public float Weight = 100f;
+}
+
+<!-- ==== FILE: phase-c(new)/Scripts/2-Data/Enums/GlobalEnumsC.cs ==== -->
+/// <summary>
+/// All enums introduced in Phase C — one file, one place.
+/// </summary>
+
+/// <summary> What kind of resource this ore is. OreNode has one ResourceType, every OrePiece
+/// spawned from it inherits that type. OreDataService uses this for color lookups and formatted
+/// strings. Used across all phases — machines process by type, quests track by type. </summary>
+public enum ResourceType
+{
+	INVALID = 0,
+	Iron = 1,
+	Coal = 2,
+	Gold = 3,
+	Slag = 4,
+	Diamond = 5,
+	Emerald = 6,
+	Copper = 7,
+	Broken = 8,
+	Ruby = 9,
+	Steel = 10,
+	Celestite = 11,
+	Quartz = 12,
+	Amethyst = 13,
+	Mystery = 14
+}
+
+/// <summary> What shape/processing state this ore piece is in. Ore = raw from node, Crushed = broken
+/// by pickaxe or crusher, Ingot/Plate/Rod/Pipe = processed by machines (Phase E). OrePiecePoolManager
+/// uses ResourceType + PieceType + IsPolished as the composite key for pool queues. </summary>
+public enum PieceType
+{
+	INVALID = 0,
+	Ore = 1,
+	Crushed = 2,
+	Ingot = 3,
+	Plate = 4,
+	Gem = 5,
+	Pipe = 6,
+	Rod = 7,
+	DrillBit = 8,
+	ThreadedRod = 9,
+	Gear = 10,
+	OreCluster = 11,
+	JunkCast = 12,
+	Geode = 13
+}
+
+/// <summary> Ore limit throttle state — OreLimitManager checks every 15s how many ore pieces
+/// are actively moving. Regular = normal spawning. SlightlyLimited = AutoMiner 25% slower.
+/// HighlyLimited = 50% slower. Blocked = AutoMiner stops entirely. PhysicsLimitUIWarning
+/// subscribes to OnOreLimitChanged and shows/hides the warning panel based on this. </summary>
+public enum OreLimitState
+{
+	Regular = 0,
+	SlightlyLimited = 1,
+	HighlyLimited = 2,
+	Blocked = 3
+}
+
+<!-- ==== FILE: phase-c(new)/Scripts/2-Data/Interface/IDamageable.cs ==== -->
+using UnityEngine;
+
+/// <summary>
+/// Any object that can take damage at a world position. OreNode implements this to lose health
+/// when the pickaxe hits it. DamageableOrePiece implements this to break into cluster pieces
+/// when hit hard enough by collision. ToolPickaxe calls TakeDamage on whatever IDamageable
+/// the raycast hits — it doesn't know if it's a node or an ore piece.
+/// </summary>
+public interface IDamageable
+{
+	void TakeDamage(float damage, Vector3 position);
+}
+
+<!-- ==== FILE: phase-c(new)/Scripts/2-Data/SO_AutoMinerResourceDefinition.cs ==== -->
+using System.Collections.Generic;
+using UnityEngine;
+
+/// <summary>
+/// Pure data config for one AutoMiner placement — spawn probability (default 80%), spawn rate
+/// (seconds between spawns), and a weighted list of possible OrePiece prefabs. AutoMiner reads
+/// my public fields on Start to configure itself. UtilsPhaseC.PickOrePrefab reads PossibleOrePrefabs
+/// to do the weighted random selection. I have zero methods — all logic lives in the consumer.
+/// Created in Unity: Create → SO → SO_AutoMinerResourceDefinition.
+/// </summary>
+[CreateAssetMenu(menuName = "SO/SO_AutoMinerResourceDefinition", fileName = "SO_AutoMinerResourceDefinition")]
+public class SO_AutoMinerResourceDefinition : ScriptableObject
+{
+	[Range(0f, 100f)] public float SpawnProbability = 80f;
+	[Range(0f, 20f)] public float SpawnRate = 2f;
+	public List<WeightedOreChance> PossibleOrePrefabs = new List<WeightedOreChance>();
+}
+
+<!-- ==== FILE: phase-c(new)/Scripts/3-MonoBehaviours/AutoMiner.cs ==== -->
+using UnityEngine;
+
+/// <summary>
+/// I spawn ore pieces on a timer. My Rotator child spins continuously (visual drill animation).
+/// Every _spawnRate seconds, I roll against _spawnProbability (default 80%) — if it passes,
+/// I call UtilsPhaseC.PickOrePrefab to do a weighted random selection from the SO definition's
+/// PossibleOrePrefabs list, then spawn it via OrePiecePoolManager at my _oreSpawnPoint.
+/// OreLimitManager throttles me — at SlightlyLimited my timer is 25% slower, at Blocked I
+/// skip spawning entirely. On Start I read SpawnProbability and SpawnRate from my SO definition.
+///
+/// Who uses me: Scene (placed on mine walls). OreLimitManager (throttles my spawn rate).
+/// Events I fire: none. Events I subscribe to: none.
+/// </summary>
+public class AutoMiner : MonoBehaviour
+{
+	#region Inspector Fields
+	[SerializeField] GameObject _rotator;
+	[SerializeField] Transform _oreSpawnPoint;
+	[SerializeField] bool _rotateY;
+	[SerializeField] bool _rotateZ;
+	[SerializeField] bool _enabled = true;
+	[SerializeField] int _oresPerRotation = 12;
+	[SerializeField] OrePiece _fallbackOrePrefab;
+	[SerializeField] SO_AutoMinerResourceDefinition _resourceDefinition;
+	[Header("Configured from Definition")]
+	[SerializeField] [Range(0f, 100f)] float _spawnProbability = 80f;
+	[SerializeField] [Range(0f, 20f)] float _spawnRate = 2f;
+	#endregion
+
+	#region private API
+	Vector3 rotationAxis;
+	float timeUntilNextSpawn;
+
+	/// <summary> Checks if spawning is blocked by OreLimitManager, rolls against spawn probability,
+	/// then picks a weighted random prefab from the SO definition and spawns it via the pool. </summary>
+	void TrySpawnOre()
+	{
+		// → if OreLimitManager says we're at Blocked state, skip entirely
+		if (Singleton<OreLimitManager>.Ins.ShouldBlockOreSpawning()) return;
+		// → random probability roll — 80% default means ~20% of cycles produce nothing
+		if (Random.Range(0f, 100f) > _spawnProbability) return;
+		// → weighted random pick from SO's PossibleOrePrefabs, or fallback if no definition
+		OrePiece prefab = _resourceDefinition != null
+			? UtilsPhaseC.PickOrePrefab(_resourceDefinition.PossibleOrePrefabs, true)
+			: _fallbackOrePrefab;
+		// → spawn via pool at the ore spawn point position
+		if (prefab != null)
+			Singleton<OrePiecePoolManager>.Ins.SpawnPooledOre(prefab, _oreSpawnPoint.position, _oreSpawnPoint.rotation);
+	}
+	#endregion
+
+	#region Unity Life Cycle
+	/// <summary> Sets up the rotation axis, initializes spawn timer, and reads spawn probability
+	/// and rate from the SO definition (overrides inspector defaults if definition exists). </summary>
+	private void Start()
+	{
+		// → initialize spawn timer and pick rotation axis
+		timeUntilNextSpawn = _spawnRate;
+		rotationAxis = _rotateZ ? Vector3.back : (_rotateY ? Vector3.down : Vector3.right);
+		// → read config from SO definition (overrides inspector defaults)
+		if (_resourceDefinition != null)
+		{
+			_spawnProbability = _resourceDefinition.SpawnProbability;
+			_spawnRate = _resourceDefinition.SpawnRate;
+		}
+	}
+	/// <summary> Every frame: rotates the drill visual at a speed based on spawn rate, counts
+	/// down the spawn timer, and calls TrySpawnOre when the timer hits zero. Timer is throttled
+	/// by OreLimitManager's multiplier during high load. </summary>
+	private void Update()
+	{
+		if (!_enabled || _spawnRate <= 0f) return;
+		// → rotate the drill visual (speed = 360° per spawnRate * oresPerRotation)
+		float angle = 360f / (_spawnRate * _oresPerRotation) * Time.deltaTime;
+		_rotator.transform.Rotate(rotationAxis, angle);
+		// → count down spawn timer
+		timeUntilNextSpawn -= Time.deltaTime;
+		timeUntilNextSpawn = Mathf.Min(timeUntilNextSpawn, _spawnRate);
+		// → try to spawn ore when timer hits zero, then reset with throttle multiplier
+		if (timeUntilNextSpawn <= 0f)
+		{
+			TrySpawnOre();
+			timeUntilNextSpawn += _spawnRate * Singleton<OreLimitManager>.Ins.GetAutoMinerSpawnTimeMultiplier();
+		}
+	}
+	#endregion
+
+	#region extra
+	// nice-to-have: Phase D adds IInteractable (Turn On/Off), ICustomSaveDataProvider, BuildingObject integration
+	// nice-to-have: Phase D adds Toggle(on/off) with light material swap + looping sound
+	#endregion
+}
+
+<!-- ==== FILE: phase-c(new)/Scripts/3-MonoBehaviours/DamageableOrePiece.cs ==== -->
+using UnityEngine;
+
+/// <summary>
+/// I'm a special OrePiece (like an OreCluster) that can take damage from collisions. When
+/// something hits me hard enough (velocity > _minDamageVelocity), I lose health. At zero health
+/// I play break particles, call CompleteClusterBreaking (spawns smaller ore pieces), and trigger
+/// a small explosion force. I also prevent PhysicsSoundPlayer from existing on the same GO
+/// since I handle my own collision sounds.
+///
+/// Who uses me: Physics engine (OnCollisionEnter), ToolPickaxe (can hit me via IDamageable too).
+/// Events I fire: none directly (particles + cluster spawn are immediate).
+/// </summary>
+public class DamageableOrePiece : OrePiece, IDamageable
+{
+	#region Inspector Fields
+	[Header("Damageable Settings")]
+	[SerializeField] float _health = 10f;
+	[SerializeField] float _minDamageVelocity = 30f;
+	[SerializeField] float _cooldown = 0.1f;
+	#endregion
+
+	#region private API
+	float lastPlayTime;
+	#endregion
+
+	#region public API — IDamageable
+	/// <summary> take damage — breaks into cluster pieces at 0 health </summary>
+	public void TakeDamage(float damage, Vector3 position)
+	{
+		_health -= damage;
+		if (_health <= 0f)
+		{
+			// Phase H: play break sound
+			Singleton<ParticleManager>.Ins.CreateParticle(
+				Singleton<ParticleManager>.Ins.BreakOreNodeParticlePrefab, transform.position);
+			CompleteClusterBreaking();
+			UtilsPhaseB.SimpleExplosion(transform.position, 0.5f, 2f, 0.1f);
+		}
+	}
+	#endregion
+
+	#region Unity Life Cycle
+	/// <summary> When something hits me, checks if the impact velocity exceeds _minDamageVelocity.
+	/// If so, calculates damage proportional to the excess velocity and calls TakeDamage on myself. </summary>
+	private void OnCollisionEnter(Collision collision)
+	{
+		if (collision.contactCount == 0 || Time.time - lastPlayTime < _cooldown) return;
+		lastPlayTime = Time.time;
+		float sqrVel = collision.relativeVelocity.sqrMagnitude;
+		if (sqrVel > _minDamageVelocity)
+		{
+			float damage = (sqrVel - _minDamageVelocity) * 0.1f;
+			TakeDamage(damage, transform.position);
+		}
+		// Phase H: play physics impact sound if close enough to player
+	}
+	#endregion
+}
+
+<!-- ==== FILE: phase-c(new)/Scripts/3-MonoBehaviours/OreNode.cs ==== -->
+using System.Collections.Generic;
+using UnityEngine;
+
+using SPACE_UTIL;
+
+/// <summary>
+/// I'm a breakable rock embedded in mine walls/floor. When the player swings a pickaxe at me,
+/// ToolPickaxe calls my TakeDamage (via IDamageable interface) which subtracts from my health.
+/// When health hits zero, BreakNode fires — I pick a random drop count (2-4), use WeightedRandom
+/// on my _possibleDrops list to pick OrePiece prefabs, spawn them via OrePiecePoolManager with
+/// random velocity (they fly out and bounce), play a break particle burst via ParticleManager,
+/// fire OnOreMined so the quest system can track mining progress, then Destroy myself permanently.
+/// On Start I pick one random model variant from _models and hide the rest (visual variety).
+///
+/// Who uses me: ToolPickaxe (TakeDamage via IDamageable raycast).
+/// Events I fire: OnOreMined(resourceType, position).
+/// </summary>
+public class OreNode : MonoBehaviour, IDamageable
+{
+	#region Inspector Fields
+	[SerializeField] ResourceType _resourceType;
+	[SerializeField] float _health = 100f;
+	[SerializeField] int _minDrops = 2;
+	[SerializeField] int _maxDrops = 4;
+	[SerializeField] List<WeightedNodeDrop> _possibleDrops = new List<WeightedNodeDrop>();
+	[SerializeField] GameObject[] _models;
+	#endregion
+
+	#region public API
+	public ResourceType ResourceType => _resourceType;
+	#endregion
+
+	#region public API — IDamageable
+	/// <summary> Called by ToolPickaxe via IDamageable when the pickaxe raycast hits me. Subtracts
+	/// damage from health, and if health reaches zero, calls BreakNode which spawns ore pieces,
+	/// plays break particles, fires OnOreMined, and destroys this node permanently. </summary>
+	public void TakeDamage(float damage, Vector3 position)
+	{
+		// Phase H: play take damage sound
+		// → subtract damage from health
+		_health -= damage;
+		// → at zero health: spawn 2-4 ore pieces, play particles, fire OnOreMined, destroy node
+		if (_health <= 0f) BreakNode(position);
+	}
+	#endregion
+
+	#region private API
+	/// <summary> Spawns 2-4 ore pieces with random velocity from a point between node center and
+	/// hit position, plays break particle burst, fires OnOreMined for quest tracking, then
+	/// permanently destroys this node. </summary>
+	void BreakNode(Vector3 hitPosition)
+	{
+		// → pick random drop count between _minDrops and _maxDrops
+		int dropCount = Random.Range(_minDrops, _maxDrops + 1);
+		Vector3 spawnCenter = (transform.position + hitPosition) * 0.5f;
+		// → for each drop: weighted random prefab, spawn via pool, apply random velocity + spin
+		for (int i = 0; i < dropCount; i++)
+		{
+			Vector3 pos = spawnCenter + Random.insideUnitSphere * 0.15f;
+			OrePiece prefab = GetOrePrefab();
+			if (prefab == null) continue;
+			var spawned = Singleton<OrePiecePoolManager>.Ins.SpawnPooledOre(prefab, pos, Quaternion.identity);
+			if (spawned?.Rb != null)
+			{
+				spawned.Rb.linearVelocity = new Vector3(Random.Range(-1.5f, 1.5f), Random.Range(2f, 4f), Random.Range(-1.5f, 1.5f));
+				spawned.Rb.angularVelocity = Random.insideUnitSphere * Random.Range(1f, 50f);
+			}
+		}
+		// → spawn break particle burst at hit point
+		// Phase H: play break sound
+		Singleton<ParticleManager>.Ins.CreateParticle(
+			Singleton<ParticleManager>.Ins.BreakOreNodeParticlePrefab, hitPosition);
+		// → fire OnOreMined so quest system (Phase F) can track mining progress
+		// purpose: quest system + other listeners react to mining
+		GameEvents.RaiseOreMined(_resourceType, transform.position);
+		// Phase G: MarkStaticPositionAsBroken for save/load
+		// → permanently destroy this node GO
+		Destroy(gameObject);
+	}
+	/// <summary> Picks one OrePiece prefab from _possibleDrops using weighted random — higher
+	/// weight entries are more likely. Returns null if the list is empty. </summary>
+	OrePiece GetOrePrefab()
+	{
+		return UtilsPhaseC.WeightedRandom(_possibleDrops, d => d.Weight)?.OrePrefab;
+	}
+	#endregion
+
+	#region Unity Life Cycle
+	/// <summary> Picks one random model variant from _models and hides the rest — gives each
+	/// node in the scene a slightly different look even if they use the same prefab. </summary>
+	private void Start()
+	{
+		// → pick one random model, hide all others
+		if (_models.Length > 0)
+		{
+			int chosen = Random.Range(0, _models.Length);
+			for (int i = 0; i < _models.Length; i++)
+				_models[i].SetActive(i == chosen);
+		}
+	}
+	#endregion
+}
+
+<!-- ==== FILE: phase-c(new)/Scripts/3-MonoBehaviours/OrePiece.cs ==== -->
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+using SPACE_UTIL;
+
+/// <summary>
+/// I'm a physical ore piece that exists in the world — I have a ResourceType (Iron, Gold, etc.),
+/// PieceType (Ore, Crushed, Ingot, etc.), and a sell value. On Start I pick a random mesh from
+/// _possibleMeshes, apply random scale variance, and set a random price multiplier (0.9-1.1x).
+/// I self-register in a static AllOrePieces list (OnEnable adds, OnDisable removes) so OreManager
+/// and OreLimitManager can iterate all active pieces. When I enter a SellerMachine trigger, it
+/// calls my SellAfterDelay — I detach from magnet, tag as MarkedForDestruction (so other triggers
+/// skip me), wait 2s, then add money + fire OnOreSold + return to pool via Delete(). The pool
+/// (OrePiecePoolManager) deactivates me, resets everything, and enqueues me for reuse.
+///
+/// Who uses me: OreNode (spawns me), SellerMachine (sells me), ToolMagnet (pulls me),
+///   ToolPickaxe (TryConvertToCrushed), OrePiecePoolManager (pool lifecycle).
+/// Events I fire: OnOreSold (via DelayThenSell coroutine).
+/// </summary>
+public class OrePiece : BaseSellableItem
+{
+	#region Inspector Fields
+	[SerializeField] ResourceType _resourceType;
+	[SerializeField] PieceType _pieceType;
+	[SerializeField] bool _isPolished;
+	[SerializeField] Mesh[] _possibleMeshes;
+	[SerializeField] MeshFilter _meshFilter;
+	[SerializeField] MeshCollider _meshCollider;
+	[SerializeField] bool _useRandomMesh = true;
+	[SerializeField] bool _useRandomScale = true;
+	[SerializeField] Vector3 _scaleVariance = new Vector3(0.25f, 0.25f, 0.25f);
+	[SerializeField] Sprite _inventoryIcon;
+	[Header("Conversion Prefabs (Phase E)")]
+	[SerializeField] GameObject _crushedPrefab;
+	[SerializeField] GameObject _polishedPrefab;
+	// Phase E: _ingotPrefab, _platePrefab, _pipePrefab, _rodPrefab, _threadedPrefab
+	#endregion
+
+	#region private API
+	float randomPriceMultiplier = 1f;
+	int meshID;
+	#endregion
+
+	#region public API
+	public ResourceType ResourceType => _resourceType;
+	public PieceType PieceType => _pieceType;
+	public bool IsPolished => _isPolished;
+	public float RandomPriceMultiplier { get => randomPriceMultiplier; set => randomPriceMultiplier = value; }
+	public int MeshID => meshID;
+	public float VolumeInsideBox = 0.1f;
+	[Obsolete] public float PolishedPercent;
+	public float SievePercent;
+	public ToolMagnet CurrentMagnetTool;
+	public HashSet<object> BasketsThisIsInside = new HashSet<object>(); // Phase E: HashSet<BaseBasket>
+
+	public static List<OrePiece> AllOrePieces = new List<OrePiece>();
+
+	/// <summary> Returns the sell price for this ore piece — BaseSellValue multiplied by
+	/// a random multiplier (0.9-1.1) that was set on Start. This is what EconomyManager.AddMoney receives. </summary>
+	public override float GetSellValue() => Mathf.Round(BaseSellValue * randomPriceMultiplier * 100f) / 100f;
+	/// <summary> Returns my inventory icon sprite — ToolResourceScanner shows this when the
+	/// player looks at me with the scanner tool equipped. Null if no icon assigned. </summary>
+	public Sprite GetIcon() => _inventoryIcon;
+
+	/// <summary> Returns me to the pool instead of Destroy — OrePiecePoolManager deactivates me,
+	/// resets my velocity/drag/tags, and enqueues me for reuse by the next SpawnPooledOre call. </summary>
+	public void Delete()
+	{
+		// → return to pool: deactivate, reset physics, re-tag Grabbable, enqueue
+		Singleton<OrePiecePoolManager>.Ins.ReturnToPool(this);
+	}
+	/// <summary> Called by SellerMachine when I enter its trigger. Detaches me from magnet if held,
+	/// tags me as MarkedForDestruction so other triggers skip me, then starts a 2-second coroutine
+	/// that sells me (adds money via EconomyManager, fires OnOreSold, returns me to pool). </summary>
+	public void SellAfterDelay(float delay = 2f)
+	{
+		// → detach from magnet so it stops pulling me
+		CurrentMagnetTool?.DetachBody(Rb);
+		// → tag so other triggers (other sellers, conveyors) skip me
+		gameObject.SetTag(TagType.MarkedForDestruction);
+		// → after 2s: add money to EconomyManager, fire OnOreSold for quest tracking, return to pool
+		StartCoroutine(DelayThenSell(delay));
+	}
+	/// <summary> Called by ToolPickaxe when it hits me with _canBreakOreIntoCrushed enabled. Spawns
+	/// 2 crushed pieces at my position via the pool, then deletes me. Returns false if I have no
+	/// _crushedPrefab assigned (some ore types can't be crushed). </summary>
+	public bool TryConvertToCrushed()
+	{
+		if (!gameObject.activeSelf || _crushedPrefab == null) return false;
+		for (int i = 0; i < 2; i++)
+			Singleton<OrePiecePoolManager>.Ins.TrySpawnPooledOre(_crushedPrefab, transform.position, transform.rotation);
+		// Phase H: play crush sound
+		Delete();
+		return true;
+	}
+	#endregion
+
+	#region extra
+	// nice-to-have: Phase E conversion methods — AddPolish, AddSieveValue, ConvertToPlate, ConvertToRod, etc.
+	// nice-to-have: CompleteClusterBreaking — used by DamageableOrePiece and ClusterBreaker machine
+	public void CompleteClusterBreaking() { /* Phase E */ }
+	#endregion
+
+	#region Unity Life Cycle
+	/// <summary> Picks a random mesh from _possibleMeshes, applies it to MeshFilter + MeshCollider,
+	/// randomizes scale within _scaleVariance, and sets a random price multiplier (0.9-1.1). </summary>
+	private void Start()
+	{
+		// → pick random mesh variant
+		if (_possibleMeshes.Length > 0)
+		{
+			if (_useRandomMesh) meshID = UnityEngine.Random.Range(0, _possibleMeshes.Length);
+			if (_meshCollider != null) _meshCollider.sharedMesh = _possibleMeshes[meshID];
+			if (_meshFilter != null) _meshFilter.sharedMesh = _possibleMeshes[meshID];
+		}
+		if (_useRandomScale)
+		{
+			Vector3 s = transform.localScale;
+			s.x += UnityEngine.Random.Range(-_scaleVariance.x, _scaleVariance.x);
+			s.y += UnityEngine.Random.Range(-_scaleVariance.y, _scaleVariance.y);
+			s.z += UnityEngine.Random.Range(-_scaleVariance.z, _scaleVariance.z);
+			transform.localScale = s;
+		}
+		randomPriceMultiplier = UnityEngine.Random.Range(0.9f, 1.1f);
+	}
+	/// <summary> Adds me to the static AllOrePieces list so OreManager and OreLimitManager can
+	/// iterate all active pieces. Called when I'm spawned from pool (SetActive true). </summary>
+	protected override void OnEnable()
+	{
+		base.OnEnable();
+		AllOrePieces.Add(this);
+	}
+	/// <summary> Removes me from AllOrePieces when I'm returned to pool (SetActive false) or
+	/// destroyed. Keeps the list clean — only active pieces are counted. </summary>
+	protected override void OnDisable()
+	{
+		base.OnDisable();
+		AllOrePieces.Remove(this);
+	}
+	/// <summary> Waits delay seconds, then adds my sell value to EconomyManager, fires OnOreSold
+	/// so the quest system can track resource deposits, and returns me to the pool via Delete. </summary>
+	IEnumerator DelayThenSell(float delay)
+	{
+		// → wait for the sell delay (default 2s)
+		yield return new WaitForSeconds(delay);
+		if (this == null || !isActiveAndEnabled) yield break;
+		// → add my sell value to EconomyManager (triggers OnMoneyChanged)
+		float price = GetSellValue();
+		Singleton<EconomyManager>.Ins.AddMoney(price);
+		// → fire OnOreSold so quest system (Phase F) can track resource deposits
+		// purpose: quest system tracks resource deposits (Phase F subscribes)
+		GameEvents.RaiseOreSold(price, _resourceType, _pieceType);
+		// → return me to pool for reuse
+		Delete();
+	}
+	#endregion
+}
+
+<!-- ==== FILE: phase-c(new)/Scripts/3-MonoBehaviours/PhysicsLimitUIWarning.cs ==== -->
+using UnityEngine;
+
+/// <summary>
+/// I show/hide a warning panel on the UI when the ore limit is reached. I subscribe to
+/// OnOreLimitChanged from OreLimitManager. At Regular state I hide myself entirely. At
+/// SlightlyLimited/HighlyLimited I show the soft limit warning text. At Blocked I show
+/// the hard limit warning text. I'm fully decoupled from OreLimitManager — I just react
+/// to the event, no direct reference.
+///
+/// Who uses me: Canvas (placed as a child of the main Canvas).
+/// Events I subscribe to: OnOreLimitChanged.
+/// </summary>
+public class PhysicsLimitUIWarning : MonoBehaviour
+{
+	#region Inspector Fields
+	[SerializeField] GameObject _softLimitObject;
+	[SerializeField] GameObject _hardLimitObject;
+	#endregion
+
+	#region Unity Life Cycle
+	private void Start()
+	{
+		// purpose: react to ore limit state changes from OreLimitManager
+		GameEvents.OnOreLimitChanged += HandleLimitChanged;
+		HandleLimitChanged(OreLimitState.Regular);
+	}
+	/// <summary> Switches between hidden (Regular), soft limit warning (Slightly/Highly), and
+	/// hard limit warning (Blocked) by toggling _softLimitObject and _hardLimitObject GOs. </summary>
+	void HandleLimitChanged(OreLimitState state)
+	{
+		switch (state)
+		{
+			case OreLimitState.Regular:
+				gameObject.SetActive(false);
+				break;
+			case OreLimitState.SlightlyLimited:
+			case OreLimitState.HighlyLimited:
+				gameObject.SetActive(true);
+				_softLimitObject.SetActive(true);
+				_hardLimitObject.SetActive(false);
+				break;
+			case OreLimitState.Blocked:
+				gameObject.SetActive(true);
+				_softLimitObject.SetActive(false);
+				_hardLimitObject.SetActive(true);
+				break;
+		}
+	}
+	#endregion
+}
+
+<!-- ==== FILE: phase-c(new)/Scripts/3-MonoBehaviours/SellerMachine.cs ==== -->
+using UnityEngine;
+
+/// <summary>
+/// I sell anything that enters my trigger collider (IsTrigger=true). When an OrePiece enters,
+/// I call SellAfterDelay which tags it MarkedForDestruction (so other triggers skip it), waits
+/// 2 seconds, then adds money via EconomyManager and fires OnOreSold. The OrePiece returns to
+/// pool automatically. For non-OrePiece BaseSellableItems, I sell immediately and Destroy them.
+/// I skip anything already tagged MarkedForDestruction or without a Rigidbody.
+///
+/// Who uses me: Scene (placed as a funnel/hopper for ore to fall into).
+/// Events I fire: OnOreSold (indirectly via OrePiece.SellAfterDelay).
+/// </summary>
+public class SellerMachine : MonoBehaviour
+{
+	#region Unity Life Cycle
+	/// <summary> When any collider enters my trigger: skips MarkedForDestruction and no-Rigidbody objects.
+	/// If it's an OrePiece, calls SellAfterDelay (2s delay → money → pool). If it's a BaseSellableItem,
+	/// sells immediately and Destroys the GO. </summary>
+	private void OnTriggerEnter(Collider other)
+	{
+		if (other.HasTag(TagType.MarkedForDestruction) || other.attachedRigidbody == null) return;
+		OrePiece orePiece = other.GetComponentInParent<OrePiece>();
+		if (orePiece != null)
+		{
+			orePiece.SellAfterDelay();
+			return;
+		}
+		// Phase E: BoxObject sell
+		// var box = other.GetComponentInParent<BoxObject>();
+		// if (box != null) { SellBox(box); return; }
+		BaseSellableItem sellable = other.GetComponentInParent<BaseSellableItem>();
+		if (sellable != null)
+		{
+			Singleton<EconomyManager>.Ins.AddMoney(sellable.GetSellValue());
+			// purpose: quest system tracks sold items (Phase F)
+			GameEvents.RaiseOreSold(sellable.GetSellValue(), ResourceType.INVALID, PieceType.INVALID);
+			Object.Destroy(sellable.gameObject);
+		}
+	}
+	#endregion
+}
+
+<!-- ==== FILE: phase-c(new)/Scripts/4-Utils/PhaseCLOG.cs ==== -->
+using System.Collections.Generic;
+using UnityEngine;
+using SPACE_UTIL;
+
+/// <summary>
+/// formats resource description snapshots for test logging
+/// </summary>
+public static class PhaseCLOG
+{
+	/// <summary> snapshot of all resource descriptions </summary>
+	public static string LIST_RESOURCE_DESC__TO__JSON(List<ResourceDescription> RESOURCE_DESC)
+	{
+		var snapshot = RESOURCE_DESC.map(rd => new
+		{
+			rd.ResourceType,
+			Color = $"#{ColorUtility.ToHtmlStringRGB(rd.DisplayColor)}",
+		});
+		return snapshot.ToNSJson(pretify: true);
+	}
+}
+
+<!-- ==== FILE: phase-c(new)/Scripts/4-Utils/UtilsPhaseC.cs ==== -->
+using System;
+using System.Collections.Generic;
+using UnityEngine;
+
+/// <summary>
+/// weighted random selection + ore helpers — centralized, DRY
+/// </summary>
+public static class UtilsPhaseC
+{
+	/// <summary> Picks one item from a list using weighted random selection. Higher weight = more
+	/// likely to be chosen. Used everywhere ore drops are selected: OreNode, AutoMiner, OrePiece sieving. </summary>
+	public static T WeightedRandom<T>(List<T> items, Func<T, float> getWeight)
+	{
+		if (items == null || items.Count == 0) return default;
+		if (items.Count == 1) return items[0];
+		float total = items.sum(getWeight);
+		float roll = UnityEngine.Random.value * total;
+		float cumulative = 0f;
+		foreach (var item in items)
+		{
+			cumulative += getWeight(item);
+			if (roll <= cumulative) return item;
+		}
+		return items[items.Count - 1];
+	}
+
+	/// <summary> Convenience method that reads a WeightedOreChance list (from SO_AutoMinerResourceDefinition),
+	/// optionally filters out gems, then calls WeightedRandom to pick one OrePiece prefab. </summary>
+	public static OrePiece PickOrePrefab(List<WeightedOreChance> list, bool canProduceGems)
+	{
+		if (list == null || list.Count == 0) return null;
+		var filtered = canProduceGems ? list : list.FindAll(o => o.OrePrefab.PieceType != PieceType.Gem);
+		return WeightedRandom(filtered, o => o.Weight)?.OrePrefab;
+	}
+}
+
+<!-- ==== FILE: phase-c(new)/Scripts/5-Tests/DEBUG_CheckC.cs ==== -->
+using System.Collections.Generic;
+using UnityEngine;
+using SPACE_UTIL;
+
+/// <summary>
+/// OreDataService plain C# test — zero scene dependency
+/// Prerequisites: OreDataService.cs, GlobalEnumsC.cs
+/// NOT required: Player, tools, nodes, pool — nothing
+/// How to test:
+///   Space → Build + log snapshot
+///   U → GetColoredResourceTypeString(Iron)
+///   I → GetDefaultSellValue test (needs OrePiece prefabs — limited without scene)
+///   O → Log full snapshot
+/// </summary>
+public class DEBUG_CheckC : MonoBehaviour
+{
+	#region Inspector Fields
+	[SerializeField] List<ResourceDescription> _testDescriptions;
+	#endregion
+
+	#region Unity Life Cycle
+	OreDataService ds = new OreDataService();
+	private void Update()
+	{
+		if (INPUT.K.InstantDown(KeyCode.Space))
+		{
+			ds.Build(_testDescriptions);
+			Debug.Log(ds.GetSnapshot("after Build()"));
+		}
+		else if (INPUT.K.InstantDown(KeyCode.U))
+		{
+			Debug.Log(ds.GetColoredResourceTypeString(ResourceType.Iron).colorTag("cyan"));
+			Debug.Log(ds.GetColoredFormattedResourcePieceString(ResourceType.Iron, PieceType.Ore));
+			Debug.Log(ds.GetColoredFormattedResourcePieceString(ResourceType.Gold, PieceType.DrillBit));
+			Debug.Log(ds.GetColoredFormattedResourcePieceString(ResourceType.Slag, PieceType.Pipe));
+		}
+		else if (INPUT.K.InstantDown(KeyCode.O))
+		{
+			LOG.AddLog(ds.GetSnapshot("full snapshot"), "json");
+		}
+	}
+	#endregion
+}
+
+<!-- ==== FILE: phase-c(new)/Scripts/5-Tests/Manual/AutoMinerVisualTest.md ==== -->
+# Auto Miner Visual — Manual Test
+
+> Verifies: rotator spins, ore spawns on timer, probability-based, throttled by limit.
+
+---
+
+## Prerequisites
+
+- All singletons from MiningFlowTest setup (ParticleManager, OrePiecePoolManager, OreLimitManager, OreManager, EconomyManager)
+- OrePiece prefabs registered in pool
+
+---
+
+## Setup Guide
+
+### Step 1 — SO_AutoMinerResourceDefinition Asset
+
+1. In Project panel: Create → SO → SO_AutoMinerResourceDefinition
+2. Name it `AutoMiner_IronDef`
+3. Set:
+   - `SpawnProbability` = 80
+   - `SpawnRate` = 2
+   - `_possibleOrePrefabs` list:
+     - [0] OrePrefab = `OrePiece_Iron`, Weight = 80
+     - [1] OrePrefab = `OrePiece_Gold`, Weight = 20
+
+### Step 2 — AutoMiner Prefab
+
+```
+AutoMiner (root GO)
+│
+│  Components on root:
+│   - AutoMiner component:
+│       _rotator → Rotator child
+│       _oreSpawnPoint → SpawnPoint child
+│       _rotateY = true (or _rotateZ = true)
+│       _enabled = true
+│       _oresPerRotation = 12
+│       _resourceDefinition → AutoMiner_IronDef (from Step 1)
+│       _spawnProbability = (auto-set from definition in Start)
+│       _spawnRate = (auto-set from definition in Start)
+│       _fallbackOrePrefab → OrePiece_Iron (fallback if def is null)
+│
+├── Rotator (visual mesh — this spins)
+│   └── drill_mesh (MeshFilter + MeshRenderer)
+│
+└── SpawnPoint (empty GO positioned below the drill tip)
+    - This is where ore appears
+```
+
+Place in scene.
+
+### Step 3 — OreTest Script
+
+Use existing OreTest GO from MiningFlowTest. Assign `_cam` for U key spawns.
+
+### Final Hierarchy (add to MiningFlowTest scene)
+
+```
+Scene Root
+├── ... (singletons from MiningFlowTest)
+├── AutoMiner (placed on floor near OreNodes)
+├── OreTest
+└── Floor
+```
+
+---
+
+## 1. Initial State
+
+**DO:** Press Play, look at AutoMiner
+**EXPECT:**
+- Rotator child is **visible** (drill mesh)
+- No ore pieces near miner yet
+- No console errors
+
+---
+
+## 2. Rotator Spinning
+
+**DO:** Watch the Rotator for a few seconds
+**EXPECT:**
+- Rotator **spins continuously** around the configured axis (_rotateY → spins around Y)
+- Speed: `360° / (SpawnRate × OresPerRotation)` per second = `360° / (2 × 12)` = **15°/s**
+- Smooth rotation, no jitter
+
+---
+
+## 3. First Ore Spawn
+
+**DO:** Wait ~2 seconds (SpawnRate = 2)
+**EXPECT:**
+- **Ore piece appears** at SpawnPoint position
+- Falls via gravity onto floor
+- Piece is from the weighted drop list (likely Iron at 80% chance)
+
+---
+
+## 4. Continuous Spawning
+
+**DO:** Watch for 20 seconds (~10 spawn cycles)
+**EXPECT:**
+- New ore piece every ~2 seconds
+- **Not every cycle spawns** — ~80% spawn, ~20% skip (probability check)
+- Over 10 cycles: expect roughly 7-9 pieces (random)
+
+---
+
+## 5. Weighted Drop Verification
+
+**DO:** Inspect spawned pieces over 20+ spawns → count Iron vs Gold
+**EXPECT:**
+- **~80% Iron**, **~20% Gold** (matches weights 80:20)
+- Some variance is normal — weighted random, not exact ratio
+
+---
+
+## 6. Limit Throttling
+
+**DO:** Spawn many extra ore pieces via `U` key (50+ pieces) until OreLimitManager fires
+**EXPECT:**
+- Console: `[OreTest] LimitState: SlightlyLimited`
+- AutoMiner spawn interval **increases** — visually, ore appears *less frequently*
+- Rotator still spins at same speed (rotation is independent of spawn timer)
+
+**DO:** Keep spawning until Blocked state
+**EXPECT:**
+- Console: `[OreTest] LimitState: Blocked`
+- AutoMiner **stops spawning entirely** — no new ore appears
+- Rotator still spins (visual only)
+
+---
+
+## 7. Disabled State
+
+**DO:** Set `_enabled = false` on AutoMiner in Inspector during Play mode
+**EXPECT:**
+- Rotator **stops spinning**
+- No ore spawns
+- No errors
+
+**DO:** Set `_enabled = true` again
+**EXPECT:**
+- Rotator **resumes spinning**
+- Ore spawning resumes on next timer tick
+
+---
+
+## 8. Edge Case — No Resource Definition
+
+**DO:** Create an AutoMiner with `_resourceDefinition` = None, `_fallbackOrePrefab` = OrePiece_Iron
+**EXPECT:**
+- Miner uses `_fallbackOrePrefab` instead of weighted selection
+- All spawned pieces are Iron (no weighted variety)
+
+---
+
+## Summary Checklist
+
+- [ ] Rotator spins at correct speed on correct axis
+- [ ] Ore spawns at SpawnPoint every ~SpawnRate seconds
+- [ ] ~80% spawn probability — not every cycle produces ore
+- [ ] Weighted drops: ~80% Iron, ~20% Gold (matches SO definition)
+- [ ] OreLimitManager SlightlyLimited → slower spawn rate
+- [ ] OreLimitManager Blocked → zero spawning
+- [ ] Disabled → no spin, no spawn; re-enabled → resumes
+- [ ] No definition → uses fallback prefab
+- [ ] No console errors throughout
+
+<!-- ==== FILE: phase-c(new)/Scripts/5-Tests/Manual/MiningFlowTest.md ==== -->
+# Mining Flow — Manual Test
+
+> Verifies: hit node → particles → health decrease → shatter → ore pieces fly + bounce + settle.
+
+---
+
+## Prerequisites
+
+- `OreTest.cs` script on a GO in scene (provides Space key to damage node)
+- `EconomyManager` singleton (from phase-All)
+
+---
+
+## Setup Guide — Step by Step
+
+### Step 1 — Singletons
+
+Create these Empty GOs in scene root. Each needs its singleton component:
+
+| GO Name | Component | Notes |
+|---------|-----------|-------|
+| `ParticleManager` | `ParticleManager` | Assign: `GenericHitImpactParticle`, `OreNodeHitParticlePrefab`, `BreakOreNodeParticlePrefab` (create 3 particle system prefabs or use placeholders) |
+| `OrePiecePoolManager` | `OrePiecePoolManager` | Assign: `_allOrePiecePrefabs` → list of all OrePiece prefabs (see Step 3) |
+| `OreLimitManager` | `OreLimitManager` | `_movingObjectLimit` = 500 (default) |
+| `OreManager` | `OreManager` | Assign: `_allResourceDescriptions` → list of ResourceDescription entries (see Step 2) |
+| `EconomyManager` | `EconomyManager` | `_defaultMoney` = 400 (from phase-All) |
+
+### Step 2 — Resource Descriptions
+
+On `OreManager` → `_allResourceDescriptions` list, add entries:
+
+| Index | ResourceType | DisplayColor |
+|-------|-------------|-------------|
+| 0 | Iron | Grey (0.6, 0.6, 0.6) |
+| 1 | Gold | Yellow (1, 0.84, 0) |
+| 2 | Coal | Dark Grey (0.2, 0.2, 0.2) |
+| 3 | Copper | Orange (0.85, 0.5, 0.2) |
+
+### Step 3 — OrePiece Prefab
+
+Create a prefab:
+
+```
+OrePiece_Iron (root GO)
+│
+│  Components on root:
+│   - Rigidbody (mass 0.5, no constraints, gravity ON)
+│   - OrePiece component:
+│       _resourceType = Iron
+│       _pieceType = Ore
+│       _isPolished = false
+│       BaseSellValue = 1.0
+│       _useRandomMesh = true
+│       _useRandomScale = true
+│       _scaleVariance = (0.25, 0.25, 0.25)
+│       _possibleMeshes = [assign 2-3 mesh variants]
+│       _meshFilter = this GO's MeshFilter
+│       _meshCollider = this GO's MeshCollider (optional)
+│   - MeshFilter
+│   - MeshRenderer (assign a material matching Iron color)
+│   - MeshCollider (convex = true) OR BoxCollider
+│   - Tag: "Grabbable"
+│   - Layer: "Interact"
+```
+
+Save as prefab → add to `OrePiecePoolManager._allOrePiecePrefabs` list.
+
+Repeat for Gold, Coal, Copper with different materials/colors.
+
+### Step 4 — WeightedNodeDrop Setup
+
+For each OrePiece prefab, you'll reference it in OreNode's `_possibleDrops` list (Step 5).
+
+### Step 5 — OreNode Prefab
+
+Create a prefab:
+
+```
+OreNode_Iron (root GO)
+│
+│  Components on root:
+│   - OreNode component:
+│       _resourceType = Iron
+│       _health = 100
+│       _minDrops = 2
+│       _maxDrops = 4
+│       _possibleDrops = [
+│           { OrePrefab = OrePiece_Iron, Weight = 100 }
+│       ]
+│       _models = [Model_0, Model_1, Model_2]
+│   - BoxCollider or MeshCollider (for pickaxe raycast to hit)
+│   - Layer: "Interact"
+│
+├── Model_0 (MeshFilter + MeshRenderer, rock mesh variant 1)
+├── Model_1 (different rock mesh variant)
+└── Model_2 (different rock mesh variant)
+```
+
+Place 2-3 OreNode prefabs in the scene (on floor or walls).
+
+### Step 6 — OreTest Script
+
+1. Create Empty GO → name `OreTest`
+2. Add `OreTest` component
+3. Wire:
+
+| Field | Drag From |
+|-------|-----------|
+| `_testNode` | One of the OreNode instances in scene |
+| `_testOrePrefab` | OrePiece_Iron prefab (from Project) |
+| `_cam` | Camera (for U key spawn position) |
+
+### Step 7 — Floor
+
+- Plane at y=0, layer "Default" — ore pieces land here
+
+### Final Scene Hierarchy
+
+```
+Scene Root
+├── EconomyManager
+├── ParticleManager
+├── OrePiecePoolManager
+├── OreLimitManager
+├── OreManager
+├── OreTest
+├── Floor (Plane)
+├── OreNode_Iron_01 (placed on floor)
+├── OreNode_Iron_02
+└── OreNode_Gold_01
+```
+
+---
+
+## 1. Initial State
+
+**DO:** Press Play
+**EXPECT:**
+- Each OreNode shows **one random model variant** (the others are hidden — `_models[i].SetActive(i == chosen)`)
+- No ore pieces on ground
+- No particles visible
+- Console: no errors
+
+---
+
+## 2. First Hit (Health Reduced)
+
+**DO:** Press `Space` (OreTest calls `_testNode.TakeDamage(50, position)`)
+**EXPECT:**
+- OreNode **still exists** — health was 100, now 50
+- **No ore pieces** yet — node didn't break
+- Console: no OnOreMined event (node not destroyed)
+
+---
+
+## 3. Breaking Hit (Health Reaches Zero)
+
+**DO:** Press `Space` again (another 50 damage → health = 0)
+**EXPECT:**
+- OreNode **disappears** from scene (Destroyed)
+- **2-4 ore pieces fly out** from a point between node center and hit position
+  - Each piece has **random velocity**: lateral ±1.5, upward 2-4
+  - Each piece has **random angular velocity** (tumbles)
+- Pieces **bounce and roll** on the floor (Rigidbody physics)
+- **Break particle burst** appears at hit point (BreakOreNodeParticlePrefab)
+- Console: `[OreTest] Mined: Iron at (x, y, z)`
+
+---
+
+## 4. Inspect Ore Piece
+
+**DO:** Pause the game → select an ore piece in Scene view → check Inspector
+**EXPECT:**
+- Tag: `"Grabbable"`
+- Layer: `"Interact"`
+- `OrePiece` component:
+  - `ResourceType` = Iron (matches the broken node)
+  - `PieceType` = Ore
+  - `BaseSellValue` = non-zero (e.g. 1.0)
+  - `RandomPriceMultiplier` = between 0.9 and 1.1
+- MeshFilter: one of the `_possibleMeshes` variants (random)
+- Transform.localScale: slightly varied from original (random scale)
+
+---
+
+## 5. Spawn Ore Directly
+
+**DO:** Unpause → press `U` (OreTest spawns ore at camera forward via pool)
+**EXPECT:**
+- New ore piece **appears** 2m in front of camera
+- Falls via gravity, bounces on floor
+- Console: no event (direct spawn doesn't fire OnOreMined)
+
+---
+
+## 6. Check Ore Count
+
+**DO:** Press `I`
+**EXPECT:**
+- Console: `OrePiece count: X` where X = number of active ore pieces in scene
+
+---
+
+## 7. Multiple Node Types
+
+**DO:** Assign `_testNode` to a Gold OreNode (or add a second OreTest with different node). Break it.
+**EXPECT:**
+- Gold ore pieces fly out (different material/color from Iron)
+- Console: `[OreTest] Mined: Gold at (x, y, z)`
+- No Iron pieces from a Gold node — drops match node's `_possibleDrops`
+
+---
+
+## 8. Edge Case — Empty Drops List
+
+**DO:** Create an OreNode with `_possibleDrops` = empty list. Break it.
+**EXPECT:**
+- Node breaks (disappears + particles)
+- **Zero ore pieces** spawn — `GetOrePrefab()` returns null, loop skips
+- No crash, no console errors
+
+---
+
+## Summary Checklist
+
+- [ ] OreNode shows one random model variant on Start
+- [ ] First hit (50 damage) reduces health but doesn't break
+- [ ] Second hit (0 health) → node destroyed
+- [ ] 2-4 ore pieces fly out with random velocity + angular velocity
+- [ ] Pieces have random mesh variant from `_possibleMeshes`
+- [ ] Pieces have slight random scale variation
+- [ ] Break particle burst at hit point
+- [ ] Console: `[OreTest] Mined: Iron at (x,y,z)`
+- [ ] U key spawns ore via pool (no event)
+- [ ] I key logs current ore count
+- [ ] Different node types produce matching ore types
+- [ ] Empty drops list → no crash, zero pieces
+- [ ] All ore pieces tagged "Grabbable", layer "Interact"
+
+<!-- ==== FILE: phase-c(new)/Scripts/5-Tests/Manual/SellerMachineTest.md ==== -->
+# Seller Machine — Manual Test
+
+> Verifies: ore enters trigger → waits → money increases → ore returns to pool.
+
+---
+
+## Prerequisites
+
+- All singletons from MiningFlowTest setup
+- OrePiece prefabs registered in pool
+- OreTest script on a GO (for U key ore spawning)
+
+---
+
+## Setup Guide
+
+### Step 1 — SellerMachine GO
+
+1. Create Empty GO → name `SellerMachine`
+2. Add `BoxCollider`:
+   - **IsTrigger = true** ← critical
+   - Size: (2, 1, 2) — large enough for ore to roll/fall into
+3. Add `SellerMachine` component (no SerializeFields to wire)
+4. Position on the floor — visible and accessible
+
+Optional visual: add a child GO with a MeshRenderer (e.g. a funnel/hopper shape) so you can see where the trigger is.
+
+### Step 2 — Verify OreTest Wiring
+
+On `OreTest` component:
+
+| Field | Drag From |
+|-------|-----------|
+| `_testOrePrefab` | OrePiece_Iron prefab |
+| `_cam` | Camera (for U key spawn direction) |
+
+### Step 3 — Money Logging
+
+OreTest.Start already subscribes:
+```
+GameEvents.OnOreSold → logs "[OreTest] Sold: Iron Ore for $X.XX"
+GameEvents.OnMoneyChanged → logs "[OreTest] Money: $XXX.XX"
+```
+
+### Final Hierarchy (add to MiningFlowTest scene)
+
+```
+Scene Root
+├── ... (singletons from MiningFlowTest)
+├── SellerMachine (with trigger collider on floor)
+├── OreTest
+└── Floor
+```
+
+---
+
+## 1. Initial State
+
+**DO:** Press Play, open Console
+**EXPECT:**
+- SellerMachine trigger visible in **Scene view** as green wireframe box
+- Starting money: `$400.00` (EconomyManager default)
+- No ore pieces in scene
+- No console errors
+
+---
+
+## 2. Spawn Ore Near Seller
+
+**DO:** Press `U` to spawn an ore piece — aim so it lands **inside or near** the seller trigger
+**EXPECT:**
+- Ore piece **appears** 2m in front of camera
+- Falls via gravity toward the seller
+- If it lands inside the trigger → proceed to Step 3
+- If it misses → spawn another closer to the trigger
+
+---
+
+## 3. Ore Enters Trigger
+
+**DO:** Observe when ore piece enters the SellerMachine trigger collider
+**EXPECT:**
+- `OnTriggerEnter` fires on SellerMachine
+- Ore is **tagged "MarkedForDestruction"** immediately
+  - Check in Inspector during Play: tag changed from "Grabbable" to "MarkedForDestruction"
+- Other triggers will now **ignore** this ore (they check `CompareTag("MarkedForDestruction")`)
+- Ore is **still visible** — it hasn't sold yet (2s delay starts)
+
+---
+
+## 4. After 2-Second Delay
+
+**DO:** Wait 2 seconds after ore entered trigger
+**EXPECT:**
+- Ore piece **disappears** (returned to pool → `SetActive(false)`)
+- Console: `[OreTest] Sold: Iron Ore for $X.XX` (price = BaseSellValue × RandomPriceMultiplier)
+- Console: `[OreTest] Money: $40X.XX` (starting 400 + sell value)
+- Money on HUD updates (if MoneyHUD exists)
+
+---
+
+## 5. Multiple Ore Simultaneously
+
+**DO:** Spawn 3-4 ore pieces rapidly (press `U` multiple times) → let all enter trigger
+**EXPECT:**
+- Each piece is tagged "MarkedForDestruction" independently on trigger enter
+- Each sells after its own 2s delay (they don't batch)
+- Console shows **multiple** Sold messages — one per piece
+- Money increases **incrementally** per piece
+- `OrePiece.AllOrePieces` count decreases as each is returned to pool
+
+**DO:** Press `I` to check ore count after all sell
+**EXPECT:**
+- Count decreased by the number sold
+
+---
+
+## 6. Pool Recycling Verification
+
+**DO:** After selling 3+ ore, press `U` again to spawn new ore
+**EXPECT:**
+- New ore **reuses a pooled piece** — no new Instantiate (you can verify in Hierarchy: piece name ends with `[Pooled]`)
+- Pooled piece has its **original mesh + scale** from first spawn (pool reset doesn't re-randomize mesh/scale — `Start()` only runs once per Instantiate, not on pool recycle)
+
+---
+
+## 7. MarkedForDestruction Prevents Double-Sell
+
+**DO:** Spawn ore → let it enter seller trigger → immediately push it into a second seller trigger (if you have two)
+**EXPECT:**
+- Only **one** sell occurs — second trigger checks `CompareTag("MarkedForDestruction")` and returns early
+- No double money, no console double-log
+
+---
+
+## 8. Non-OrePiece Sellable (BaseSellableItem)
+
+**DO:** Create a simple GO with `BaseSellableItem` component (BaseSellValue = 5), Rigidbody, Collider, push it into seller
+**EXPECT:**
+- Item is **Destroyed** (not pooled — only OrePiece uses pool)
+- Money increases by 5
+- Console: `[OreTest] Sold: INVALID INVALID for $5.00` (INVALID because BaseSellableItem doesn't have ResourceType/PieceType)
+
+---
+
+## 9. Edge Case — Ore Already MarkedForDestruction
+
+**DO:** Manually tag an ore piece as "MarkedForDestruction" in Inspector → push into seller
+**EXPECT:**
+- `OnTriggerEnter` checks tag first → **returns immediately**
+- No sell, no money change, no console log
+
+---
+
+## Summary Checklist
+
+- [ ] Ore enters trigger → tagged "MarkedForDestruction" immediately
+- [ ] 2s delay before sell completes
+- [ ] Money increases by sell value (BaseSellValue × RandomPriceMultiplier)
+- [ ] Console: `OnOreSold` fires with correct ResourceType + PieceType
+- [ ] Console: `OnMoneyChanged` fires with new total
+- [ ] Ore returns to pool (disappears via SetActive false, not Destroyed)
+- [ ] Multiple ore sell independently (own 2s timers)
+- [ ] Pool recycles: next spawn reuses dequeued piece (name has [Pooled])
+- [ ] MarkedForDestruction prevents double-sell
+- [ ] Non-OrePiece sellable: Destroyed, not pooled
+- [ ] Pre-tagged MarkedForDestruction ore: ignored by seller
+- [ ] Zero console errors throughout
+
+<!-- ==== FILE: phase-c(new)/Scripts/5-Tests/OreTest.cs ==== -->
+using System.Collections.Generic;
+using UnityEngine;
+using SPACE_UTIL;
+
+/// <summary>
+/// Spawn/mine/sell flow test — needs scene with OreNodes, Pool, Seller
+/// Prerequisites: All Phase C scripts + EconomyManager
+/// NOT required: Player (use test controls), inventory, shop
+/// How to test:
+///   Space → damage nearest OreNode by 50
+///   U → spawn OrePiece at camera forward
+///   I → log OrePiece.AllOrePieces count
+///   O → log OreDataService snapshot
+///   M/N → menu toggle (sim)
+/// </summary>
+public class OreTest : MonoBehaviour
+{
+	#region Inspector Fields
+	[SerializeField] OreNode _testNode;
+	[SerializeField] OrePiece _testOrePrefab;
+	[SerializeField] Camera _cam;
+	[TextArea(5, 10)]
+	string README = @"Space → damage testNode by 50
+U → spawn ore at camera forward
+I → log ore count
+O → log OreDataService snapshot
+M/N → menu toggle";
+	#endregion
+
+	#region Unity Life Cycle
+	private void Start()
+	{
+		// purpose: log when ore is mined
+		GameEvents.OnOreMined += (type, pos) => Debug.Log($"[OreTest] Mined: {type} at {pos}".colorTag("lime"));
+		// purpose: log when ore is sold
+		GameEvents.OnOreSold += (price, type, piece) => Debug.Log($"[OreTest] Sold: {type} {piece} for ${price}".colorTag("cyan"));
+		// purpose: log ore limit state changes
+		GameEvents.OnOreLimitChanged += (state) => Debug.Log($"[OreTest] LimitState: {state}".colorTag("orange"));
+		// purpose: log money changes
+		GameEvents.OnMoneyChanged += (money) => Debug.Log($"[OreTest] Money: {money.formatMoney()}".colorTag("lime"));
+	}
+	private void Update()
+	{
+		if (INPUT.K.InstantDown(KeyCode.Space) && _testNode != null)
+		{
+			_testNode.TakeDamage(50f, _testNode.transform.position);
+		}
+		else if (INPUT.K.InstantDown(KeyCode.U) && _testOrePrefab != null && _cam != null)
+		{
+			Vector3 pos = _cam.transform.position + _cam.transform.forward * 2f;
+			Singleton<OrePiecePoolManager>.Ins.SpawnPooledOre(_testOrePrefab, pos, Quaternion.identity);
+		}
+		else if (INPUT.K.InstantDown(KeyCode.I))
+		{
+			Debug.Log($"OrePiece active: {OrePiece.AllOrePieces.Count}, pooled: {Singleton<OrePiecePoolManager>.Ins.GetInactiveCount()}".colorTag("cyan"));
+		}
+		else if (INPUT.K.InstantDown(KeyCode.O))
+		{
+			LOG.AddLog(Singleton<OreManager>.Ins.DataService.GetSnapshot("ore test"), "json");
+		}
+		else if (INPUT.K.InstantDown(KeyCode.M)) GameEvents.RaiseMenuStateChanged(true);
+		else if (INPUT.K.InstantDown(KeyCode.N)) GameEvents.RaiseMenuStateChanged(false);
+	}
+	#endregion
+}
+
