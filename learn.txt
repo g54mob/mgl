@@ -2091,7 +2091,13 @@ Every phase folder has a `GUIDE.md` with:
 - **Folder structure**
 - **Script Purpose** — one sentence per script (if it doesn't fit one sentence, split it)
 - **Hand-typing order** (compile groups with stop-and-test points)
-- **Vertical Slice Test checklist per system** (internal/external prerequisites, NOT required, controls)
+- **Vertical Slice Tests** — beginner-friendly step-by-step for each `.cs` test:
+  - Conversational intro explaining what this test proves
+  - "What you need to type first" / "What you DON'T need"
+  - Step-by-step scene setup (numbered: create GO, add component, wire fields with `| Field | Drag From |` tables)
+  - "How to test" table: `| Key | What it does | What you should see |`
+  - "Full test flow" (ordered steps for complex tests: "do this first, then this, expect this")
+  - Checklist — pass/fail items
 - **Art & Scene Work (Non-Script)** — everything the user needs to create in Unity Editor:
   - Animation assets: clip names, AnimatorController state machine flow (states, transitions, HasExitTime settings)
   - Audio: which clips are needed, where they play, what triggers them (even if SoundManager is Phase H — list them as stubs so the user knows what to prepare)
@@ -2380,12 +2386,14 @@ For each phase, the agent must produce:
    - Folder structure (numbered: 0-Core, 1-Managers, 2-Data, 3-MonoBehaviours, 4-Utils, 5-Tests)
    - Script Purpose — one sentence per script
    - Hand-typing order (compile groups with stop-and-test points)
-   - Vertical Slice Tests — per system, each with:
-     - Internal prerequisites
-     - External prerequisites (exact scene setup)
-     - NOT required (proves LEGO independence)
-     - Controls
-     - Checklist
+   - Vertical Slice Tests — beginner-friendly step-by-step for each `.cs` test:
+     - Conversational intro: what this test proves (1-2 sentences)
+     - "What you need to type first" / "What you DON'T need"
+     - Step-by-step scene setup (numbered: create GO, add component, wire fields with `| Field | Drag From |` tables)
+     - "How to test" table: `| Key | What it does | What you should see |`
+     - "Full test flow" for complex tests (ordered steps: do X → expect Y → do Z)
+     - Checklist: pass/fail items
+     - Reference: see `phase-b(New)/GUIDE.md` tests for the gold standard format
    - Scene Setup (full — GOs, components, wiring checklist)
    - Modifications to Earlier Phases (table: File | How | Change | Why)
    - Source vs Phase diff (what original did vs what we changed)
@@ -7875,156 +7883,236 @@ phase-b(New)/
 
 ## Vertical Slice Tests (`.cs` — automated bootstrap)
 
-> These scripts fire GameEvents + log to console. Run in Play mode.
-
 ### 1. DEBUG_CheckB — InventoryDataService (Data-Level)
 
-**Internal prerequisites:** `InventoryDataService.cs`, `GlobalEnumsB.cs`
-**External prerequisites:** Empty scene, one GO with `DEBUG_CheckB`
-**NOT required:** Player, tools, UI, shop, interaction — nothing
-**Controls:**
-- `Space` → Build 40 slots + log snapshot
-- `U` → TryAdd a mock tool at preferred slot
-- `I` → Remove tool at slot 0
-- `O` → Switch to slot 3
-- `P` → Log full snapshot
+> This test proves InventoryDataService works as pure C# — zero scene, zero UI, zero tools.
+> One GO, press keys, check the console. If this passes, your data layer is solid.
+
+**What you need to type first:** `InventoryDataService.cs`, `GlobalEnumsB.cs`
+**What you DON'T need:** Player, tools, UI, shop, interaction — nothing. Just the DataService.
+
+**Step-by-step scene setup:**
+1. Create a new empty scene in Unity
+2. Create an Empty GO → name it `DEBUG_CheckB`
+3. Add the `DEBUG_CheckB` component to it
+4. No inspector wiring needed — the test creates its own DataService via `new`
+5. Press Play
+
+**How to test:**
+
+| Key | What it does | What you should see in Console |
+|-----|-------------|-------------------------------|
+| `Space` | Builds 40 slots (10 hotbar + 30 extended) + logs snapshot | JSON with 40 slots, all empty, activeSlotIndex = 0 |
+| `U` | TryAdd a mock tool at preferred slot | Logs which slot the tool was added to |
+| `I` | Remove tool at slot 0 | Logs removal confirmation |
+| `O` | SwitchTo slot 3 | Logs new activeSlotIndex = 3 |
+| `P` | Log full snapshot | JSON with all 40 slots + current active index |
 
 **Checklist:**
-- [ ] Build creates 40 slots (10 hotbar + 30 extended)
-- [ ] TryAdd places tool in first empty slot
-- [ ] Remove nulls the slot
-- [ ] SwitchTo changes activeSlotIndex
-- [ ] Scroll wraps within hotbar bounds
-- [ ] Swap exchanges two slots
-- [ ] Snapshot logs all slot states
+- [ ] Space → 40 slots created (10 hotbar + 30 extended)
+- [ ] U → TryAdd places tool in first empty slot
+- [ ] I → Remove nulls the slot
+- [ ] O → SwitchTo changes activeSlotIndex
+- [ ] P → Snapshot logs all slot states correctly
+- [ ] Zero console errors
+
+---
 
 ### 2. PlayerMovementTest — WASD + Jump + Sprint (UI-Level)
 
-**Internal prerequisites:** `PlayerMovement.cs`, `PlayerCamera.cs`, `GameEvents.cs`
-**External prerequisites:**
-- Scene with a floor (Plane) + a few walls
-- Empty GO "Player" with: CharacterController, PlayerMovement, PlayerCamera
-- Child GO "Camera" with Camera component
-- Child GO "GroundCheck" positioned at player feet
-- Assign: `_playerCam`, `_cc`, `_groundCheck`, `_groundLayer` in inspector
-**NOT required:** Inventory, tools, shop, interaction
-**Controls:**
-- `WASD` → move
-- `Space` → jump
-- `Shift` → sprint (FOV widens)
-- `C` → duck
-- `M` → simulate menu open (locks input)
-- `N` → simulate menu close (unlocks input)
+> This test proves the player can walk, jump, sprint, duck, and look around.
+> No inventory, no tools — just movement physics on a floor with some walls.
+
+**What you need to type first:** `PlayerMovement.cs`, `PlayerCamera.cs`, `PlayerFootsteps.cs`, `PlayerSpawnPoint.cs`, `GameEvents.cs`
+**What you DON'T need:** Inventory, tools, shop, interaction, grab
+
+**Step-by-step scene setup:**
+1. Create an Empty GO → name it `Player`
+2. Add `CharacterController` (height 2, radius 0.5, center 0,1,0)
+3. Add `PlayerMovement` component
+4. Add `PlayerCamera` component
+5. Create child of Player → name `Camera` → add `Camera` component
+6. Create child of Camera → name `ViewModelContainer` (empty — tools parent here later)
+7. Wire `PlayerMovement`:
+
+| Field | Drag From / Value |
+|-------|-------------------|
+| `_cc` | CharacterController (self) |
+| `_playerCam` | Camera child |
+| `_viewModelContainer` | ViewModelContainer child |
+| `_groundLayer` | "Ground" layer |
+| `_walkSpeed` | 4 |
+| `_sprintSpeed` | 6 |
+
+8. Wire `PlayerCamera`:
+
+| Field | Drag From |
+|-------|-----------|
+| `_cam` | Camera child |
+| `_movement` | PlayerMovement (on parent) |
+| `_viewModelContainer` | ViewModelContainer child |
+
+9. Create Floor — Plane at y=0, layer "Ground"
+10. Create a few wall cubes (scale 3,3,1) to test collision
+11. Create `PlayerMovementTest` GO → add `PlayerMovementTest` component
+12. Create `PlayerSpawnPoint` GO at (0, 1, 0)
+13. Press Play
+
+**How to test:**
+
+| Input | What should happen |
+|-------|-------------------|
+| `WASD` | Player moves in camera direction |
+| `Space` | Jump (only works when grounded) |
+| `Shift + W` | Sprint — faster + FOV widens slightly |
+| `C` | Duck — height shrinks, camera lowers |
+| `C` under ceiling | Release C → player can't stand up (blocked) |
+| `Walk off ledge` | Gravity pulls down, lands on floor |
+| `Walk on steep slope` | Slides downhill automatically |
+| `M` | Menu open → WASD/mouse look disabled, cursor unlocked |
+| `N` | Menu close → WASD/look re-enabled, cursor locked |
+| `V` | Noclip toggle — fly through walls, Space/C for up/down |
+| `Fall below y=-200` | Auto-respawn at PlayerSpawnPoint |
 
 **Checklist:**
-- [ ] WASD moves player
-- [ ] Jump works on ground only
-- [ ] Sprint increases speed + FOV
-- [ ] Duck lowers height, stand-up blocked under ceiling
-- [ ] Slope sliding kicks in past slope limit
-- [ ] Gravity pulls down when airborne
-- [ ] M key → menu open → WASD/look disabled
-- [ ] N key → menu close → WASD/look re-enabled
-- [ ] Cursor locked in FPS mode, unlocked in menu
-- [ ] V key toggles noclip — fly through walls, no gravity
-- [ ] Noclip: Space/C for up/down, Shift for fast fly
+- [ ] WASD moves relative to camera facing
+- [ ] Jump only works on ground
+- [ ] Sprint increases speed + FOV widens
+- [ ] Duck lowers height, blocked stand-up under ceiling
+- [ ] Slope sliding past slope limit
+- [ ] Gravity when airborne
+- [ ] M → input frozen, cursor free. N → input restored, cursor locked
+- [ ] V → noclip fly, Space/C up/down, Shift fast
+- [ ] Fall respawn works
+- [ ] Zero console errors
+
+---
 
 ### 3. PlayerGrabTest — SpringJoint Grab (UI-Level)
 
-**Internal prerequisites:** `PlayerMovement.cs`, `PlayerCamera.cs`, `PlayerGrab.cs`, `GameEvents.cs`
-**External prerequisites:**
-- Same player setup as PlayerMovementTest
-- Add `PlayerGrab` to player GO, assign `_cam`, `_holdPos`, `_dragger`, `_rope`
-- Child GO "HoldPosition" in front of camera
-- Child GO "RigidbodyDragger" (inactive, has Rigidbody + `RigidbodyDraggerController`, assign `_playerGrab`)
-- LineRenderer on player
-- 3-4 cubes with Rigidbody + tag "Grabbable" + layer "Interact"
-**NOT required:** Inventory, tools, shop
-**Controls:**
-- `Right-click` → grab/release toggle
-- `WASD` → move while holding
-- `M/N` → menu toggle
+> This test proves you can right-click to grab a physics object, drag it around with a rope,
+> and release it. See `Manual/GrabRopeTest.md` for the full setup — this is the same scene.
+
+**What you need to type first:** `PlayerGrab.cs`, `RigidbodyDraggerController.cs`, `PlayerMovement.cs`, `PlayerCamera.cs`, `GameEvents.cs`
+**What you DON'T need:** Inventory, tools, shop
+
+**Step-by-step scene setup:** Follow `Manual/GrabRopeTest.md` Steps 1-10 exactly — it has the full Player hierarchy, RigidbodyDragger setup, LineRenderer, and grabbable cubes. Then add a `PlayerGrabTest` GO with the test component.
+
+**How to test:**
+
+| Input | What should happen |
+|-------|-------------------|
+| `Right-click` on cube | SpringJoint connects, rope appears between hand and cube |
+| `WASD` while holding | Cube drags behind you on the spring |
+| `Right-click` again | Release — rope disappears, cube bounces |
+| `Pull cube very far` | SpringJoint breaks → ForceRelease, rope disappears |
+| `M` then right-click | Grab blocked (menu is open) |
+| `N` then right-click | Grab works again |
 
 **Checklist:**
-- [ ] Right-click on Grabbable → SpringJoint connects
-- [ ] LineRenderer rope visible between hand and object
-- [ ] Moving player drags object
-- [ ] Right-click again → releases, rope disappears
-- [ ] Object bounces naturally after release
-- [ ] Cannot grab while menu is open
-- [ ] Grab auto-releases if object is destroyed
-- [ ] Grab auto-releases if SpringJoint breaks (pull object too far)
+- [ ] Right-click on Grabbable → SpringJoint connects, rope visible
+- [ ] WASD moves player, cube follows on spring
+- [ ] Right-click again → clean release, rope gone
+- [ ] Pulling too far → joint breaks → auto-release
+- [ ] Menu open blocks grab
+- [ ] Zero console errors
+
+---
 
 ### 4. InventoryTest — Add/Remove/Switch Tools (UI-Level)
 
-**Internal prerequisites:** `InventoryDataService.cs`, `InventoryOrchestrator.cs`, `InventoryUI.cs`, `Field_InventorySlot.cs`, `BaseHeldTool.cs`, `GameEvents.cs`
-**External prerequisites:**
-- Canvas with hotbar panel (horizontal layout) + extended panel + selected item info panel (name/desc/icon/amount texts + equip/drop buttons) + drag ghost icon (Image + TMP_Text, starts inactive)
-- Empty GO with InventoryOrchestrator, assign `_hotbarContainer`, `_extendedContainer`, `_pfInventorySlot`, drag ghost refs, selected item info refs
-- Empty GO with InventoryUI SubManager
-- 2-3 BaseHeldTool prefabs in scene (with Rigidbody, WorldModel, ViewModel)
-**NOT required:** Player movement, grab, shop, interaction
-**Controls:**
-- `Space` → fire RaiseToolPickupRequested on first tool
-- `1-0` → switch hotbar slots
-- `Scroll` → cycle hotbar
-- `G` → drop active tool
-- `Tab` → toggle inventory panel
+> This test proves the full inventory UI: pick up tools, switch hotbar slots, drag-drop between
+> slots, open extended panel, selected item info. See `Manual/InventoryUITest.md` for full UI setup.
+
+**What you need to type first:** `InventoryDataService.cs`, `InventoryOrchestrator.cs`, `InventoryUI.cs`, `Field_InventorySlot.cs`, `UIEventRelay.cs`, `BaseHeldTool.cs`, `GameEvents.cs`
+**What you DON'T need:** Player movement, grab, shop, interaction
+
+**Step-by-step scene setup:** Follow `Manual/InventoryUITest.md` Steps 1-14 for the full Canvas + hotbar + extended panel + InventoryOrchestrator wiring. Then add an `InventoryTest` GO with the test component and wire `_testTools` to 2-3 BaseHeldTool instances in the scene.
+
+**How to test:**
+
+| Input | What should happen |
+|-------|-------------------|
+| `Space` | Fires RaiseToolPickupRequested → tool appears in hotbar slot 0 |
+| `Space` again | Second tool → slot 1 |
+| `1` | Switch to slot 0 (highlight moves) |
+| `2` | Switch to slot 1 |
+| `Scroll up/down` | Cycle through occupied hotbar slots |
+| `G` | Drop active tool → WorldModel appears in world, slot empties |
+| `Tab` | Open extended inventory panel |
+| `Drag slot 0 → slot 15` | Tools swap positions |
+| `Drag slot outside UI` | Tool drops to world |
+| `Click slot in extended` | Selected item info panel shows name/desc/icon |
+| `Click Equip button` | Equips tool + closes inventory |
+| `Click Drop button` | Drops tool from info panel |
+| `ESC` or `Tab` | Close inventory |
 
 **Checklist:**
-- [ ] Space picks up tool → appears in hotbar slot
+- [ ] Space picks up tool → icon appears in hotbar
 - [ ] 1-0 keys switch active slot (highlight moves)
-- [ ] Scroll wheel cycles through occupied slots
-- [ ] G drops active tool → world model appears, leaves inventory
-- [ ] Tab opens extended inventory panel
-- [ ] Multiple pickups fill consecutive slots
-- [ ] Drag slot from hotbar to extended → tools swap
-- [ ] Drag slot outside UI → tool drops to world
-- [ ] Click slot in extended inventory → selected item info panel shows name/desc/icon
-- [ ] Equip button → equips tool + closes inventory
-- [ ] Drop button → drops tool from info panel
-- [ ] Console logs every GameEvents fire
+- [ ] Scroll cycles through occupied slots
+- [ ] G drops tool → WorldModel visible, slot empties
+- [ ] Tab opens/closes extended inventory
+- [ ] Drag-drop swaps slots
+- [ ] Drag outside UI → tool drops to world
+- [ ] Selected item info shows name/desc/icon
+- [ ] Equip button equips + closes panel
+- [ ] Drop button drops + hides info
+- [ ] Console logs every GameEvent fire
+- [ ] Zero console errors
 
-### 5. ToolActionTest — Pickaxe + Magnet + Hammer Usage (UI-Level)
+### 5. ToolActionTest — Pickaxe + Magnet + Hammer + MiningHat (UI-Level)
 
-**Internal prerequisites:** `PlayerMovement.cs`, `PlayerCamera.cs`, `InventoryOrchestrator.cs`, `InventoryDataService.cs`, `BaseHeldTool.cs`, `ToolPickaxe.cs`, `ToolMagnet.cs`, `ToolHammer.cs`, `ToolMiningHat.cs`, `GameEvents.cs`
-**External prerequisites:**
-- Full player setup (PlayerMovement + PlayerCamera on Player GO with Camera child)
-- InventoryOrchestrator wired with hotbar panel + Field_InventorySlot prefab
-- 1x ToolPickaxe prefab in scene (WorldModel + ViewModel + Animator with Attack1 state)
-- 1x ToolMagnet prefab in scene (with `_pullOrigin` child, `_selectionModeText` TMP on ViewModel)
-- 1x ToolHammer prefab in scene
-- 1x ToolMiningHat prefab in scene (with `_worldModelLight` + `_viewModelLight` children)
-- 5-6 cubes with Rigidbody + tag "Grabbable" + layer "Interact" (magnet targets)
-- 1 wall/floor object (non-Grabbable, layer "Interact") for pickaxe world-hit test
-**NOT required:** Shop, interaction system, ore nodes, buildings
-**Controls:**
-- `Space` → pickup ToolPickaxe from world
-- `U` → pickup ToolMagnet from world
-- `I` → pickup ToolHammer from world
-- `O` → pickup ToolMiningHat from world
-- `1-4` → switch between equipped tools
-- `Left-click hold` → pickaxe swing (hold = repeated)
-- `Right-click hold` → magnet pull (nearby Grabbables fly toward you)
-- `Left-click` → magnet launch (push held objects away)
-- `R` → magnet gentle drop
-- `Q` → magnet cycle grab mode (Everything → NotInFilter → NotOnConveyors)
-- `G` → drop active tool
+> This test proves all 4 main tools work: pickaxe swings, magnet pulls, hammer raycasts,
+> mining hat toggles light. See `Manual/ToolViewModelTest.md` for full prefab setup.
+
+**What you need to type first:** All tool scripts + PlayerMovement + PlayerCamera + InventoryOrchestrator + InventoryUI + GameEvents
+**What you DON'T need:** Shop, interaction system, ore nodes, buildings
+
+**Step-by-step scene setup:** Follow `Manual/ToolViewModelTest.md` Steps 1-5 for the full player + inventory + tool prefab setup. Key additions:
+1. Create `ToolActionTest` GO → add `ToolActionTest` component
+2. Wire `_testTools` list with 4 tool instances in scene (Pickaxe, Magnet, Hammer, MiningHat)
+3. Place 5-6 cubes with `Rigidbody`, tag `Grabbable`, layer `Interact` (magnet pull targets)
+4. Place 1 wall cube, layer `Interact`, no tag (pickaxe hit target)
+5. Press Play
+
+**How to test:**
+
+| Input | What should happen |
+|-------|-------------------|
+| `Space` | Picks up Pickaxe → appears in hotbar slot 0, ViewModel shows |
+| `U` | Picks up Magnet → slot 1 |
+| `I` | Picks up Hammer → slot 2 |
+| `O` | Picks up MiningHat → slot 3 |
+| `1` | Switch to Pickaxe |
+| `Hold left-click` (Pickaxe) | Swing animation plays → after 0.2s delay, raycast hits → cube gets force push |
+| `Hold left-click` at wall | Swing hits wall → no error (no Rigidbody, no crash) |
+| `2` | Switch to Magnet |
+| `Hold right-click` (Magnet) | Nearby cubes fly toward you via SpringJoints |
+| `Left-click` (Magnet) | All held cubes launch forward |
+| `R` (Magnet) | All held cubes drop gently |
+| `Q` (Magnet) | Selection mode cycles: Everything → NotInFilter → NotOnConveyors. TMP text updates on ViewModel |
+| `3` | Switch to Hammer |
+| `Left-click` (Hammer) | Raycast fires — no effect (buildings are Phase D) |
+| `4` | Switch to MiningHat |
+| `Left-click` (MiningHat) | Light toggles on/off on both WorldModel and ViewModel |
+| `G` (any tool) | Drop active tool → WorldModel appears in world with forward velocity |
 
 **Checklist:**
-- [ ] Pickaxe: hold left-click → swing animation plays repeatedly at cooldown rate
-- [ ] Pickaxe: swing hits Rigidbody cube → cube gets force impulse
-- [ ] Pickaxe: swing hits wall → no error (non-Rigidbody surface)
-- [ ] Magnet: hold right-click → nearby Grabbable cubes pulled via SpringJoints
-- [ ] Magnet: left-click → held cubes launch forward
-- [ ] Magnet: R key → held cubes drop gently
-- [ ] Magnet: Q key → selection mode cycles, TMP text updates on viewmodel
-- [ ] Magnet: pull cube far away → SpringJoint breaks → cube auto-detaches
-- [ ] Hammer: left-click → raycast fires (no effect yet — buildings are Phase D)
-- [ ] MiningHat: left-click → light toggles on/off on viewmodel
-- [ ] All tools: G key → tool drops to world with forward velocity
-- [ ] All tools: switching tools shows/hides correct ViewModel
-- [ ] Console logs every GameEvents fire
+- [ ] Pickaxe: hold left-click → swing animation at cooldown rate
+- [ ] Pickaxe: swing hits cube → force impulse applied
+- [ ] Pickaxe: swing hits wall → no error
+- [ ] Magnet: hold right-click → cubes pulled via SpringJoints
+- [ ] Magnet: left-click → launch forward
+- [ ] Magnet: R → gentle drop
+- [ ] Magnet: Q → mode cycles, TMP updates
+- [ ] Magnet: pull too far → SpringJoint breaks, auto-detach
+- [ ] Hammer: left-click raycasts (no effect, Phase D)
+- [ ] MiningHat: left-click → light on/off toggle
+- [ ] G → tool drops with velocity
+- [ ] 1-4 keys switch tools, correct ViewModel shows/hides
+- [ ] Console logs every GameEvent fire
+- [ ] Zero console errors
 
 ---
 
@@ -12731,50 +12819,129 @@ phase-c(New)/
 
 ### 1. DEBUG_CheckC — OreDataService (Data-Level)
 
-**Internal prerequisites:** `OreDataService.cs`, `GlobalEnumsC.cs`
-**External prerequisites:** Empty scene, one GO with `DEBUG_CheckC`
-**NOT required:** Player, tools, nodes, pool — nothing
-**Controls:**
-- `Space` → Build + log resource descriptions
-- `U` → GetColoredResourceTypeString(Iron)
-- `I` → GetDefaultSellValue(Iron, Ore, false)
-- `O` → Log full snapshot
+> This test proves the OreDataService works as pure C# — zero scene, zero physics, zero prefabs.
+> You create an empty scene with ONE GameObject, press keys, and check the console.
 
-**Checklist:**
-- [ ] Build stores resource descriptions
-- [ ] GetResourceDescription returns correct entry
-- [ ] GetResourceColor returns matching Color
-- [ ] GetColoredResourceTypeString wraps in color tag
-- [ ] GetColoredFormattedResourcePieceString maps piece type labels
-- [ ] Snapshot logs all resource data
+**What you need to type first:** `OreDataService.cs`, `GlobalEnumsC.cs`, `PhaseCLOG.cs`
+**What you DON'T need:** Player, tools, nodes, pool, managers — nothing. Just the DataService.
+
+**Step-by-step scene setup:**
+1. Create a new empty scene in Unity
+2. Create an Empty GO → name it `DEBUG_CheckC`
+3. Add the `DEBUG_CheckC` component to it
+4. In the Inspector, expand `_testDescriptions` list → add 3 entries:
+
+| Index | ResourceType | DisplayColor |
+|-------|-------------|-------------|
+| 0 | Iron | Grey (0.6, 0.6, 0.6) |
+| 1 | Gold | Yellow (1, 0.84, 0) |
+| 2 | Coal | Dark Grey (0.2, 0.2, 0.2) |
+
+5. That's it — press Play
+
+**How to test (press these keys one at a time):**
+
+| Key | What it does | What you should see in Console |
+|-----|-------------|-------------------------------|
+| `Space` | Calls `ds.Build(_testDescriptions)` then logs snapshot | JSON showing 3 resource descriptions with their types + hex colors |
+| `U` | Calls `GetColoredResourceTypeString(Iron)` + `GetColoredFormattedResourcePieceString` for 3 combos | `<color=#999999>Iron</color>` then `Iron Ore`, `Gold Drill Bit`, `Junk Pipe` (all with color tags) |
+| `O` | Logs full snapshot via `LOG.AddLog` | Same JSON as Space but routed through the LOG system |
+
+**Checklist — every item must pass:**
+- [ ] Space → snapshot shows all 3 resource descriptions with correct hex colors
+- [ ] U → `GetColoredResourceTypeString(Iron)` wraps "Iron" in `<color=#hex>` tag
+- [ ] U → `GetColoredFormattedResourcePieceString(Gold, DrillBit)` shows "Gold Drill Bit" (not "Gold DrillBit")
+- [ ] U → `GetColoredFormattedResourcePieceString(Slag, Pipe)` shows "Junk Pipe" (Slag Pipe → "Junk" override)
+- [ ] O → snapshot logs via LOG system without errors
+- [ ] Zero console errors throughout
+
+---
 
 ### 2. OreTest — Spawn/Mine/Sell Flow (UI-Level)
 
-**Internal prerequisites:** All Phase C scripts + `GameEvents.cs`
-**External prerequisites:**
-- Scene with floor, a few OreNode prefabs, ParticleManager singleton, OrePiecePoolManager singleton, OreLimitManager singleton, OreManager singleton
-- SellerMachine trigger volume
-- OreNode prefabs with: ResourceType, Health, _possibleDrops, _models
-- OrePiece prefabs registered in OrePiecePoolManager
-**NOT required:** Player (use test controls), inventory, shop
-**Controls:**
-- `Space` → damage nearest OreNode by 50
-- `U` → spawn an OrePiece at cursor
-- `I` → log all OrePiece count
-- `O` → log OreDataService snapshot
-- `M/N` → menu toggle (sim)
+> This test proves the full ore lifecycle: mine nodes → pieces fly out → sell at machine → money increases → pool recycles.
+> You need all Phase C singletons but NO player — OreTest provides keyboard controls.
 
-**Checklist:**
-- [ ] Space damages node → health decreases
-- [ ] Node at 0 health → shatters → 2-4 ore pieces fly out
+**What you need to type first:** All Phase C scripts + `GameEvents.cs` (partial)
+**What you DON'T need:** Player, inventory, shop, interaction — OreTest handles input directly
+
+**Step-by-step scene setup:**
+
+1. **Create singletons** — one Empty GO each, add the component:
+
+| GO Name | Component | What to set in Inspector |
+|---------|-----------|------------------------|
+| `ParticleManager` | `ParticleManager` | Assign 3 particle prefabs (or leave empty — won't crash, just no particles) |
+| `OrePiecePoolManager` | `OrePiecePoolManager` | `_allOrePiecePrefabs` → add all OrePiece prefabs (see step 3) |
+| `OreLimitManager` | `OreLimitManager` | `_movingObjectLimit` = 500 |
+| `OreManager` | `OreManager` | `_allResourceDescriptions` → add Iron/Gold/Coal entries (see DEBUG_CheckC step 4) |
+| `EconomyManager` | `EconomyManager` | `_defaultMoney` = 400 |
+
+2. **Create OrePiece prefab** (at minimum, one):
+   - New GO → add `Rigidbody` (mass 0.5, gravity ON) + `MeshFilter` + `MeshRenderer` + `BoxCollider`
+   - Add `OrePiece` component: `_resourceType` = Iron, `_pieceType` = Ore, `BaseSellValue` = 1.0
+   - Tag: `Grabbable`, Layer: `Interact`
+   - Save as prefab → drag into `OrePiecePoolManager._allOrePiecePrefabs`
+
+3. **Create OreNode prefab** (at minimum, one):
+   - New GO → add `BoxCollider` + `OreNode` component
+   - Set: `_resourceType` = Iron, `_health` = 100, `_minDrops` = 2, `_maxDrops` = 4
+   - `_possibleDrops` → add one entry: OrePrefab = your OrePiece_Iron prefab, Weight = 100
+   - Layer: `Interact`
+   - Place instance in scene on the floor
+
+4. **Create SellerMachine:**
+   - New GO → add `BoxCollider` (IsTrigger = true, Size 2,1,2) + `SellerMachine` component
+   - Place on floor near the OreNodes
+
+5. **Create OreTest GO:**
+   - New GO → add `OreTest` component
+   - Wire:
+
+| Field | Drag From |
+|-------|-----------|
+| `_testNode` | One of the OreNode instances in scene |
+| `_testOrePrefab` | OrePiece_Iron prefab from Project |
+| `_cam` | Main Camera in scene |
+
+6. **Floor** — Plane at y=0
+
+7. Press Play
+
+**How to test (press these keys one at a time):**
+
+| Key | What it does | What you should see |
+|-----|-------------|-------------------|
+| `Space` | Damages `_testNode` by 50 | First press: node still exists (health 50). Second press: node **breaks** → 2-4 ore pieces fly out, particles, console `[OreTest] Mined: Iron at (x,y,z)` |
+| `U` | Spawns OrePiece at camera forward | Ore piece appears 2m ahead, falls to floor |
+| `I` | Logs ore count | Console: `OrePiece active: X, pooled: Y` |
+| `O` | Logs OreDataService snapshot | Console: JSON with resource descriptions |
+| `M` | Simulates menu open | `RaiseMenuStateChanged(true)` |
+| `N` | Simulates menu close | `RaiseMenuStateChanged(false)` |
+
+**Full test flow (do these in order):**
+1. Press `Space` once → node still alive, console shows nothing
+2. Press `Space` again → node **breaks**, ore flies, console: `[OreTest] Mined: Iron`
+3. Press `I` → shows active ore count (should be 2-4)
+4. Push ore into SellerMachine trigger (spawn near it with `U` aimed at seller)
+5. Wait 2 seconds → ore disappears, console: `[OreTest] Sold: Iron Ore for $X.XX` and `[OreTest] Money: $40X.XX`
+6. Press `I` → active count decreased, pooled count increased
+7. Press `U` → new ore spawns (reuses pooled piece if available — name ends with `[Pooled]`)
+8. Spam `U` 500+ times → console eventually shows `[OreTest] LimitState: SlightlyLimited` then `Blocked`
+
+**Checklist — every item must pass:**
+- [ ] Space damages node → health decreases per hit
+- [ ] Node at 0 health → shatters → 2-4 ore pieces fly out with random velocity
 - [ ] Ore pieces have random mesh + random scale
-- [ ] Particles spawn at break point
-- [ ] Ore pieces are grabbable (tag "Grabbable")
-- [ ] SellerMachine: ore enters trigger → waits → money increases
-- [ ] OrePiecePoolManager recycles: disabled ore returns to pool
-- [ ] OreLimitManager: at limit → RaiseOreLimitChanged fires
-- [ ] PhysicsLimitUIWarning: shows/hides based on limit state
-- [ ] Console logs every GameEvents fire
+- [ ] Break particles spawn at hit point (if ParticleManager prefabs assigned)
+- [ ] Console: `[OreTest] Mined: Iron at (x,y,z)` on break
+- [ ] Ore enters seller trigger → tagged MarkedForDestruction → waits 2s → disappears
+- [ ] Console: `[OreTest] Sold: Iron Ore for $X.XX` after sell
+- [ ] Console: `[OreTest] Money: $4XX.XX` after sell
+- [ ] I key shows `active: X, pooled: Y` — pooled increases after selling
+- [ ] U key spawns reuse pooled pieces (name has `[Pooled]`)
+- [ ] OreLimitManager fires LimitState changes when enough pieces are moving
+- [ ] Zero console errors throughout
 
 ---
 
