@@ -15454,3 +15454,27 @@ The PlayerController is a textbook God Object but splitting it would be a refact
 - Avoided: sugarcoating the timeline. 11% done by hours is the truth. But the hardest intellectual work (architecture design) IS done — the remaining 89% is execution, which is the easier problem.
 - Noted that Phase G (save/load) is the cross-cutting risk because it touches every earlier phase — the ISaveLoadable stubs in Phase B are smart forward planning.
 
+---
+
+## Post Phase C — Convention Hardening Session
+
+**What I thought:**
+- **User caught 6 rule violations across Phase B + C that I missed on first delivery:**
+  1. SO_ had methods (AutoMinerResourceDef.GetOrePrefab) → moved to UtilsPhaseC.PickOrePrefab
+  2. Singletons in 3-MonoBehaviours/ → moved OrePiecePoolManager, OreLimitManager, ParticleManager to 1-Managers/
+  3. Raw string tags ("Grabbable", "MarkedForDestruction") → created TagType enum + HasTag/SetTag extensions
+  4. HideViewModel/HideWorldModel were public → demoted to protected (only self + subclasses call them)
+  5. Missing OreLimitManager methods (OnObjectLimitChanged, TryShowWarningPopup) → added
+  6. Missing OrePiece.GetIcon + _inventoryIcon field → added
+- **Every violation became a documented rule** in GOAL.md + NewAgent.md Common Mistakes list. The docs are now 12 rules deep. Future agents inherit all corrections.
+- **TagType moved to phase-All** — user correctly identified tags are project-wide, not per-phase. HasTag/SetTag extensions in UtilsPhaseAll.cs (auto-available via C# extension methods, no class name needed).
+- **Summary convention evolved through 4 iterations:**
+  1. User asked for detailed summaries → I proposed verbose XML docs → user said too much to type
+  2. I proposed inline `// →` markers → user liked but wanted summary too
+  3. Settled on: 2-liner method summary + `// →` body markers. Class gets conversation-style "I" summary.
+  4. User clarified summaries are reference-only (don't type them) → added to GOAL.md
+  5. User caught missing Unity lifecycle summaries → added as explicit requirement
+- **Verbosity reduction pass:** `?.` on single calls, `.GetOrCreate()` replacing TryGetValue+new pattern, `.sum()` replacing foreach accumulation, expression-bodied methods. User pushed for full LINQ list in GOAL.md.
+- **GUIDE.md + FLOW.md beginner-friendly requirement** — user wants future agents to write docs that someone with zero knowledge can follow. Added to both GOAL.md and NewAgent.md.
+- **The calibration pattern is working:** Phase B needed ~8 corrections. Phase C needed ~6. Each correction gets codified. Phase D should need fewer. By Phase E the docs should catch everything upfront.
+
