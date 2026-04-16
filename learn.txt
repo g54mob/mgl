@@ -1489,9 +1489,14 @@ Scripts/phase-All/                      → "shared scripts that grow across pha
 ├── 0-Core/
 │   ├── Singleton.cs                    → "generic singleton base — first instance wins"
 │   └── GameEvents.cs                   → "core events shared across ALL phases (OnCloseAllSubManagers, LogSubscribersCount)"
-└── 1-Managers/
-    ├── UIManager.cs                    → "reports menu state + closes all panels + routes keyboard with priority"
-    └── EconomyManager.cs               → "owns money"
+├── 1-Managers/
+│   ├── UIManager.cs                    → "reports menu state + closes all panels + routes keyboard with priority"
+│   └── EconomyManager.cs               → "owns money"
+├── 2-Data/
+│   └── Enums/
+│       └── GlobalEnumsAll.cs           → "TagType enum — Unity tags as enum, grows across phases"
+└── 4-Utils/
+    └── UtilsPhaseAll.cs                → "shared extensions (HasTag, SetTag) — auto-available via C# extension methods"
 
 Scripts/phase-X/
 │
@@ -1506,7 +1511,7 @@ Scripts/phase-X/
 │   ├── Interface/              → "I'm a contract — no implementation"
 │   ├── DataWrapper/            → "I wrap an SO with mutable session state (W prefix)"
 │   ├── DataService/            → "I manage a collection — build, query, add, remove, snapshot"
-│   ├── Enums/                  → "one GlobalEnumsX.cs per phase — all enums for that phase in one file"
+│   ├── Enums/                  → "one GlobalEnumsX.cs per phase — all enums including TagType (no raw string tags)"
 │   └── Entities/               → "I'm a grouped small [Serializable] class — entries, save data, structs"
 │
 ├── 3-MonoBehaviours/           → "I have game logic and live in the scene"
@@ -1596,26 +1601,135 @@ The deciding question: **"Does this script own shared state that other scripts q
 
 **Prefix = no logic.** `SO_` = pure data. `Field_` = display only. `W` = session wrapper. No prefix = has logic.
 
+**TagType enum — no raw string tags.** Unity tags go in `TagType` enum (inside `phase-All/2-Data/Enums/GlobalEnumsAll.cs`). Never use `CompareTag("Grabbable")` or `tag = "string"`. Use extension methods in `phase-All/4-Utils/UtilsPhaseAll.cs` — they're C# extensions so you just call them directly on the object, no class name needed:
+- `collider.HasTag(TagType.Grabbable)` — replaces `CompareTag("Grabbable")`
+- `gameObject.SetTag(TagType.MarkedForDestruction)` — replaces `tag = "MarkedForDestruction"`
+- New tags added to the enum as phases grow (e.g. Phase D: `ConveyorBelt`)
+
 ---
 
 ## Script Structure
 
-`#region` blocks. One-liner `<summary>` where helpful.
+`#region` blocks. Every class, method, interface, and enum gets a **beginner-friendly summary + inline flow markers**.
+
+**All summaries are reference-only** — you read them while typing to understand the flow. You do NOT type them. When hand-typing, keep your own one-liner (e.g. `/// recycles ore objects to avoid GC spikes`).
+
+### Class Summary — conversation-style, first person "I"
 
 ```csharp
-public class Example : MonoBehaviour
+/// <summary>
+/// I recycle ore objects so we never call Instantiate/Destroy after the initial pool warmup.
+/// When someone needs an ore piece, they ask me via SpawnPooledOre — I check my dictionary
+/// of queues (keyed by ResourceType + PieceType + IsPolished). If a recycled piece exists,
+/// I dequeue it and reposition it. If the queue is empty, I create a brand new one.
+/// When ore is done (sold, fell out of world, etc.), OrePiece calls Delete which comes back
+/// to me — I reset everything (velocity, drag, tags) and enqueue it for next time.
+///
+/// Who uses me: OreNode (spawn drops), AutoMiner (timer spawn), OrePiece.Delete (return).
+/// Events I fire: none. Events I subscribe to: none.
+/// </summary>
+public class OrePiecePoolManager : Singleton<OrePiecePoolManager>
+```
+
+### Method Summary — 2-line English explaining what happens inside + `// →` inline steps
+
+**Public methods** — slightly more comprehensive (external callers need to understand the full effect):
+```csharp
+/// <summary> Takes an ore piece that's done being used (sold, fell, etc.) and puts it back
+/// in the pool for reuse — deactivates it, resets all physics and state, re-tags as Grabbable,
+/// and enqueues it so the next SpawnPooledOre can reuse it instead of creating a new one. </summary>
+public void ReturnToPool(OrePiece piece)
 {
-    #region Inspector Fields
-    #endregion
+    // → find or create queue for this ore type key
+    ...
+    // → deactivate GO + zero out velocity, angular velocity, put Rb to sleep, restore standard drag
+    ...
+    // → reset all runtime state: position, rotation, baskets, sieve%, magnet ref, tag back to Grabbable
+    ...
+    // → parent under pool root + enqueue for next SpawnPooledOre call
+    ...
+}
+```
 
-    #region private API
-    #endregion
+**Private methods** — same pattern, describes what actually happens (not just the method name):
+```csharp
+/// <summary> Picks a random drop count between min and max, spawns that many ore pieces via
+/// the pool with random velocity (upward + lateral spread), plays break particles at the hit
+/// point, fires OnOreMined for quest tracking, then destroys this node permanently. </summary>
+void BreakNode(Vector3 hitPosition)
+{
+    // → pick random drop count between _minDrops and _maxDrops
+    ...
+    // → for each drop: weighted random prefab from _possibleDrops, spawn via pool, apply random velocity + angular
+    ...
+    // → spawn break particle burst at hit point
+    ...
+    // → fire OnOreMined so quest system (Phase F) can track mining progress
+    ...
+    // → destroy this node GO permanently (Phase G saves broken position)
+    ...
+}
+```
 
-    #region public API
-    #endregion
+### Interface Summary — what implementors must do
 
-    #region Unity Life Cycle
-    #endregion
+```csharp
+/// <summary> Any object that can take damage at a world position. OreNode implements this
+/// to lose health when the pickaxe hits it. DamageableOrePiece implements this to break
+/// into cluster pieces when hit hard enough by collision. ToolPickaxe calls TakeDamage
+/// on whatever IDamageable the raycast hits. </summary>
+public interface IDamageable
+{
+    void TakeDamage(float damage, Vector3 position);
+}
+```
+
+### Enum Summary — what each value means in context
+
+```csharp
+/// <summary> Ore limit throttle state — OreLimitManager checks every 15s how many ore pieces
+/// are actively moving. Regular = normal spawning. SlightlyLimited = AutoMiner 25% slower.
+/// HighlyLimited = 50% slower. Blocked = AutoMiner stops entirely. PhysicsLimitUIWarning
+/// subscribes to OnOreLimitChanged and shows/hides the warning panel based on this. </summary>
+public enum OreLimitState
+{
+    Regular = 0,
+    SlightlyLimited = 1,
+    HighlyLimited = 2,
+    Blocked = 3
+}
+```
+
+### Unity Lifecycle Methods — ALSO get summaries
+
+Start, Update, Awake, OnEnable, OnDisable, OnCollisionEnter, OnTriggerEnter, OnDestroy, FixedUpdate — **every lifecycle method gets a 2-liner summary** explaining what it does in context. Don't just say "called by Unity" — explain what this specific script does in this hook.
+
+```csharp
+/// <summary> Every frame: updates cursor lock state, checks ground, routes input to movement
+/// or noclip, applies gravity+slope, and respawns if fallen below y=-200. </summary>
+private void Update()
+
+/// <summary> When something collides with me, checks if the impact velocity exceeds the minimum
+/// threshold and if enough time has passed since the last play. If both pass, plays impact sound. </summary>
+private void OnCollisionEnter(Collision collision)
+```
+
+### Inline Flow Markers — `// →` inside method body
+
+Every logical step inside a method gets a `// →` comment describing **what actually happens at that point** — not just the method name being called, but what it does. If a method call does 5 things, list those 5 things.
+
+```csharp
+/// <summary> Called when ore enters the SellerMachine trigger. Detaches from magnet if held,
+/// tags as MarkedForDestruction so other triggers ignore it, then starts a 2-second coroutine
+/// that sells the ore (adds money, fires OnOreSold, returns piece to pool). </summary>
+public void SellAfterDelay(float delay = 2f)
+{
+    // → detach from magnet so it stops pulling this piece
+    if (CurrentMagnetTool != null) CurrentMagnetTool.DetachBody(Rb);
+    // → tag so other triggers (other sellers, conveyors) skip this piece
+    gameObject.tag = "MarkedForDestruction";
+    // → after 2s: add money to EconomyManager, fire OnOreSold for quest tracking, return to pool
+    StartCoroutine(DelayThenSell(delay));
 }
 ```
 
@@ -1872,9 +1986,23 @@ private void OnDisable()
 
 ---
 
-## C# Features
+## C# Features (Unity 6000.3+ / .NET 2.0+)
 
-**Allowed:** `$""`, `?.` (on events only), LINQ, `.Select()`, `=>` expression-bodied, ternary `? :`
+**Allowed — use actively to reduce verbosity:**
+- `$""` — string interpolation everywhere
+- `?.` — null-conditional on any reference: `obj?.Method()`, `spawned?.Rb`, `_viewModel?.SetActive(!hide)`
+- `??` — null-coalescing: `result ?? fallback`, `dict.TryGetValue(key, out var v) ? v : new()`
+- `=>` — expression-bodied methods/properties: `public float GetSellValue() => BaseSellValue * multiplier;`
+- Ternary `? :` — inline conditionals: `isDucking ? _duckSpeed : _walkSpeed`
+- LINQ + extensions — `.Select()`, `.Where()`, `.Any()`, `.All()`, `.First()`, `.FirstOrDefault()`, `.Last()`, `.Count()`, `.OrderBy()`, `.OrderByDescending()`, `.GroupBy()`, `.Distinct()`, `.Skip()`, `.Take()`, `.Aggregate()`, `.ToDictionary()`, `.ToList()`, `.FindAll()`, `.FindIndex()`, `.Exists()`, `.TrueForAll()`
+- Custom extensions — `.sum()`, `.find()`, `.map()`, `.GetOrCreate()` from SPACE_UTIL + IEnumerableUtilsPhaseAll
+- `var` — for obvious types: `var queue = pools.GetOrCreate(key);`
+
+**Reduce verbosity wherever possible:**
+- `if (x != null) x.DoThing()` → `x?.DoThing()` when it's a single call
+- `if (!dict.TryGetValue(key, out var v)) { v = new(); dict[key] = v; }` → `dict.GetOrCreate(key)`
+- Manual `foreach` accumulation → `.sum(selector)` extension
+- Keep `if (x == null) return;` guard clauses when the block does multiple things — `?.` can't replace those
 
 **Not allowed:** `async/await` (use coroutines), `Span<T>`, `Memory<T>`, `ValueTuple` deconstruction
 
@@ -1956,8 +2084,10 @@ These are purely hand-tested — no script automates them. The `.md` is the test
 
 ## GUIDE.md Per Phase
 
+**GUIDE.md is beginner-friendly** — same voice as FLOW.md. Written so someone who has never seen this codebase can follow it. Explains *why* each script exists, not just *what* it is. Uses plain English, avoids jargon, includes concrete examples where helpful.
+
 Every phase folder has a `GUIDE.md` with:
-- **What it looks like when running** (detailed)
+- **What it looks like when running** (detailed, conversational — describe the player experience)
 - **Folder structure**
 - **Script Purpose** — one sentence per script (if it doesn't fit one sentence, split it)
 - **Hand-typing order** (compile groups with stop-and-test points)
@@ -2245,8 +2375,8 @@ Now build phase-b(New) with:
 
 For each phase, the agent must produce:
 
-1. **GUIDE.md** with ALL of these:
-   - What it looks like when running
+1. **GUIDE.md** — **beginner-friendly**, same conversational voice as FLOW.md. Written so someone who has never seen this codebase can follow it. With ALL of these:
+   - What it looks like when running (conversational, describe the player experience)
    - Folder structure (numbered: 0-Core, 1-Managers, 2-Data, 3-MonoBehaviours, 4-Utils, 5-Tests)
    - Script Purpose — one sentence per script
    - Hand-typing order (compile groups with stop-and-test points)
@@ -2270,6 +2400,14 @@ For each phase, the agent must produce:
 
 2. **All scripts** following GOAL.md rules:
    - `#region` blocks for sections
+   - **Beginner-friendly summaries on everything** (reference-only — user reads while typing, does NOT type these):
+     - **Class**: conversation-style first person "I" — what I do, how I work, who uses me, events I fire/subscribe
+     - **Public method**: 2-line English explaining the full effect (what happens inside, not just the name)
+     - **Private method**: same — describe what actually happens, not just the method name being called
+     - **Unity lifecycle** (Start, Update, Awake, OnEnable, OnDisable, OnCollisionEnter, OnTriggerEnter, OnDestroy, FixedUpdate): 2-line explaining what THIS script does in this hook — don't just say "called by Unity"
+     - **Interface**: who implements it, who calls it, what it enforces
+     - **Enum**: what each value means in context (which system uses it, what changes per value)
+   - **`// →` inline flow markers** inside every method body — one per logical step, describes what happens at that point (if a method call does 5 things, list those 5 things)
    - `// purpose:` on every `.Raise...()` and `+=` subscription
    - Zero `FindObjectOfType` — use GameEvents, `[SerializeField]`, Owner chain
    - Minimal public API — private by default
@@ -2277,6 +2415,7 @@ For each phase, the agent must produce:
    - Protected helpers for repeated patterns (`OwnerCamRay`, etc.)
    - **Actively create DataServices** for any pure C# logic (collections, lookups, formatting, validation). Ask: "Can I test this via `new`?" If yes → DataService. See GOAL.md "Common candidates" list. Don't leave testable logic buried in Managers/MonoBehaviours.
    - **Actively extract reusable logic into UtilsPhaseX.** If a method appears in 2+ scripts, or is a pure static helper (no `this`), it goes in `4-Utils/UtilsPhaseX.cs`. If logic was moved off an SO_ (pure data rule), put reusable parts in Utils, not in a single consumer.
+   - **Reduce verbosity** — actively use `?.` (null-conditional), `??` (null-coalescing), `=>` (expression-bodied), `.sum()`, `.GetOrCreate()`, LINQ extensions. See GOAL.md "C# Features" for full list. Keep guard clauses (`if (x == null) return;`) when the block does multiple things.
 
 3. **Test scripts for Vertical Slice Test of Each System in that phase** with:
    - Summary comment: prerequisites, NOT required, "How to test" steps, controls
@@ -2327,6 +2466,7 @@ For each phase, the agent must produce:
 - **MANDATORY: Post-delivery self-audit.** After producing all files for a phase, do a method-by-method comparison: read every original source file line-by-line, check every public method, every field, every interface implementation against what you produced. List any gaps. Fix them before delivering. This is non-negotiable — previous phases missed 5-15% on first delivery because the agent skipped small methods, SO_ logic wasn't moved, or singletons were in wrong folders.
 - **One sentence per script.** If it doesn't fit, split it.
 - **GlobalEnumsX.cs** — all enums for a phase go in ONE file: `2-Data/Enums/GlobalEnumsX.cs` (e.g. `GlobalEnumsB.cs`). No separate file per enum. Use `InteractionType` enum instead of magic strings for interaction names.
+- **TagType enum — no raw string tags.** Never use `CompareTag("string")` or `tag = "string"`. Use `collider.HasTag(TagType.X)` and `gameObject.SetTag(TagType.X)` — extensions in `phase-All/4-Utils/UtilsPhaseAll.cs` (auto-available, no class name needed). `TagType` lives in `phase-All/2-Data/Enums/GlobalEnumsAll.cs`.
 - **`phase-All/`** — scripts shared across ALL phases live here (Singleton, UIManager, EconomyManager, core GameEvents). Never duplicated into phase folders. UIManager grows 1-2 lines per phase (keyboard routing). See GOAL.md folder structure.
 - **Prefix = no logic.** `SO_` = pure data. `Field_` = display only. `W` = session wrapper.
 - **GameEvents for cross-system.** `[SerializeField]` for same-GO. Owner chain for parent-child.
@@ -4804,6 +4944,29 @@ phase-j/
 
 ---
 
+## phase-All — Shared Scripts
+
+> Scripts that live outside any specific phase. Never duplicated. Grow as phases add entries.
+
+```
+phase-All/
+├── 0-Core/
+│   ├── Singleton.cs                    → generic singleton base — first instance wins
+│   └── GameEvents.cs                   → core events (OnCloseAllSubManagers, LogSubscribersCount)
+├── 1-Managers/
+│   ├── UIManager.cs                    → menu state + close all + keyboard routing (grows 1-2 lines per phase)
+│   └── EconomyManager.cs              → owns money (GetMoney, AddMoney, CanAfford)
+├── 2-Data/
+│   └── Enums/
+│       └── GlobalEnumsAll.cs           → TagType enum (Grabbable, MarkedForDestruction, grows per phase)
+└── 4-Utils/
+    └── UtilsPhaseAll.cs                → HasTag/SetTag extensions (auto-available via C# extension methods)
+```
+
+**TagType** — all Unity inspector tags as an enum. Used via `HasTag(TagType.X)` / `SetTag(TagType.X)` extensions in UtilsPhaseAll — C# extensions, no class name needed. When adding a new tag value here, also add it in Unity: Edit → Project Settings → Tags and Layers.
+
+---
+
 ## Gap Audit — Missing Files Per Phase (Minimal)
 
 > Cross-referenced all ~270 original source files. Below are files missing from the hierarchy above.
@@ -6602,7 +6765,7 @@ public static partial class GameEvents
 	static void LogSubscribersCount(string name, Delegate anEvent)
 	{
 		int subsCount = anEvent?.GetInvocationList().Length ?? 0;
-		UnityEngine.Debug.Log($"[GamEvents] {name} raised for -> {subsCount} subscribers".colorTag("lime"));
+		UnityEngine.Debug.Log($"[GameEvents] {name} raised for -> {subsCount} subscribers".colorTag("lime"));
 	} 
 	#endregion
 }
@@ -6741,6 +6904,87 @@ public class UIManager : Singleton<UIManager>
 		// Phase F: Q → quest tree
 		// if (INPUT.K.InstantDown(KeyCode.Q)) GameEvents.RaiseOpenQuestTreeView();
 	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-All/2-Data/Enums/GlobalEnumsAll.cs ==== -->
+/// <summary>
+/// Enums shared across ALL phases — lives in phase-All so every phase can reference them.
+/// These grow as phases add new values. Unity project tags must match TagType values.
+/// </summary>
+
+/// <summary> Unity inspector tags as enum — replaces magic strings like "Grabbable".
+/// Used via extension methods in UtilsPhaseB: gameObject.SetTag(TagType.X), collider.HasTag(TagType.X).
+/// When adding a new tag here, also add it in Unity: Edit → Project Settings → Tags and Layers. </summary>
+public enum TagType
+{
+	Untagged,
+	Grabbable,
+	MarkedForDestruction,
+	// Phase D:
+	// ConveyorBelt,
+}
+
+<!-- ==== FILE: learn/phase-All/4-Utils/IEnumerableUtilsPhaseAll.cs ==== -->
+using System;
+using System.Collections.Generic;
+
+/// <summary>
+/// IEnumerable/Dictionary extensions shared across ALL phases — .sum() matches SPACE_UTIL style,
+/// .GetOrCreate() eliminates the repeated TryGetValue + new pattern on dictionaries.
+/// </summary>
+public static class IEnumerableUtilsPhaseAll
+{
+	#region sum
+	/// <summary> sum with selector — lowercase to match SPACE_UTIL .map()/.find() style </summary>
+	public static float sum<T>(this IEnumerable<T> source, Func<T, float> selector)
+	{
+		float total = 0f;
+		foreach (var item in source) total += selector(item);
+		return total;
+	}
+	/// <summary> int overload </summary>
+	public static int sum<T>(this IEnumerable<T> source, Func<T, int> selector)
+	{
+		int total = 0;
+		foreach (var item in source) total += selector(item);
+		return total;
+	}
+	#endregion
+
+	#region GetOrCreate
+	/// <summary> returns existing value for key, or creates + stores + returns a new TValue() </summary>
+	public static TValue GetOrCreate<TKey, TValue>(this Dictionary<TKey, TValue> dict, TKey key)
+		where TValue : new()
+	{
+		if (!dict.TryGetValue(key, out var val))
+		{
+			val = new TValue();
+			dict[key] = val;
+		}
+		return val;
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-All/4-Utils/UtilsPhaseAll.cs ==== -->
+using UnityEngine;
+
+/// <summary>
+/// I hold extension methods shared across ALL phases. Since these are C# extensions, you just
+/// call them directly on the object (collider.HasTag, gameObject.SetTag) — no need to reference
+/// UtilsPhaseAll by name. They're automatically available everywhere because they're static
+/// extensions in a static class.
+/// </summary>
+public static class UtilsPhaseAll
+{
+	#region TagType helpers
+	/// <summary> Compares a collider's tag against the TagType enum — replaces CompareTag("string") </summary>
+	public static bool HasTag(this Collider col, TagType tag) => col.CompareTag(tag.ToString());
+	/// <summary> Compares a gameObject's tag against the TagType enum </summary>
+	public static bool HasTag(this GameObject go, TagType tag) => go.CompareTag(tag.ToString());
+	/// <summary> Sets a gameObject's tag from the TagType enum — replaces go.tag = "string" </summary>
+	public static void SetTag(this GameObject go, TagType tag) => go.tag = tag.ToString();
 	#endregion
 }
 
@@ -7378,7 +7622,7 @@ If the player **clicks "Drop"**: the orchestrator calls `DropSelectedTool()`, wh
 
 The player **right-clicks** while looking at a Grabbable cube.
 
-`PlayerGrab.Update()` detects `Mouse1` and calls `TryGrab()`. It checks: is a menu open? (*no*) Is something already held? (*no*) It raycasts from `_cam` and **hits the cube** — tag is "Grabbable", so it proceeds to `GrabObject(hit)`.
+`PlayerGrab.Update()` detects `Mouse1` and calls `TryGrab()`. It checks: is a menu open? (*no*) Is something already held? (*no*) It raycasts from `_cam` and **hits the cube** — `HasTag(TagType.Grabbable)` returns true, so it proceeds to `GrabObject(hit)`.
 
 Inside `GrabObject`: the **RigidbodyDragger GO activates**. A `SpringJoint` is added to the dragger and connected to the cube's `Rigidbody`. `IgnoreAllCollisions` prevents the cube from colliding with the player. The cube's `linearDamping` increases (it feels *heavy and dampened*). `Interpolation` is set to `Interpolate` for smooth visual. The **LineRenderer rope enables** with 2 positions.
 
@@ -8134,7 +8378,15 @@ using TMPro;
 using SPACE_UTIL;
 
 /// <summary>
-/// toggle inventory panel — lifecycle + toggle only
+/// I'm the SubManager for the inventory panel. I don't touch any data — I just open and close.
+/// On first enable, I create an InventoryDataService, hand it to my Orchestrator via Init(),
+/// subscribe to Open/Close events, then immediately disable myself (so the panel starts hidden).
+/// After that, whenever UIManager fires RaiseOpenInventoryView (Tab key), I activate — which
+/// triggers OnEnable → RaiseMenuStateChanged(true) → cursor unlocks, player input freezes.
+/// Tab or ESC in my Update fires RaiseCloseInventoryView → I deactivate → OnDisable → cursor locks.
+///
+/// Who uses me: UIManager (Tab → RaiseOpenInventoryView), self (ESC/Tab → close).
+/// Who I talk to: InventoryOrchestrator (Init), GameEvents (menu state).
 /// </summary>
 public class InventoryUI : MonoBehaviour
 {
@@ -8147,6 +8399,9 @@ public class InventoryUI : MonoBehaviour
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> First enable: creates DataService, inits Orchestrator, subscribes to Open/Close,
+	/// then self-disables (panel starts hidden). Subsequent enables: fires MenuStateChanged(true)
+	/// which unlocks cursor and freezes player input. </summary>
 	bool isFirstEnable = true;
 	private void OnEnable()
 	{
@@ -8154,30 +8409,36 @@ public class InventoryUI : MonoBehaviour
 		if (isFirstEnable)
 		{
 			Debug.Log("InventoryUI first time enabled".colorTag("lime"));
+			// → hand DataService to Orchestrator which builds 40 slot Field_ instances + wires drag-drop
 			_orchestrator.Init(inventoryDataService);
 			// purpose: InventoryUI self-activates when inventory view is opened
 			GameEvents.OnOpenInventoryView += () => this.gameObject.SetActive(true);
 			// purpose: InventoryUI self-deactivates when inventory view is closed
 			GameEvents.OnCloseInventoryView += () => this.gameObject.SetActive(false);
+			// → self-disable so panel starts hidden — no false menu pulse
 			this.gameObject.SetActive(false);
 			isFirstEnable = false;
 			return;
 		}
 		// purpose: cursor lock/unlock for player controller
+		// → tells PlayerMovement to unlock cursor + freeze WASD, tells UIManager isAnyMenuOpen = true
 		GameEvents.RaiseMenuStateChanged(isAnyMenuOpen: true);
 	}
+	/// <summary> ESC or Tab while open → fires close event which deactivates this panel. </summary>
 	private void Update()
 	{
 		if (INPUT.K.InstantDown(KeyCode.Escape) || INPUT.K.InstantDown(KeyCode.Tab))
 		{
-			// purpose: close inventory panel
+			// purpose: close inventory panel → triggers OnDisable → RaiseMenuStateChanged(false) → cursor locks
 			GameEvents.RaiseCloseInventoryView();
 		}
 	}
+	/// <summary> Fires MenuStateChanged(false) which re-locks cursor and re-enables player input. </summary>
 	private void OnDisable()
 	{
 		Debug.Log(C.method(this, "orange"));
 		// purpose: cursor lock/unlock for player controller
+		// → tells PlayerMovement to re-lock cursor + re-enable WASD, tells UIManager isAnyMenuOpen = false
 		GameEvents.RaiseMenuStateChanged(isAnyMenuOpen: false);
 	}
 	#endregion
@@ -8192,7 +8453,16 @@ using System.Collections.Generic;
 using SPACE_UTIL;
 
 /// <summary>
-/// purely C# — manages all inventory slots: add/remove/switch/stack/swap
+/// I'm the pure C# brain behind the inventory — no Unity dependency, testable via `new`.
+/// I manage 40 Slot objects (10 hotbar + 30 extended). Each Slot holds a BaseHeldTool reference
+/// or null. InventoryOrchestrator calls my Build() to create the slots, then uses TryAdd (finds
+/// first empty slot or stacks), Remove, SwitchTo (changes active index), Scroll (cycles hotbar),
+/// Swap (drag-drop between any two slots), and GetSnapshot (test logging). I track activeSlotIndex
+/// so the Orchestrator knows which tool is equipped. I'm completely decoupled from UI — I have
+/// no idea Field_InventorySlot exists.
+///
+/// Who uses me: InventoryOrchestrator (all operations), DEBUG_CheckB (plain C# test).
+/// Events I fire: none. Events I subscribe to: none. Pure data.
 /// </summary>
 public class InventoryDataService
 {
@@ -8394,7 +8664,14 @@ using TMPro;
 using SPACE_UTIL;
 
 /// <summary>
-/// display-only: slot icon, name, amount, selection state — no logic
+/// I display one inventory slot in the UI — icon sprite, name text, amount text, background
+/// color for selected/hovered state, orange hotbar indicator, and drag visibility toggle.
+/// I have zero logic — no onClick, no drag interfaces, no business logic. InventoryOrchestrator
+/// calls my SetData/SetEmpty/SetHighlighted methods to update what I show. UIEventRelay
+/// (added to my GO at runtime by Orchestrator) handles all drag-drop input separately.
+///
+/// Who uses me: InventoryOrchestrator (SetData, SetEmpty, SetHighlighted, SetHovered, SetDragVisible).
+/// Events I fire: none. Events I subscribe to: none.
 /// </summary>
 public class Field_InventorySlot : MonoBehaviour
 {
@@ -8510,8 +8787,15 @@ using UnityEngine;
 // ──────────────────────────────────────────────────────────────
 
 /// <summary>
-/// outlines whatever the player looks at — powered by Highlight Plus asset
-/// Compiles without the package. Uncomment all [HP] sections after import.
+/// I outline whatever the player looks at with a fresnel/highlight effect. Every Update I
+/// raycast from the camera. If I hit a BaseHeldTool, I apply the tool highlight profile. If
+/// I hit something tagged Grabbable, I apply the grabbable profile. Phase D adds building +
+/// wrench profiles. All Highlight Plus code is commented out with [HP] markers — uncomment
+/// after importing the Highlight Plus package. Without the package, the raycast still runs
+/// but no visual outline appears.
+///
+/// Who uses me: Self (Update raycasts from camera). No external callers.
+/// Events I fire: none. Events I subscribe to: none.
 /// </summary>
 public class FresnelHighlighter : MonoBehaviour
 {
@@ -8549,8 +8833,12 @@ public class FresnelHighlighter : MonoBehaviour
 	// 	activeEffects.Clear();
 	// }
 
+	/// <summary> Raycasts from camera forward within _interactRange. If it hits a BaseHeldTool,
+	/// applies tool highlight profile. If it hits a Grabbable tag, applies grabbable profile.
+	/// Phase D adds building + wrench profiles. All [HP] code is commented until import. </summary>
 	void OutlineLookedAtThing()
 	{
+		// → raycast from camera center forward within interact range
 		if (!Physics.Raycast(_cam.transform.position, _cam.transform.forward, out RaycastHit hit, _interactRange, _interactLayerMask))
 			return;
 
@@ -8560,7 +8848,7 @@ public class FresnelHighlighter : MonoBehaviour
 			// HighlightObject(hit.collider.gameObject, _toolProfile);
 			return;
 		}
-		if (hit.collider.CompareTag("Grabbable"))
+		if (hit.collider.HasTag(TagType.Grabbable))
 		{
 			// HighlightObject(hit.collider.gameObject, _grabbableProfile);
 			return;
@@ -8571,10 +8859,14 @@ public class FresnelHighlighter : MonoBehaviour
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> Every frame: clears previous highlights (when HP imported), then raycasts to
+	/// find what the player is looking at and applies the matching highlight profile. </summary>
 	private void Update()
 	{
+		// → clear all previous frame highlights (when HP imported)
 		// ── [HP] uncomment ClearAll once HighlightPlus is imported ──
 		// ClearAll();
+		// → raycast and apply highlight to whatever the player looks at
 		OutlineLookedAtThing();
 	}
 	#endregion
@@ -8594,7 +8886,16 @@ using TMPro;
 using SPACE_UTIL;
 
 /// <summary>
-/// wires Field_InventorySlot instances to InventoryDataService — handles tool switching, actions, drag-drop
+/// I'm the brain of the inventory system. InventoryUI hands me a DataService on Init — I then
+/// Instantiate 40 Field_InventorySlot prefabs (10 hotbar + 30 extended), attach UIEventRelay to
+/// each for drag-drop, and subscribe to OnToolPickupRequested so I can add tools to slots.
+/// In Update, I route hotbar keys (1-0), scroll wheel, and tool actions (LMB/RMB/R/Q/G) to the
+/// active tool. I also manage drag-drop between slots (swap), drop-outside-UI (tool drops to world),
+/// and the selected item info panel (click slot → show name/icon/desc → equip/drop buttons).
+/// I have zero reference to PlayerMovement — tool.Owner is set via GameEvents.OnToolEquipped by PlayerGrab.
+///
+/// Who uses me: InventoryUI (Init), GameEvents (OnToolPickupRequested).
+/// Events I fire: RaiseToolEquipped, RaiseToolSwitched, RaiseItemPickedUp, RaiseItemDropped, RaiseCloseInventoryView.
 /// </summary>
 public class InventoryOrchestrator : MonoBehaviour
 {
@@ -8624,6 +8925,9 @@ public class InventoryOrchestrator : MonoBehaviour
 	BaseHeldTool previousActiveTool;
 	int dragFromIndex = -1;
 
+	/// <summary> Destroys any existing slot children, then Instantiates 40 Field_InventorySlot
+	/// prefabs (10 under hotbar, 30 under extended). Attaches UIEventRelay to each for drag-drop
+	/// and wires all Action callbacks (beginDrag, drag, endDrag, drop, pointerDown). </summary>
 	void BuildSlotFields()
 	{
 		_hotbarContainer.destroyLeaves();
@@ -8649,6 +8953,8 @@ public class InventoryOrchestrator : MonoBehaviour
 			RELAY_SLOT.Add(relay);
 		}
 	}
+	/// <summary> Loops through all 40 slots and updates each Field_ to match the DataService state —
+	/// shows icon+name+amount for occupied slots, SetEmpty for empty, highlights the active slot. </summary>
 	void RefreshAllSlots()
 	{
 		for (int i = 0; i < FIELD_SLOT.Count; i++)
@@ -8666,6 +8972,9 @@ public class InventoryOrchestrator : MonoBehaviour
 			}
 		}
 	}
+	/// <summary> Called via OnToolPickupRequested when a tool’s “Take” interaction fires. Adds the
+	/// tool to the first empty slot via DataService, deactivates it, equips if EquipWhenPickedUp,
+	/// fires OnItemPickedUp, and refreshes all slot displays. </summary>
 	void HandleToolPickup(BaseHeldTool tool)
 	{
 		int idx = dataService.TryAdd(tool, -1);
@@ -8677,6 +8986,9 @@ public class InventoryOrchestrator : MonoBehaviour
 		GameEvents.RaiseItemPickedUp(tool);
 		RefreshAllSlots();
 	}
+	/// <summary> Deactivates the previous tool’s GO, activates the new tool’s GO (which triggers
+	/// OnEnable → parents to ViewModelContainer), fires RaiseToolEquipped (PlayerGrab sets Owner),
+	/// fires RaiseToolSwitched, and refreshes all slot highlights. </summary>
 	void SwitchToSlot(int index)
 	{
 		if (previousActiveTool != null) previousActiveTool.gameObject.SetActive(false);
@@ -8701,6 +9013,8 @@ public class InventoryOrchestrator : MonoBehaviour
 		GameEvents.RaiseToolSwitched(index);
 		RefreshAllSlots();
 	}
+	/// <summary> Gets the active tool from DataService, calls DropItem (shows WorldModel, applies
+	/// forward velocity), removes from DataService, fires OnItemDropped, refreshes slots. </summary>
 	void HandleDropActiveTool()
 	{
 		BaseHeldTool tool = dataService.ActiveTool;
@@ -8715,6 +9029,8 @@ public class InventoryOrchestrator : MonoBehaviour
 	#endregion
 
 	#region private API — drag-drop
+	/// <summary> Records which slot the drag started from, hides the slot’s content (SetDragVisible
+	/// false), shows the DragGhostIcon with the tool’s sprite following the cursor. </summary>
 	void HandleBeginDrag(UIEventRelay relay, UnityEngine.EventSystems.PointerEventData e)
 	{
 		var slot = dataService.GetSlots()[relay.Index];
@@ -8726,10 +9042,13 @@ public class InventoryOrchestrator : MonoBehaviour
 		_dragGhostAmountText.text = slot.Tool.Quantity > 1 ? slot.Tool.Quantity.ToString() : "";
 		_dragGhostIcon.transform.SetAsLastSibling();
 	}
+	/// <summary> Every frame during drag — moves the ghost icon to follow the cursor position. </summary>
 	void HandleDrag(UnityEngine.EventSystems.PointerEventData e)
 	{
 		_dragGhostIcon.transform.position = e.position;
 	}
+	/// <summary> Drag ended — restores the source slot’s visibility, hides the ghost. If dropped
+	/// outside any UI slot (e.pointerEnter == null), drops the tool into the world instead. </summary>
 	void HandleEndDrag(UIEventRelay relay, UnityEngine.EventSystems.PointerEventData e)
 	{
 		FIELD_SLOT[relay.Index].SetDragVisible(true);
@@ -8743,6 +9062,8 @@ public class InventoryOrchestrator : MonoBehaviour
 		dragFromIndex = -1;
 		RefreshAllSlots();
 	}
+	/// <summary> Drop landed on a target slot — swaps the dragged tool with whatever is in the
+	/// target slot via DataService.Swap, then refreshes all displays. </summary>
 	void HandleDrop(UIEventRelay relay, UnityEngine.EventSystems.PointerEventData e)
 	{
 		if (dragFromIndex < 0 || dragFromIndex == relay.Index) return;
@@ -8754,6 +9075,8 @@ public class InventoryOrchestrator : MonoBehaviour
 	#region extra
 	// nice-to-have: selected item info panel — click a slot in extended inventory to see name/desc/icon + equip/drop buttons
 	BaseHeldTool selectedTool;
+	/// <summary> Shows or hides the selected item info panel. If tool is not null, displays its
+	/// name, description, icon, amount, and sets the equip button text (“Equip” or “Build”). </summary>
 	void UpdateSelectedItemInfo(BaseHeldTool tool)
 	{
 		selectedTool = tool;
@@ -8765,6 +9088,8 @@ public class InventoryOrchestrator : MonoBehaviour
 		_selectedItemIcon.sprite = (tool is IIconItem icon) ? icon.GetIcon() : null;
 		_equipButtonText.text = (tool is ToolBuilder) ? "Build" : "Equip";
 	}
+	/// <summary> Equips the currently selected tool by switching to its slot index, then fires
+	/// RaiseCloseInventoryView so the inventory panel closes after equipping. </summary>
 	void EquipSelectedTool()
 	{
 		if (selectedTool == null) return;
@@ -8773,6 +9098,8 @@ public class InventoryOrchestrator : MonoBehaviour
 		// purpose: close inventory after equipping
 		GameEvents.RaiseCloseInventoryView();
 	}
+	/// <summary> Drops the currently selected tool from the info panel — calls DropItem on the
+	/// tool, removes it from DataService, fires OnItemDropped, and hides the info panel. </summary>
 	void DropSelectedTool()
 	{
 		if (selectedTool == null) return;
@@ -8803,6 +9130,8 @@ public class InventoryOrchestrator : MonoBehaviour
 	#endregion
 
 	#region private API — subscriptions
+	/// <summary> Subscribes to OnToolPickupRequested (so tools can be added to inventory) and
+	/// OnMoneyChanged (triggers RefreshAllSlots to update any money-dependent displays). </summary>
 	void SubscribeEvents()
 	{
 		// purpose: InventoryOrchestrator adds this tool to hotbar
@@ -8813,8 +9142,11 @@ public class InventoryOrchestrator : MonoBehaviour
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> Every frame (when no menu open): routes hotbar keys 1-0, scroll wheel, and
+	/// tool action keys (LMB/RMB/R/Q/G) to the active tool’s virtual methods. </summary>
 	private void Update()
 	{
+		// → skip all input when any menu is open
 		if (Singleton<UIManager>.Ins.isAnyMenuOpen) return;
 		// hotbar keys 1-0
 		if (INPUT.K.InstantDown(KeyCode.Alpha1)) SwitchToSlot(0);
@@ -8845,6 +9177,7 @@ public class InventoryOrchestrator : MonoBehaviour
 			if (INPUT.K.InstantDown(KeyCode.G)) HandleDropActiveTool();
 		}
 	}
+	/// <summary> Unsubscribes from OnToolPickupRequested to prevent null ref on scene unload. </summary>
 	private void OnDestroy()
 	{
 		GameEvents.OnToolPickupRequested -= HandleToolPickup;
@@ -8857,7 +9190,13 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// accumulates conveyor velocities for FixedUpdate — base for all physics world objects
+/// I'm the base class for any physics object that can sit on conveyors. I cache my Rigidbody
+/// on Awake and set standard drag values. In FixedUpdate I apply accumulated conveyor velocities
+/// (Phase D populates these via RegisterConveyor/UnregisterConveyor stubs). OrePiece and
+/// BaseSellableItem inherit from me. I also expose STANDARD_LINEAR_DAMPING and STANDARD_ANGULAR_DAMPING
+/// constants that OrePiecePoolManager uses when resetting pooled ore.
+///
+/// Who inherits me: BaseSellableItem → BaseHeldTool → all tools, OrePiece → DamageableOrePiece.
 /// </summary>
 public class BasePhysicsObject : MonoBehaviour
 {
@@ -8896,8 +9235,11 @@ public class BasePhysicsObject : MonoBehaviour
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> Caches the Rigidbody reference and sets standard drag values so all physics
+	/// objects start with consistent drag (used as reset values by OrePiecePoolManager). </summary>
 	protected virtual void Awake()
 	{
+		// → cache Rigidbody for conveyor velocity + pool reset
 		rb = GetComponent<Rigidbody>();
 		if (rb != null)
 		{
@@ -8918,7 +9260,12 @@ public class BasePhysicsObject : MonoBehaviour
 
 <!-- ==== FILE: learn/phase-b(New)/Scripts/3-MonoBehaviours/Physics/BaseSellableItem.cs ==== -->
 /// <summary>
-/// has a base sell value — sits between BasePhysicsObject and BaseHeldTool
+/// I add a sell value to any physics object. SellerMachine checks for me on trigger enter —
+/// if something has BaseSellableItem, it can be sold for BaseSellValue. OrePiece inherits me
+/// and overrides GetSellValue to multiply by RandomPriceMultiplier. BaseHeldTool also inherits
+/// me (tools are technically sellable, though most have zero sell value).
+///
+/// Who inherits me: BaseHeldTool → all tools, OrePiece → DamageableOrePiece.
 /// </summary>
 public class BaseSellableItem : BasePhysicsObject
 {
@@ -8933,7 +9280,11 @@ using System.Collections;
 using UnityEngine;
 
 /// <summary>
-/// debris piece that despawns after time
+/// I'm a debris piece (rock chunk, metal shard, etc.) that auto-destroys after _lifetime seconds.
+/// Spawned by particle effects or node breaks for visual flair. I just exist, fall via gravity,
+/// and disappear. No pool recycling — I'm cheap and short-lived.
+///
+/// Who uses me: ParticleManager or manual Instantiate for break effects.
 /// </summary>
 public class PhysicsGib : BaseSellableItem
 {
@@ -8966,7 +9317,12 @@ public class PhysicsGib : BaseSellableItem
 using UnityEngine;
 
 /// <summary>
-/// plays sound on collision impact — uses cooldown to avoid spam
+/// I play an impact sound when this physics object collides with something. I check the
+/// collision velocity against _minImpactVelocity and respect a cooldown to prevent spam.
+/// ToolPickaxe also calls my PlayImpactSound directly when it hits me with the pickaxe.
+/// All actual sound calls are Phase H stubs until SoundManager exists.
+///
+/// Who uses me: Unity physics (OnCollisionEnter), ToolPickaxe (PlayImpactSound on hit).
 /// </summary>
 public class PhysicsSoundPlayer : MonoBehaviour
 {
@@ -8981,18 +9337,25 @@ public class PhysicsSoundPlayer : MonoBehaviour
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> When something collides with me, checks if the impact velocity exceeds the minimum
+	/// threshold and if enough time has passed since the last play. If both pass, plays the impact
+	/// sound at the contact point (Phase H stub — no actual sound until SoundManager exists). </summary>
 	private void OnCollisionEnter(Collision collision)
 	{
+		// → skip if no contact or cooldown hasn't elapsed
 		if (collision.contactCount == 0 || Time.time - lastPlayTime < _cooldown) return;
+		// → check if collision velocity is strong enough to trigger sound
 		float sqrVel = collision.relativeVelocity.sqrMagnitude;
 		if (sqrVel <= _minImpactVelocity) return;
 		lastPlayTime = Time.time;
+		// → play impact sound at contact point (Phase H adds actual SoundManager call)
 		// Phase H: Singleton<SoundManager>.Ins.PlaySoundAtLocation(_impactDef, collision.GetContact(0).point);
 	}
 	#endregion
 
 	#region public API
-	/// <summary> force play impact sound at this position </summary>
+	/// <summary> Called by ToolPickaxe when its raycast hits an object with this component.
+	/// Forces an impact sound to play at this object's position regardless of collision state. </summary>
 	public void PlayImpactSound()
 	{
 		// Phase H: Singleton<SoundManager>.Ins.PlaySoundAtLocation(_impactDef, transform.position);
@@ -9014,7 +9377,15 @@ using TMPro;
 using SPACE_UTIL;
 
 /// <summary>
-/// mouse look, FOV, camera bobbing, viewmodel bobbing
+/// I handle everything the camera does — mouse look (X/Y rotation), FOV changes during sprint,
+/// camera head bob while walking, viewmodel bob (subtle hand sway), and view punch (recoil from
+/// explosions or elevator landing). I read PlayerMovement's speed and grounded state to scale
+/// bob intensity. I subscribe to OnCamViewPunch for external systems (StartingElevator, future
+/// explosions) to shake the camera. OnMenuStateChanged is handled by PlayerMovement — I just
+/// read isAnyMenuOpen to skip look input.
+///
+/// Who uses me: PlayerMovement (I'm on the same GO). StartingElevator (view punch event).
+/// Events I subscribe to: OnCamViewPunch (camera shake from external sources).
 /// </summary>
 public class PlayerCamera : MonoBehaviour
 {
@@ -9076,6 +9447,8 @@ public class PlayerCamera : MonoBehaviour
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> Initializes FOV to base value and subscribes to OnCamViewPunch so external
+	/// systems (elevator landing, explosions) can shake the camera. </summary>
 	private void Start()
 	{
 		currentFOV = _baseFOV;
@@ -9085,15 +9458,20 @@ public class PlayerCamera : MonoBehaviour
 		// purpose: apply view punch from elevator landing, explosions, etc.
 		GameEvents.OnCamViewPunch += HandleViewPunch;
 	}
+	/// <summary> Every frame: handles mouse look (when no menu open), FOV sprint widening,
+	/// camera head bob, viewmodel hand sway, and view punch decay from explosions. </summary>
 	private void Update()
 	{
 		if (Time.timeScale == 0f) return;
+		// → skip look input when any menu is open
 		if (!isAnyMenuOpen) HandleLook();
 		HandleFOV();
 		HandleCameraBobbing();
 		HandleViewModelBobbing();
 		HandleViewPunchDecay();
 	}
+	/// <summary> Reads Mouse X/Y, applies sensitivity, rotates player around Y-axis (horizontal)
+	/// and tilts camera around X-axis (vertical, clamped to ±88°). </summary>
 	void HandleLook()
 	{
 		float mx = Input.GetAxis("Mouse X") * _mouseSensitivity;
@@ -9102,6 +9480,7 @@ public class PlayerCamera : MonoBehaviour
 		xRot = (xRot - my).clamp(-88f, 88f);
 		_movement.transform.Rotate(Vector3.up * mx);
 	}
+	/// <summary> Widens FOV by 5% when sprinting, smoothly returns to base FOV when stopping. </summary>
 	void HandleFOV()
 	{
 		bool sprinting = _movement.SelectedWalkSpeed > _movement.WalkSpeed && _movement.IsGrounded;
@@ -9109,6 +9488,8 @@ public class PlayerCamera : MonoBehaviour
 		currentFOV = Mathf.SmoothDamp(currentFOV, targetFOV, ref fovVelocity, 0.1f);
 		_cam.fieldOfView = currentFOV;
 	}
+	/// <summary> Applies head bob (subtle pitch/yaw oscillation) based on movement speed and
+	/// grounded state. Faster movement = faster + larger bob. Airborne = no bob. </summary>
 	void HandleCameraBobbing()
 	{
 		bool moving = _movement.MoveInput.sqrMagnitude > 0.01f;
@@ -9140,6 +9521,8 @@ public class PlayerCamera : MonoBehaviour
 		Quaternion bobRot = Quaternion.Euler(bobbingPitch, bobbingYaw, 0f);
 		_cam.transform.localRotation = lookRot * bobRot;
 	}
+	/// <summary> Applies hand sway to the ViewModel container — similar to camera bob but with
+	/// separate frequency/amplitude for a natural first-person hand movement feel. </summary>
 	void HandleViewModelBobbing()
 	{
 		if (_viewModelContainer == null) return;
@@ -9182,12 +9565,16 @@ public class PlayerCamera : MonoBehaviour
 		Quaternion bobQ = Quaternion.Euler(viewBobPitch + smoothedPitchSway, viewBobYaw + smoothedYawSway, 0f);
 		_viewModelContainer.localRotation = Quaternion.Euler(_viewModelBaseRotEuler) * bobQ;
 	}
+	/// <summary> Called via OnCamViewPunch event — sets a target punch rotation that decays
+	/// over the given duration. Used by elevator landing and future explosion effects. </summary>
 	void HandleViewPunch(Vector3 punchAmount, float duration)
 	{
 		viewPunchTarget = punchAmount;
 		viewPunchDuration = duration;
 		viewPunchTimer = duration;
 	}
+	/// <summary> Gradually reduces the view punch rotation back to zero over the duration set
+	/// by HandleViewPunch. Applied to the camera's local rotation each frame. </summary>
 	void HandleViewPunchDecay()
 	{
 		if (viewPunchTimer > 0f)
@@ -9198,6 +9585,8 @@ public class PlayerCamera : MonoBehaviour
 		}
 		else viewPunchCurrent = Vector3.zero;
 	}
+	/// <summary> Unsubscribes from OnCamViewPunch to prevent null ref if camera is destroyed
+	/// before the event bus (e.g. scene unload). </summary>
 	private void OnDestroy()
 	{
 		GameEvents.OnCamViewPunch -= HandleViewPunch;
@@ -9209,7 +9598,13 @@ public class PlayerCamera : MonoBehaviour
 using UnityEngine;
 
 /// <summary>
-/// plays footstep sounds based on movement speed — alternates left/right
+/// I play footstep sounds when the player walks. I read PlayerMovement's speed and grounded
+/// state to decide when to trigger a footstep. I alternate left/right clips from the assigned
+/// SO_FootstepSoundDefinition. Currently all sound calls are Phase H stubs — no audio plays
+/// until SoundManager exists. I also have a water variant for when IsInWater is true.
+///
+/// Who uses me: Self (Update reads PlayerMovement). No external callers.
+/// Events I fire: none. Events I subscribe to: none.
 /// </summary>
 public class PlayerFootsteps : MonoBehaviour
 {
@@ -9262,7 +9657,16 @@ using TMPro;
 using SPACE_UTIL;
 
 /// <summary>
-/// grabs physics objects with SpringJoint + LineRenderer rope
+/// I grab physics objects when the player right-clicks on something tagged "Grabbable".
+/// I create a SpringJoint between a kinematic RigidbodyDragger and the target's Rigidbody,
+/// increase drag for a heavy feel, and draw a LineRenderer rope between hand and object.
+/// Right-click again releases — I destroy the joint, restore drag, disable the rope.
+/// If the player pulls too far, the SpringJoint breaks and RigidbodyDraggerController calls
+/// my ForceRelease(). I also subscribe to OnToolEquipped to set tool.Owner = PlayerMovement,
+/// which decouples InventoryOrchestrator from needing a PlayerMovement reference.
+///
+/// Who uses me: RigidbodyDraggerController (ForceRelease on joint break).
+/// Events I subscribe to: OnMenuStateChanged (block grab), OnToolEquipped (set tool.Owner).
 /// </summary>
 public class PlayerGrab : MonoBehaviour
 {
@@ -9314,6 +9718,8 @@ public class PlayerGrab : MonoBehaviour
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> Subscribes to menu state (blocks grab when open) and tool equip (sets tool.Owner
+	/// to PlayerMovement so tools can access camera for raycasts). Disables rope on start. </summary>
 	private void Start()
 	{
 		// purpose: block grab when menu is open
@@ -9322,8 +9728,11 @@ public class PlayerGrab : MonoBehaviour
 		GameEvents.OnToolEquipped += (tool) => tool.Owner = _movement;
 		_rope.enabled = false;
 	}
+	/// <summary> Every frame: right-click triggers grab/release, updates rope line positions
+	/// between dragger and held object, and auto-releases if the held object was deactivated. </summary>
 	private void Update()
 	{
+		// → right-click toggles grab/release
 		if (INPUT.K.InstantDown(KeyCode.Mouse1)) TryGrab();
 
 		if (heldObject != null && !heldObject.activeInHierarchy) Release();
@@ -9337,14 +9746,21 @@ public class PlayerGrab : MonoBehaviour
 		}
 		else _rope.enabled = false;
 	}
+	/// <summary> If menu is open, does nothing. If already holding, releases. Otherwise raycasts
+	/// from camera — if it hits a Grabbable-tagged object, starts the grab via GrabObject. </summary>
 	void TryGrab()
 	{
+		// → blocked when any menu panel is open
 		if (isAnyMenuOpen) return;
+		// → already holding? release instead
 		if (heldObject != null || grabJoint != null) { Release(); return; }
 		if (!Physics.Raycast(_cam.transform.position, _cam.transform.forward, out RaycastHit hit, _interactRange, _interactLayerMask)) return;
-		if (!hit.collider.CompareTag("Grabbable")) return;
+		if (!hit.collider.HasTag(TagType.Grabbable)) return;
 		GrabObject(hit);
 	}
+	/// <summary> Creates a SpringJoint between the kinematic dragger and the target’s Rigidbody.
+	/// Increases drag for a heavy feel, enables interpolation for smooth visuals, ignores
+	/// collisions between player and grabbed object, and enables the rope LineRenderer. </summary>
 	void GrabObject(RaycastHit hit)
 	{
 		heldObject = hit.collider.gameObject;
@@ -9374,6 +9790,9 @@ public class PlayerGrab : MonoBehaviour
 		rb.linearDamping = 2.5f;
 		rb.angularDamping = 0.3f;
 	}
+	/// <summary> Destroys the SpringJoint, deactivates the dragger, restores the object’s original
+	/// drag values, re-enables collisions, hides the rope, and starts a 3s coroutine to disable
+	/// interpolation on the released object (saves CPU when idle). </summary>
 	void Release()
 	{
 		if (isAnyMenuOpen) return;
@@ -9418,7 +9837,16 @@ using TMPro;
 using SPACE_UTIL;
 
 /// <summary>
-/// walk, sprint, duck, jump, slope sliding, gravity — replaces SimplePlayerController
+/// I'm the main player controller — I handle WASD movement, sprinting, ducking, jumping,
+/// slope sliding, gravity, and noclip fly mode (V key). I'm a Singleton so tools and other
+/// systems access my camera, ViewModelContainer, and HoldPosition via Owner chain properties.
+/// I subscribe to OnMenuStateChanged to freeze input when any menu is open. I also own the
+/// mining hat dual-light system (nightVisionLight vs miningHatLight) toggled by ToolMiningHat.
+/// PlayerCamera reads my speed/grounded state for camera bobbing. PlayerGrab reads my camera
+/// for raycasts. InventoryOrchestrator reads isAnyMenuOpen to block hotbar input.
+///
+/// Who uses me: Every tool (via Owner chain), PlayerCamera (bob speed), PlayerGrab (camera ref).
+/// Events I subscribe to: OnMenuStateChanged (freeze/unfreeze input).
 /// </summary>
 public class PlayerMovement : Singleton<PlayerMovement>
 {
@@ -9482,11 +9910,15 @@ public class PlayerMovement : Singleton<PlayerMovement>
 
 	#region extra
 	// nice-to-have: noclip — V key fly mode, no gravity, through walls
+	/// <summary> Flips noclip on/off — disables CharacterController so the player can fly through
+	/// walls. Re-enabling CC snaps the player back to valid ground. </summary>
 	void ToggleNoclip()
 	{
 		isUsingNoclip = !isUsingNoclip;
 		_cc.enabled = !isUsingNoclip;
 	}
+	/// <summary> Flies the player in the camera's forward direction using WASD, Space/C for up/down,
+	/// Shift for fast fly. No gravity, no collisions — pure free movement for debugging. </summary>
 	void HandleNoclipMovement()
 	{
 		Vector3 forward = _playerCam.transform.forward;
@@ -9528,15 +9960,21 @@ public class PlayerMovement : Singleton<PlayerMovement>
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> Locks cursor to FPS mode, sets initial walk speed, and subscribes to menu state
+	/// changes so movement freezes when any UI panel is open. </summary>
 	private void Start()
 	{
+		// → lock cursor to center of screen for FPS look
 		INPUT.UI.SetCursor(isFpsMode: true);
 		selectedWalkSpeed = _walkSpeed;
 		// purpose: lock/unlock movement when menus open
 		GameEvents.OnMenuStateChanged += (open) => isAnyMenuOpen = open;
 	}
+	/// <summary> Every frame: updates cursor lock state, checks ground, routes input to movement
+	/// or noclip, applies gravity+slope, and respawns if fallen below y=-200. </summary>
 	private void Update()
 	{
+		// → cursor follows menu state (locked in FPS, free in menus)
 		INPUT.UI.SetCursor(isFpsMode: !isAnyMenuOpen);
 		isGrounded = !isUsingNoclip && _cc.isGrounded;
 		if (!isAnyMenuOpen)
@@ -9548,6 +9986,8 @@ public class PlayerMovement : Singleton<PlayerMovement>
 		if (!isUsingNoclip) HandleGravityAndSlope();
 		if (transform.position.y <= -200f) RespawnPlayer();
 	}
+	/// <summary> Reads WASD input, applies sprint/duck speed modifiers, moves the CharacterController,
+	/// and handles jumping (Space key adds upward velocity when grounded). </summary>
 	void HandleMovement()
 	{
 		moveInput = new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical"));
@@ -9563,6 +10003,8 @@ public class PlayerMovement : Singleton<PlayerMovement>
 			velocity.x = 0f; velocity.z = 0f;
 		}
 	}
+	/// <summary> C key ducks (shrinks CC height), releasing C stands up (blocked if ceiling above).
+	/// Smoothly interpolates camera height and scales the character model to match. </summary>
 	void HandleDucking()
 	{
 		bool wantsDuck = Input.GetKey(KeyCode.C);
@@ -9585,6 +10027,8 @@ public class PlayerMovement : Singleton<PlayerMovement>
 		if (_characterModel != null)
 			_characterModel.localScale = new Vector3(1f, _cc.height / _standingHeight, 1f);
 	}
+	/// <summary> Applies gravity when airborne, detects steep slopes via raycasts and adds slide
+	/// velocity to push the player downhill, caps head-bump velocity to zero. </summary>
 	void HandleGravityAndSlope()
 	{
 		if (isGrounded)
@@ -9617,6 +10061,7 @@ public class PlayerMovement : Singleton<PlayerMovement>
 		CollisionFlags flags = _cc.Move(velocity * Time.deltaTime);
 		if ((flags & CollisionFlags.Above) != 0 && velocity.y > 0f) velocity.y = 0f;
 	}
+	/// <summary> Teleports the player to a random spawn point — called when y falls below -200. </summary>
 	void RespawnPlayer()
 	{
 		TeleportPlayer(PlayerSpawnPoint.GetRandomSpawnPoint());
@@ -9629,7 +10074,11 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// marks where the player spawns — self-registers, zero FindObjectOfType
+/// I mark a spawn position in the scene. On OnEnable I add myself to a static list, OnDisable
+/// I remove myself. GetRandomSpawnPoint picks a random entry from that list — zero FindObjectOfType.
+/// PlayerMovement.RespawnPlayer calls GetRandomSpawnPoint when the player falls below y=-200.
+///
+/// Who uses me: PlayerMovement (RespawnPlayer). Self-registering static list pattern.
 /// </summary>
 public class PlayerSpawnPoint : MonoBehaviour
 {
@@ -9655,7 +10104,12 @@ public class PlayerSpawnPoint : MonoBehaviour
 using UnityEngine;
 
 /// <summary>
-/// auto-releases grab when SpringJoint breaks — attach to RigidbodyDragger GO
+/// I sit on the RigidbodyDragger child GO (the kinematic rigidbody that PlayerGrab creates
+/// SpringJoints on). When the player pulls a grabbed object too far, the SpringJoint breaks
+/// and Unity calls my OnJointBreak. I then call PlayerGrab.ForceRelease() which cleans up
+/// the joint, rope, drag values, and collision ignoring — same as a normal release but forced.
+///
+/// Who uses me: Unity physics (OnJointBreak callback). PlayerGrab (ForceRelease).
 /// </summary>
 public class RigidbodyDraggerController : MonoBehaviour
 {
@@ -9681,7 +10135,16 @@ using TMPro;
 using SPACE_UTIL;
 
 /// <summary>
-/// base class for all equippable tools — implements IInteractable, IIconItem, ISaveLoadableObject(stub)
+/// I'm the base class every equippable tool inherits from (ToolPickaxe, ToolMagnet, etc.).
+/// I handle the common lifecycle: when picked up via "Take" interaction, I fire RaiseToolPickupRequested
+/// so InventoryOrchestrator adds me to a hotbar slot. When equipped, my ViewModel shows in front of
+/// the camera (parented to Owner.ViewModelContainer). When dropped (G key), I unparent, show my
+/// WorldModel, and fly forward with velocity. Subclasses override PrimaryFire, SecondaryFire, etc.
+/// Owner (PlayerMovement) is set by PlayerGrab via OnToolEquipped event — I never set it myself.
+/// I implement IInteractable (for interaction wheel), IIconItem (inventory icon), and ISaveLoadableObject (stub for Phase G).
+///
+/// Who uses me: InventoryOrchestrator (equip/drop/switch), PlayerGrab (sets Owner via event).
+/// Events I fire: RaiseToolPickupRequested (on "Take" interaction).
 /// </summary>
 public class BaseHeldTool : BaseSellableItem, IInteractable, ISaveLoadableObject, IIconItem
 {
@@ -9751,9 +10214,9 @@ public class BaseHeldTool : BaseSellableItem, IInteractable, ISaveLoadableObject
 		Owner = null;
 	}
 	/// <summary> show/hide view model </summary>
-	public virtual void HideViewModel(bool hide = true) { if (_viewModel != null) _viewModel.SetActive(!hide); }
+	protected virtual void HideViewModel(bool hide = true) => _viewModel?.SetActive(!hide);
 	/// <summary> show/hide world model </summary>
-	public virtual void HideWorldModel(bool hide = true) { if (_worldModel != null) _worldModel.SetActive(!hide); }
+	protected virtual void HideWorldModel(bool hide = true) => _worldModel?.SetActive(!hide);
 	#endregion
 
 	#region extra
@@ -9823,7 +10286,12 @@ public class BaseHeldTool : BaseSellableItem, IInteractable, ISaveLoadableObject
 using UnityEngine;
 
 /// <summary>
-/// shows ghost preview + place buildings — partial, Phase D completes placement logic
+/// I show a ghost building preview and place buildings on left-click. Phase B creates the skeleton
+/// — Reload rotates 90°, QButtonPressed cycles alternate prefabs, DropItem spawns a BuildingCrate
+/// instead of raw drop. Phase D completes PrimaryFire (grid snap, ghost material green/red,
+/// conveyor auto-snap) and Update (ghost follows cursor). Currently mostly stubs with comments.
+///
+/// Who uses me: InventoryOrchestrator (PrimaryFire, Reload, QButtonPressed, DropItem).
 /// </summary>
 public class ToolBuilder : BaseHeldTool
 {
@@ -9872,7 +10340,11 @@ public class ToolBuilder : BaseHeldTool
 using UnityEngine;
 
 /// <summary>
-/// pick up / pack placed buildings — primary = take/pack, secondary = pack only
+/// I pick up or pack placed buildings. Left-click raycasts from the camera — Phase D will add
+/// BuildingObject.TryTakeOrPack and BuildingCrate.TryAddToInventory when buildings exist.
+/// Right-click does the same for a secondary action. Currently both are stubs with comments.
+///
+/// Who uses me: InventoryOrchestrator (PrimaryFire, SecondaryFire).
 /// </summary>
 public class ToolHammer : BaseHeldTool
 {
@@ -9906,11 +10378,11 @@ public class ToolHammer : BaseHeldTool
 
 <!-- ==== FILE: learn/phase-b(New)/Scripts/3-MonoBehaviours/Tool/ToolHardHat.cs ==== -->
 /// <summary>
-/// separate tool type extending ToolPickaxe — distinct SavableObjectID, empty override
+/// I'm a separate tool type that extends ToolPickaxe with zero overrides. I exist so the
+/// inspector can assign different prefab (hard hat model) and different SavableObjectID
+/// while reusing all of ToolPickaxe's swing/raycast/damage logic. Empty class — all behavior inherited.
 /// </summary>
-public class ToolHardHat : ToolPickaxe
-{
-}
+public class ToolHardHat : ToolPickaxe { }
 
 <!-- ==== FILE: learn/phase-b(New)/Scripts/3-MonoBehaviours/Tool/ToolMagnet.cs ==== -->
 using System;
@@ -9919,7 +10391,17 @@ using UnityEngine;
 using TMPro;
 
 /// <summary>
-/// pull nearby physics objects via spring joints — launch, drop, cycle mode
+/// I pull nearby Grabbable physics objects toward me using SpringJoints. When the player holds
+/// right-click, I OverlapSphere at my pull origin and create a MagnetAnchor GO with a SpringJoint
+/// for each nearby Rigidbody — they fly toward me. Left-click launches them all forward (push force).
+/// R drops them gently. Q cycles my selection mode (Everything/NotInFilter/NotOnConveyors) and
+/// updates the TMP text on my ViewModel. I clean up broken joints every FixedUpdate, and track
+/// recently dropped bodies to disable interpolation after 3 seconds. DetachBody is called by
+/// OrePiece when it enters a machine (Phase C+) so it releases from me cleanly.
+///
+/// Who uses me: InventoryOrchestrator (SecondaryFireHeld, PrimaryFire, Reload, QButtonPressed).
+/// Who calls DetachBody: OrePiece.SellAfterDelay, future machine triggers.
+/// Events I fire: none.
 /// </summary>
 public class ToolMagnet : BaseHeldTool
 {
@@ -10077,7 +10559,13 @@ public class ToolMagnet : BaseHeldTool
 using UnityEngine;
 
 /// <summary>
-/// toggles a light on equip/unequip — primary fire toggles light
+/// I'm a wearable mining hat that toggles a light. Left-click toggles isOn which shows/hides
+/// both _worldModelLight and _viewModelLight. On equip (OnEnable) and unequip (OnDisable) I
+/// restore the light to its current state. I also override Interact for the "Toggle" interaction
+/// wheel option. PlayerMovement has a separate dual-light system (nightVision vs miningHat)
+/// that ToolMiningHat can call via ToggleMiningLightFromTool.
+///
+/// Who uses me: InventoryOrchestrator (PrimaryFire), InteractionWheel ("Toggle").
 /// </summary>
 public class ToolMiningHat : BaseHeldTool
 {
@@ -10117,7 +10605,14 @@ using System.Collections;
 using UnityEngine;
 
 /// <summary>
-/// swing and raycast-hit with delay — hold left-click to mine
+/// I'm the pickaxe tool. When the player holds left-click, I play a swing animation then
+/// wait 0.2s before raycasting from the camera. If I hit an IDamageable (OreNode), I call
+/// TakeDamage on it. If I hit an OrePiece, I try TryConvertToCrushed (splits into 2 crushed).
+/// If I hit a plain Rigidbody, I push it with AddForce. I also play the PhysicsSoundPlayer
+/// impact sound on the hit target if it has one. My cooldown prevents swing spam.
+///
+/// Who uses me: InventoryOrchestrator routes PrimaryFireHeld to me.
+/// Events I fire: none directly (IDamageable targets fire their own events when broken).
 /// </summary>
 public class ToolPickaxe : BaseHeldTool
 {
@@ -10178,7 +10673,13 @@ using UnityEngine;
 using TMPro;
 
 /// <summary>
-/// shows resource info text on raycast hit while equipped
+/// I show the name of whatever the player is looking at while I'm equipped. In Update I
+/// raycast from the camera — if I hit a BaseHeldTool I show its Name, if I hit an OrePiece
+/// (Phase C) I show its resource type. The text is displayed on my ViewModel's TMP_Text.
+/// PrimaryFire does nothing — I'm a passive scan tool. Phase C/D extend the raycast checks
+/// to identify OreNodes, BuildingObjects, etc.
+///
+/// Who uses me: InventoryOrchestrator (equips me, I run my own Update).
 /// </summary>
 public class ToolResourceScanner : BaseHeldTool
 {
@@ -10215,7 +10716,11 @@ public class ToolResourceScanner : BaseHeldTool
 using UnityEngine;
 
 /// <summary>
-/// toggle building supports on/off — primary disables, secondary enables
+/// I toggle building support scaffolding on/off. Left-click raycasts and disables supports,
+/// right-click enables them. Phase D adds the actual BuildingObject.EnableBuildingSupports call.
+/// Currently both are stubs with comments showing where the Phase D logic goes.
+///
+/// Who uses me: InventoryOrchestrator (PrimaryFire, SecondaryFire).
 /// </summary>
 public class ToolSupportsWrench : BaseHeldTool
 {
@@ -10248,7 +10753,13 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 
 /// <summary>
-/// relays Unity EventSystem events to Action callbacks — attach to any UI prefab, zero logic
+/// I relay Unity EventSystem events (drag, drop, pointer enter/exit/down) to Action callbacks.
+/// InventoryOrchestrator adds me to each Field_InventorySlot GO at runtime via AddComponent,
+/// then wires my Action fields (onBeginDrag, onDrag, onEndDrag, onDrop, onPointerDown, etc.)
+/// to its handler methods. This keeps Field_ pure display — zero interfaces on it. I'm reusable
+/// across any UI system that needs drag-drop or pointer events (quest tree, research tree, etc.).
+///
+/// Who uses me: InventoryOrchestrator (wires all Actions in BuildSlotFields).
 /// </summary>
 public class UIEventRelay : MonoBehaviour,
 	IBeginDragHandler, IDragHandler, IEndDragHandler, IDropHandler,
@@ -10339,10 +10850,7 @@ public static class UtilsPhaseB
 	{
 		Collider[] cols = Physics.OverlapSphere(center, radius);
 		foreach (var col in cols)
-		{
-			Rigidbody rb = col.attachedRigidbody;
-			if (rb != null) rb.AddExplosionForce(force, center, radius, upwardsMod, ForceMode.Impulse);
-		}
+			col.attachedRigidbody?.AddExplosionForce(force, center, radius, upwardsMod, ForceMode.Impulse);
 	}
 
 	#region extra
@@ -12014,9 +12522,9 @@ On `SetActive(true)`, `OrePiece.OnEnable()` fires and **adds itself** to the sta
 
 The piece **lives in the world** as a physics object — it can be grabbed (Phase B SpringJoint), pulled by magnet (Phase B ToolMagnet), or pushed onto conveyors (Phase D).
 
-When the piece enters a `SellerMachine` trigger, `OnTriggerEnter` calls `orePiece.SellAfterDelay(2f)`. This **detaches from magnet** if held, tags as `"MarkedForDestruction"` (so other triggers ignore it), then starts a **2-second coroutine**. After the delay, `EconomyManager.AddMoney(sellValue)` is called and `GameEvents.RaiseOreSold(price, type, pieceType)` fires.
+When the piece enters a `SellerMachine` trigger, `OnTriggerEnter` calls `orePiece.SellAfterDelay(2f)`. This **detaches from magnet** if held, calls `SetTag(TagType.MarkedForDestruction)` (so other triggers skip it via `HasTag` check), then starts a **2-second coroutine**. After the delay, `EconomyManager.AddMoney(sellValue)` is called and `GameEvents.RaiseOreSold(price, type, pieceType)` fires.
 
-`OrePiece.Delete()` calls `OrePiecePoolManager.ReturnToPool(this)`. The pool **deactivates** the piece, resets velocity/drag/rotation, clears baskets and magnet references, re-tags as `"Grabbable"`, and **enqueues** it back into the pool. `OnDisable()` removes it from `AllOrePieces`.
+`OrePiece.Delete()` calls `OrePiecePoolManager.ReturnToPool(this)`. The pool **deactivates** the piece, resets velocity/drag/rotation, clears baskets and magnet references, re-tags via `SetTag(TagType.Grabbable)`, and **enqueues** it back into the pool. `OnDisable()` removes it from `AllOrePieces`.
 
 ---
 
@@ -12443,7 +12951,15 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// throttles spawning when too many physics objects exist
+/// I throttle ore spawning when the physics engine has too many active objects. Every 15 seconds
+/// I count how many OrePieces have non-sleeping Rigidbodies. If the count exceeds _movingObjectLimit
+/// I escalate through states: Regular → SlightlyLimited (AutoMiner 25% slower) → HighlyLimited
+/// (50% slower) → Blocked (AutoMiner stops entirely). On state change I fire OnOreLimitChanged
+/// so PhysicsLimitUIWarning can show/hide the warning panel. First time a limit is hit, I log
+/// a one-time warning popup. AutoMiner reads my GetAutoMinerSpawnTimeMultiplier each spawn cycle.
+///
+/// Who uses me: AutoMiner (ShouldBlockOreSpawning, GetAutoMinerSpawnTimeMultiplier).
+/// Events I fire: OnOreLimitChanged(state).
 /// </summary>
 public class OreLimitManager : Singleton<OreLimitManager>
 {
@@ -12486,8 +13002,11 @@ public class OreLimitManager : Singleton<OreLimitManager>
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> Every 15 seconds, counts how many ore pieces have non-sleeping Rigidbodies.
+	/// Compares against _movingObjectLimit to determine throttle state (Regular → Blocked). </summary>
 	private void Update()
 	{
+		// → only check every 15 seconds to avoid per-frame overhead
 		timeSinceLastCheck += Time.deltaTime;
 		if (timeSinceLastCheck < 15f) return;
 		timeSinceLastCheck = 0f;
@@ -12513,10 +13032,13 @@ public class OreLimitManager : Singleton<OreLimitManager>
 		else if (movingCount > _movingObjectLimit) { SetState(OreLimitState.SlightlyLimited); TryShowWarningPopup(); }
 		else SetState(OreLimitState.Regular);
 	}
+	/// <summary> Only fires OnOreLimitChanged when the state actually changes — avoids spamming
+	/// the event every 15 seconds when the state hasn't moved. </summary>
 	void SetState(OreLimitState state)
 	{
 		if (currentState == state) return;
 		currentState = state;
+		// → fire event so PhysicsLimitUIWarning can show/hide the warning panel
 		// purpose: PhysicsLimitUIWarning shows/hides warning text
 		GameEvents.RaiseOreLimitChanged(currentState);
 	}
@@ -12528,7 +13050,14 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// cleans up invalid ore pieces via round-robin check — owns OreDataService
+/// I'm the top-level manager for the ore system. On Awake I create and build an OreDataService
+/// with the resource descriptions list from the inspector. In Update I do round-robin cleanup —
+/// checking one ore piece per frame. If it's null (externally destroyed), I remove it from the
+/// list. If it fell below y=-1000 (out of world), I call Delete to return it to the pool.
+/// Other scripts access my DataService property for resource color lookups and formatted strings.
+///
+/// Who uses me: OreTest (DataService snapshot), ToolResourceScanner (color/name lookups).
+/// Events I fire: none. Events I subscribe to: none.
 /// </summary>
 public class OreManager : Singleton<OreManager>
 {
@@ -12547,22 +13076,29 @@ public class OreManager : Singleton<OreManager>
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> Registers singleton, then builds OreDataService with the resource descriptions
+	/// list from the inspector so color lookups and formatted strings are ready immediately. </summary>
 	protected override void Awake()
 	{
 		base.Awake();
+		// → build OreDataService with inspector resource descriptions
 		oreDataService.Build(_allResourceDescriptions);
 	}
+	/// <summary> Checks one ore piece per frame via round-robin. If null (destroyed externally),
+	/// removes it from the list. If fallen below y=-1000 (out of world), returns it to pool. </summary>
 	private void Update()
 	{
 		var allOre = OrePiece.AllOrePieces;
 		if (allOre.Count == 0) { currentOreIndex = 0; return; }
 		if (currentOreIndex >= allOre.Count) currentOreIndex = 0;
 		var piece = allOre[currentOreIndex];
+		// → remove null entries (destroyed externally)
 		if (piece == null)
 		{
 			OrePiece.AllOrePieces.Remove(piece);
 			return;
 		}
+		// → return to pool if fallen out of world
 		if (piece.transform.position.y < -1000f)
 			piece.Delete();
 		currentOreIndex++;
@@ -12575,7 +13111,16 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// recycles ore objects to avoid GC spikes — dictionary of queues by OrePieceKey
+/// I recycle ore objects so we never call Instantiate/Destroy after the initial pool warmup.
+/// When someone needs an ore piece, they call SpawnPooledOre — I check my dictionary of queues
+/// (keyed by ResourceType + PieceType + IsPolished). If a recycled piece exists, I dequeue it
+/// and reposition it. If the queue is empty, I Instantiate a new one from the registered prefab.
+/// When an ore piece is done (sold, fell out of world, etc.), OrePiece calls Delete → ReturnToPool
+/// which deactivates the GO, resets velocity/drag/tags, and enqueues it for next time.
+/// On Awake I register all prefabs from _allOrePiecePrefabs by their OrePieceKey.
+///
+/// Who uses me: OreNode (spawn drops), AutoMiner (timer spawn), OrePiece.Delete (return to pool).
+/// Events I fire: none. Events I subscribe to: none.
 /// </summary>
 public class OrePiecePoolManager : Singleton<OrePiecePoolManager>
 {
@@ -12590,25 +13135,28 @@ public class OrePiecePoolManager : Singleton<OrePiecePoolManager>
 	#endregion
 
 	#region public API
-	/// <summary> spawn from pool or instantiate — by prefab </summary>
+	/// <summary> Shorthand that extracts ResourceType/PieceType/IsPolished from the prefab and
+	/// calls the full SpawnPooledOre overload. Used by OreNode and AutoMiner. </summary>
 	public OrePiece SpawnPooledOre(OrePiece prefab, Vector3 position = default, Quaternion rotation = default)
 	{
 		return SpawnPooledOre(prefab.ResourceType, prefab.PieceType, prefab.IsPolished, position, rotation);
 	}
-	/// <summary> spawn from pool or instantiate — by type </summary>
+	/// <summary> Main spawn method — looks up the OrePieceKey in the dictionary, dequeues a recycled
+	/// piece if available, otherwise Instantiates a new one from the registered prefab. Repositions
+	/// it and activates it. Returns the ready-to-use OrePiece. </summary>
 	public OrePiece SpawnPooledOre(ResourceType resourceType, PieceType pieceType, bool isPolished, Vector3 position = default, Quaternion rotation = default)
 	{
+		// → build composite key from type + piece + polished
 		var key = new OrePieceKey(resourceType, pieceType, isPolished);
+		// → find the registered prefab for this key
 		if (!prefabByKey.TryGetValue(key, out var prefab))
 		{
 			Debug.LogError($"No OrePiece prefab for key: {key}");
 			return null;
 		}
-		if (!pools.TryGetValue(key, out var queue))
-		{
-			queue = new Queue<OrePiece>();
-			pools[key] = queue;
-		}
+		// → find or create the queue for this key
+		var queue = pools.GetOrCreate(key);
+		// → dequeue recycled piece or Instantiate new one
 		OrePiece piece;
 		if (queue.Count > 0) piece = queue.Dequeue();
 		else
@@ -12616,29 +13164,32 @@ public class OrePiecePoolManager : Singleton<OrePiecePoolManager>
 			piece = Object.Instantiate(prefab, root);
 			piece.gameObject.name = prefab.gameObject.name + " [Pooled]";
 		}
+		// → reposition and activate
 		piece.transform.SetParent(null, false);
 		piece.transform.SetPositionAndRotation(position, rotation);
 		piece.gameObject.SetActive(true);
 		return piece;
 	}
-	/// <summary> try spawn — accepts GameObject, checks for OrePiece component </summary>
+	/// <summary> Accepts a GameObject (like _crushedPrefab from OrePiece). If it has an OrePiece
+	/// component, spawns via pool. If not, falls back to regular Instantiate. </summary>
 	public OrePiece TrySpawnPooledOre(GameObject prefab, Vector3 position = default, Quaternion rotation = default)
 	{
 		var orePiece = prefab.GetComponent<OrePiece>();
 		if (orePiece != null) return SpawnPooledOre(orePiece, position, rotation);
+		// → not an OrePiece — fallback to regular Instantiate (e.g. particle effect prefab)
 		Object.Instantiate(prefab, position, rotation);
 		return null;
 	}
-	/// <summary> return ore to pool — reset state, deactivate </summary>
+	/// <summary> Takes an ore piece that's done being used (sold, fell out of world, etc.) and
+	/// puts it back in the pool for reuse — deactivates it, resets all physics and state, re-tags
+	/// as Grabbable, and enqueues it so the next SpawnPooledOre can reuse it. </summary>
 	public void ReturnToPool(OrePiece piece)
 	{
 		if (piece == null || !piece.gameObject.activeSelf) return;
+		// → find or create queue for this ore type key
 		var key = new OrePieceKey(piece.ResourceType, piece.PieceType, piece.IsPolished);
-		if (!pools.TryGetValue(key, out var queue))
-		{
-			queue = new Queue<OrePiece>();
-			pools[key] = queue;
-		}
+		var queue = pools.GetOrCreate(key);
+		// → deactivate GO + zero out velocity, put Rb to sleep, restore standard drag
 		piece.gameObject.SetActive(false);
 		if (piece.Rb != null)
 		{
@@ -12648,15 +13199,18 @@ public class OrePiecePoolManager : Singleton<OrePiecePoolManager>
 			piece.Rb.linearDamping = BasePhysicsObject.STANDARD_LINEAR_DAMPING;
 			piece.Rb.angularDamping = BasePhysicsObject.STANDARD_ANGULAR_DAMPING;
 		}
+		// → reset all runtime state: position, rotation, baskets, sieve%, magnet ref, tag
 		piece.transform.SetLocalPositionAndRotation(Vector3.zero, Quaternion.identity);
 		piece.BasketsThisIsInside.Clear();
 		piece.SievePercent = 0f;
 		piece.CurrentMagnetTool = null;
-		piece.gameObject.tag = "Grabbable";
+		piece.gameObject.SetTag(TagType.Grabbable);
+		// → parent under pool root + enqueue for next SpawnPooledOre call
 		piece.transform.SetParent(root, false);
 		queue.Enqueue(piece);
 	}
-	/// <summary> returns total count of inactive (pooled) ore pieces </summary>
+	/// <summary> Returns how many ore pieces are sitting in pool queues waiting to be reused.
+	/// OreTest logs this alongside AllOrePieces.Count to show active vs pooled distribution. </summary>
 	public int GetInactiveCount()
 	{
 		int count = 0;
@@ -12666,11 +13220,15 @@ public class OrePiecePoolManager : Singleton<OrePiecePoolManager>
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> Creates the pool root GO, then registers every prefab in _allOrePiecePrefabs by
+	/// its OrePieceKey (ResourceType + PieceType + IsPolished) so SpawnPooledOre can look them up. </summary>
 	protected override void Awake()
 	{
 		base.Awake();
+		// → create a hidden root GO to parent inactive pooled pieces under
 		root = new GameObject("[OrePiecePools]").transform;
 		root.SetParent(transform);
+		// → register all prefabs by their composite key for O(1) lookup
 		prefabByKey.Clear();
 		foreach (var prefab in _allOrePiecePrefabs)
 		{
@@ -12689,7 +13247,13 @@ public class OrePiecePoolManager : Singleton<OrePiecePoolManager>
 using UnityEngine;
 
 /// <summary>
-/// spawns particle prefabs at world positions — singleton
+/// I spawn particle effects at world positions. OreNode calls me for break particles when a
+/// node shatters, DamageableOrePiece calls me for cluster break particles, and ToolPickaxe
+/// can call me for hit impact sparks. I hold references to the prefabs (GenericHitImpactParticle,
+/// OreNodeHitParticlePrefab, BreakOreNodeParticlePrefab) as public fields so other scripts
+/// can pass them to CreateParticle. I just Instantiate — the particle systems auto-destroy.
+///
+/// Who uses me: OreNode (break burst), DamageableOrePiece (cluster break), ToolPickaxe (hit sparks).
 /// </summary>
 public class ParticleManager : Singleton<ParticleManager>
 {
@@ -12718,7 +13282,16 @@ using UnityEngine;
 using SPACE_UTIL;
 
 /// <summary>
-/// purely C# — manages resource descriptions, sell values, formatted strings
+/// I'm pure C# — testable via `new`, zero Unity dependency. OreManager creates me on Awake
+/// and calls Build() with the resource descriptions list from the inspector. I store them in
+/// RESOURCE_DESC and provide lookups: GetResourceDescription (by type), GetResourceColor,
+/// GetColoredResourceTypeString (wraps name in rich text color tag), and
+/// GetColoredFormattedResourcePieceString (full formatted name with piece type label mapping
+/// like "Drill Bit", "Threaded Rod", etc.). ToolResourceScanner and future UI displays use
+/// these for colored ore name text.
+///
+/// Who uses me: OreManager (Build + expose via DataService property), OreTest (snapshot).
+/// Events I fire: none. Pure data.
 /// </summary>
 public class OreDataService
 {
@@ -12727,29 +13300,35 @@ public class OreDataService
 	#endregion
 
 	#region public API
-	/// <summary> store resource descriptions </summary>
+	/// <summary> Called by OreManager on Awake with the list from the inspector. Stores all
+	/// resource descriptions so I can look them up by ResourceType later. </summary>
 	public void Build(List<ResourceDescription> descriptions)
 	{
 		RESOURCE_DESC = descriptions;
 	}
-	/// <summary> lookup by type </summary>
+	/// <summary> Finds the ResourceDescription for the given type — returns the entry with
+	/// matching ResourceType, or null if not found. Used internally by GetResourceColor. </summary>
 	public ResourceDescription GetResourceDescription(ResourceType type)
 	{
 		return RESOURCE_DESC.find(r => r.ResourceType == type);
 	}
-	/// <summary> returns display color for a resource </summary>
+	/// <summary> Returns the display color for a resource type (e.g. Iron = grey, Gold = yellow).
+	/// Falls back to white if the type isn’t in the list. Used by all colored text formatting. </summary>
 	public Color GetResourceColor(ResourceType type)
 	{
 		var desc = GetResourceDescription(type);
 		return desc != null ? desc.DisplayColor : Color.white;
 	}
-	/// <summary> rich text colored resource name </summary>
+	/// <summary> Wraps the resource type name in a rich text color tag — e.g. Iron becomes
+	/// "<color=#999999>Iron</color>". Used by ToolResourceScanner and future UI displays. </summary>
 	public string GetColoredResourceTypeString(ResourceType type)
 	{
 		string hex = ColorUtility.ToHtmlStringRGB(GetResourceColor(type));
 		return $"<color=#{hex}>{type}</color>";
 	}
-	/// <summary> full formatted name with piece type label mapping </summary>
+	/// <summary> Full formatted ore name with piece type label — handles special labels like
+	/// "Drill Bit" for DrillBit, "Threaded Rod" for ThreadedRod, "Junk" for Slag Pipe. Optionally
+	/// prefixes "Polished" if requirePolished is true. Returns colored rich text. </summary>
 	public string GetColoredFormattedResourcePieceString(ResourceType resourceType, PieceType pieceType, bool requirePolished = false)
 	{
 		string hex = ColorUtility.ToHtmlStringRGB(GetResourceColor(resourceType));
@@ -12769,7 +13348,8 @@ public class OreDataService
 	#endregion
 
 	#region snapShot
-	/// <summary> PhaseCLOG formatter </summary>
+	/// <summary> Formats all stored resource descriptions into a JSON snapshot string for
+	/// test logging — DEBUG_CheckC calls this to verify the data was built correctly. </summary>
 	public string GetSnapshot(string header = "ore data snapshot")
 	{
 		return $@"
@@ -12785,7 +13365,10 @@ using System;
 using UnityEngine;
 
 /// <summary>
-/// save data for one ore piece in the world — Phase G uses this
+/// Save data for one ore piece in the world. Phase G serializes every active OrePiece into
+/// one of these entries (ResourceType, PieceType, PolishedPercent, Position, Rotation, Scale,
+/// MeshID) and stores them in the save file. On load, OrePiecePoolManager recreates pieces
+/// from these entries. Not used until Phase G — exists now so the data shape is defined early.
 /// </summary>
 [Serializable]
 public class OrePieceEntry
@@ -12803,7 +13386,10 @@ public class OrePieceEntry
 using System;
 
 /// <summary>
-/// composite key for ore pool lookup — ResourceType + PieceType + IsPolished
+/// Composite key for OrePiecePoolManager's dictionary of queues. Combines ResourceType +
+/// PieceType + IsPolished into one hashable struct. When spawning or returning ore, the pool
+/// creates an OrePieceKey to find the right queue. Two ore pieces with the same key are
+/// interchangeable in the pool (same prefab, same visual, just different position/velocity).
 /// </summary>
 [Serializable]
 public struct OrePieceKey : IEquatable<OrePieceKey>
@@ -12834,7 +13420,9 @@ using System;
 using UnityEngine;
 
 /// <summary>
-/// pairs a ResourceType with its display color — embedded in OreManager inspector
+/// Pairs a ResourceType with its display color for UI text. OreManager holds a list of these
+/// in the inspector — OreDataService.Build() stores them, then GetResourceColor(type) looks up
+/// the matching entry. Used by GetColoredResourceTypeString to wrap ore names in rich text color tags.
 /// </summary>
 [Serializable]
 public class ResourceDescription
@@ -12847,7 +13435,9 @@ public class ResourceDescription
 using System;
 
 /// <summary>
-/// weighted ore drop entry for OreNode — embedded in inspector list
+/// One entry in OreNode's _possibleDrops inspector list. Pairs an OrePiece prefab with a Weight
+/// value. When the node breaks, UtilsPhaseC.WeightedRandom picks one of these — higher weight
+/// = more likely to drop. For example: Iron Ore weight 80 + Gold Ore weight 20 = 80% Iron, 20% Gold.
 /// </summary>
 [Serializable]
 public class WeightedNodeDrop
@@ -12860,7 +13450,9 @@ public class WeightedNodeDrop
 using System;
 
 /// <summary>
-/// weighted ore chance entry for AutoMiner + OrePiece sieving/cluster
+/// Same as WeightedNodeDrop but used by AutoMiner (SO_AutoMinerResourceDefinition.PossibleOrePrefabs)
+/// and Phase E machines (OrePiece sieving, cluster breaking). Pairs an OrePiece prefab with a Weight.
+/// UtilsPhaseC.PickOrePrefab reads these lists and does the weighted random selection.
 /// </summary>
 [Serializable]
 public class WeightedOreChance
@@ -12871,10 +13463,12 @@ public class WeightedOreChance
 
 <!-- ==== FILE: learn/phase-c(New)/Scripts/2-Data/Enums/GlobalEnumsC.cs ==== -->
 /// <summary>
-/// all enums introduced in Phase C — one file, one place
+/// All enums introduced in Phase C — one file, one place.
 /// </summary>
 
-/// <summary> ore resource type </summary>
+/// <summary> What kind of resource this ore is. OreNode has one ResourceType, every OrePiece
+/// spawned from it inherits that type. OreDataService uses this for color lookups and formatted
+/// strings. Used across all phases — machines process by type, quests track by type. </summary>
 public enum ResourceType
 {
 	INVALID = 0,
@@ -12894,7 +13488,9 @@ public enum ResourceType
 	Mystery = 14
 }
 
-/// <summary> ore piece shape/state type </summary>
+/// <summary> What shape/processing state this ore piece is in. Ore = raw from node, Crushed = broken
+/// by pickaxe or crusher, Ingot/Plate/Rod/Pipe = processed by machines (Phase E). OrePiecePoolManager
+/// uses ResourceType + PieceType + IsPolished as the composite key for pool queues. </summary>
 public enum PieceType
 {
 	INVALID = 0,
@@ -12913,7 +13509,10 @@ public enum PieceType
 	Geode = 13
 }
 
-/// <summary> ore limit throttle state </summary>
+/// <summary> Ore limit throttle state — OreLimitManager checks every 15s how many ore pieces
+/// are actively moving. Regular = normal spawning. SlightlyLimited = AutoMiner 25% slower.
+/// HighlyLimited = 50% slower. Blocked = AutoMiner stops entirely. PhysicsLimitUIWarning
+/// subscribes to OnOreLimitChanged and shows/hides the warning panel based on this. </summary>
 public enum OreLimitState
 {
 	Regular = 0,
@@ -12926,7 +13525,10 @@ public enum OreLimitState
 using UnityEngine;
 
 /// <summary>
-/// contract for anything that takes damage at a position
+/// Any object that can take damage at a world position. OreNode implements this to lose health
+/// when the pickaxe hits it. DamageableOrePiece implements this to break into cluster pieces
+/// when hit hard enough by collision. ToolPickaxe calls TakeDamage on whatever IDamageable
+/// the raycast hits — it doesn't know if it's a node or an ore piece.
 /// </summary>
 public interface IDamageable
 {
@@ -12938,7 +13540,11 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// configures auto-miner spawn rate + weighted ore drops — pure data, no methods
+/// Pure data config for one AutoMiner placement — spawn probability (default 80%), spawn rate
+/// (seconds between spawns), and a weighted list of possible OrePiece prefabs. AutoMiner reads
+/// my public fields on Start to configure itself. UtilsPhaseC.PickOrePrefab reads PossibleOrePrefabs
+/// to do the weighted random selection. I have zero methods — all logic lives in the consumer.
+/// Created in Unity: Create → SO → SO_AutoMinerResourceDefinition.
 /// </summary>
 [CreateAssetMenu(menuName = "SO/SO_AutoMinerResourceDefinition", fileName = "SO_AutoMinerResourceDefinition")]
 public class SO_AutoMinerResourceDefinition : ScriptableObject
@@ -12952,7 +13558,15 @@ public class SO_AutoMinerResourceDefinition : ScriptableObject
 using UnityEngine;
 
 /// <summary>
-/// spawns ore on a timer at a node — rotates continuously, probability-based
+/// I spawn ore pieces on a timer. My Rotator child spins continuously (visual drill animation).
+/// Every _spawnRate seconds, I roll against _spawnProbability (default 80%) — if it passes,
+/// I call UtilsPhaseC.PickOrePrefab to do a weighted random selection from the SO definition's
+/// PossibleOrePrefabs list, then spawn it via OrePiecePoolManager at my _oreSpawnPoint.
+/// OreLimitManager throttles me — at SlightlyLimited my timer is 25% slower, at Blocked I
+/// skip spawning entirely. On Start I read SpawnProbability and SpawnRate from my SO definition.
+///
+/// Who uses me: Scene (placed on mine walls). OreLimitManager (throttles my spawn rate).
+/// Events I fire: none. Events I subscribe to: none.
 /// </summary>
 public class AutoMiner : MonoBehaviour
 {
@@ -12974,36 +13588,52 @@ public class AutoMiner : MonoBehaviour
 	Vector3 rotationAxis;
 	float timeUntilNextSpawn;
 
+	/// <summary> Checks if spawning is blocked by OreLimitManager, rolls against spawn probability,
+	/// then picks a weighted random prefab from the SO definition and spawns it via the pool. </summary>
 	void TrySpawnOre()
 	{
+		// → if OreLimitManager says we're at Blocked state, skip entirely
 		if (Singleton<OreLimitManager>.Ins.ShouldBlockOreSpawning()) return;
+		// → random probability roll — 80% default means ~20% of cycles produce nothing
 		if (Random.Range(0f, 100f) > _spawnProbability) return;
+		// → weighted random pick from SO's PossibleOrePrefabs, or fallback if no definition
 		OrePiece prefab = _resourceDefinition != null
 			? UtilsPhaseC.PickOrePrefab(_resourceDefinition.PossibleOrePrefabs, true)
 			: _fallbackOrePrefab;
+		// → spawn via pool at the ore spawn point position
 		if (prefab != null)
 			Singleton<OrePiecePoolManager>.Ins.SpawnPooledOre(prefab, _oreSpawnPoint.position, _oreSpawnPoint.rotation);
 	}
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> Sets up the rotation axis, initializes spawn timer, and reads spawn probability
+	/// and rate from the SO definition (overrides inspector defaults if definition exists). </summary>
 	private void Start()
 	{
+		// → initialize spawn timer and pick rotation axis
 		timeUntilNextSpawn = _spawnRate;
 		rotationAxis = _rotateZ ? Vector3.back : (_rotateY ? Vector3.down : Vector3.right);
+		// → read config from SO definition (overrides inspector defaults)
 		if (_resourceDefinition != null)
 		{
 			_spawnProbability = _resourceDefinition.SpawnProbability;
 			_spawnRate = _resourceDefinition.SpawnRate;
 		}
 	}
+	/// <summary> Every frame: rotates the drill visual at a speed based on spawn rate, counts
+	/// down the spawn timer, and calls TrySpawnOre when the timer hits zero. Timer is throttled
+	/// by OreLimitManager's multiplier during high load. </summary>
 	private void Update()
 	{
 		if (!_enabled || _spawnRate <= 0f) return;
+		// → rotate the drill visual (speed = 360° per spawnRate * oresPerRotation)
 		float angle = 360f / (_spawnRate * _oresPerRotation) * Time.deltaTime;
 		_rotator.transform.Rotate(rotationAxis, angle);
+		// → count down spawn timer
 		timeUntilNextSpawn -= Time.deltaTime;
 		timeUntilNextSpawn = Mathf.Min(timeUntilNextSpawn, _spawnRate);
+		// → try to spawn ore when timer hits zero, then reset with throttle multiplier
 		if (timeUntilNextSpawn <= 0f)
 		{
 			TrySpawnOre();
@@ -13022,7 +13652,14 @@ public class AutoMiner : MonoBehaviour
 using UnityEngine;
 
 /// <summary>
-/// OrePiece that breaks on collision damage — implements IDamageable
+/// I'm a special OrePiece (like an OreCluster) that can take damage from collisions. When
+/// something hits me hard enough (velocity > _minDamageVelocity), I lose health. At zero health
+/// I play break particles, call CompleteClusterBreaking (spawns smaller ore pieces), and trigger
+/// a small explosion force. I also prevent PhysicsSoundPlayer from existing on the same GO
+/// since I handle my own collision sounds.
+///
+/// Who uses me: Physics engine (OnCollisionEnter), ToolPickaxe (can hit me via IDamageable too).
+/// Events I fire: none directly (particles + cluster spawn are immediate).
 /// </summary>
 public class DamageableOrePiece : OrePiece, IDamageable
 {
@@ -13054,6 +13691,8 @@ public class DamageableOrePiece : OrePiece, IDamageable
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> When something hits me, checks if the impact velocity exceeds _minDamageVelocity.
+	/// If so, calculates damage proportional to the excess velocity and calls TakeDamage on myself. </summary>
 	private void OnCollisionEnter(Collision collision)
 	{
 		if (collision.contactCount == 0 || Time.time - lastPlayTime < _cooldown) return;
@@ -13076,7 +13715,16 @@ using UnityEngine;
 using SPACE_UTIL;
 
 /// <summary>
-/// breakable rock that drops ore pieces when mined — implements IDamageable
+/// I'm a breakable rock embedded in mine walls/floor. When the player swings a pickaxe at me,
+/// ToolPickaxe calls my TakeDamage (via IDamageable interface) which subtracts from my health.
+/// When health hits zero, BreakNode fires — I pick a random drop count (2-4), use WeightedRandom
+/// on my _possibleDrops list to pick OrePiece prefabs, spawn them via OrePiecePoolManager with
+/// random velocity (they fly out and bounce), play a break particle burst via ParticleManager,
+/// fire OnOreMined so the quest system can track mining progress, then Destroy myself permanently.
+/// On Start I pick one random model variant from _models and hide the rest (visual variety).
+///
+/// Who uses me: ToolPickaxe (TakeDamage via IDamageable raycast).
+/// Events I fire: OnOreMined(resourceType, position).
 /// </summary>
 public class OreNode : MonoBehaviour, IDamageable
 {
@@ -13094,40 +13742,54 @@ public class OreNode : MonoBehaviour, IDamageable
 	#endregion
 
 	#region public API — IDamageable
-	/// <summary> take damage — breaks node at 0 health </summary>
+	/// <summary> Called by ToolPickaxe via IDamageable when the pickaxe raycast hits me. Subtracts
+	/// damage from health, and if health reaches zero, calls BreakNode which spawns ore pieces,
+	/// plays break particles, fires OnOreMined, and destroys this node permanently. </summary>
 	public void TakeDamage(float damage, Vector3 position)
 	{
 		// Phase H: play take damage sound
+		// → subtract damage from health
 		_health -= damage;
+		// → at zero health: spawn 2-4 ore pieces, play particles, fire OnOreMined, destroy node
 		if (_health <= 0f) BreakNode(position);
 	}
 	#endregion
 
 	#region private API
+	/// <summary> Spawns 2-4 ore pieces with random velocity from a point between node center and
+	/// hit position, plays break particle burst, fires OnOreMined for quest tracking, then
+	/// permanently destroys this node. </summary>
 	void BreakNode(Vector3 hitPosition)
 	{
+		// → pick random drop count between _minDrops and _maxDrops
 		int dropCount = Random.Range(_minDrops, _maxDrops + 1);
 		Vector3 spawnCenter = (transform.position + hitPosition) * 0.5f;
+		// → for each drop: weighted random prefab, spawn via pool, apply random velocity + spin
 		for (int i = 0; i < dropCount; i++)
 		{
 			Vector3 pos = spawnCenter + Random.insideUnitSphere * 0.15f;
 			OrePiece prefab = GetOrePrefab();
 			if (prefab == null) continue;
-			OrePiece spawned = Singleton<OrePiecePoolManager>.Ins.SpawnPooledOre(prefab, pos, Quaternion.identity);
-			if (spawned != null && spawned.Rb != null)
+			var spawned = Singleton<OrePiecePoolManager>.Ins.SpawnPooledOre(prefab, pos, Quaternion.identity);
+			if (spawned?.Rb != null)
 			{
 				spawned.Rb.linearVelocity = new Vector3(Random.Range(-1.5f, 1.5f), Random.Range(2f, 4f), Random.Range(-1.5f, 1.5f));
 				spawned.Rb.angularVelocity = Random.insideUnitSphere * Random.Range(1f, 50f);
 			}
 		}
+		// → spawn break particle burst at hit point
 		// Phase H: play break sound
 		Singleton<ParticleManager>.Ins.CreateParticle(
 			Singleton<ParticleManager>.Ins.BreakOreNodeParticlePrefab, hitPosition);
+		// → fire OnOreMined so quest system (Phase F) can track mining progress
 		// purpose: quest system + other listeners react to mining
 		GameEvents.RaiseOreMined(_resourceType, transform.position);
 		// Phase G: MarkStaticPositionAsBroken for save/load
+		// → permanently destroy this node GO
 		Destroy(gameObject);
 	}
+	/// <summary> Picks one OrePiece prefab from _possibleDrops using weighted random — higher
+	/// weight entries are more likely. Returns null if the list is empty. </summary>
 	OrePiece GetOrePrefab()
 	{
 		return UtilsPhaseC.WeightedRandom(_possibleDrops, d => d.Weight)?.OrePrefab;
@@ -13135,8 +13797,11 @@ public class OreNode : MonoBehaviour, IDamageable
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> Picks one random model variant from _models and hides the rest — gives each
+	/// node in the scene a slightly different look even if they use the same prefab. </summary>
 	private void Start()
 	{
+		// → pick one random model, hide all others
 		if (_models.Length > 0)
 		{
 			int chosen = Random.Range(0, _models.Length);
@@ -13156,7 +13821,18 @@ using UnityEngine;
 using SPACE_UTIL;
 
 /// <summary>
-/// physical resource object with type + piece type — extends BaseSellableItem
+/// I'm a physical ore piece that exists in the world — I have a ResourceType (Iron, Gold, etc.),
+/// PieceType (Ore, Crushed, Ingot, etc.), and a sell value. On Start I pick a random mesh from
+/// _possibleMeshes, apply random scale variance, and set a random price multiplier (0.9-1.1x).
+/// I self-register in a static AllOrePieces list (OnEnable adds, OnDisable removes) so OreManager
+/// and OreLimitManager can iterate all active pieces. When I enter a SellerMachine trigger, it
+/// calls my SellAfterDelay — I detach from magnet, tag as MarkedForDestruction (so other triggers
+/// skip me), wait 2s, then add money + fire OnOreSold + return to pool via Delete(). The pool
+/// (OrePiecePoolManager) deactivates me, resets everything, and enqueues me for reuse.
+///
+/// Who uses me: OreNode (spawns me), SellerMachine (sells me), ToolMagnet (pulls me),
+///   ToolPickaxe (TryConvertToCrushed), OrePiecePoolManager (pool lifecycle).
+/// Events I fire: OnOreSold (via DelayThenSell coroutine).
 /// </summary>
 public class OrePiece : BaseSellableItem
 {
@@ -13196,24 +13872,35 @@ public class OrePiece : BaseSellableItem
 
 	public static List<OrePiece> AllOrePieces = new List<OrePiece>();
 
-	/// <summary> sell value with random multiplier </summary>
+	/// <summary> Returns the sell price for this ore piece — BaseSellValue multiplied by
+	/// a random multiplier (0.9-1.1) that was set on Start. This is what EconomyManager.AddMoney receives. </summary>
 	public override float GetSellValue() => Mathf.Round(BaseSellValue * randomPriceMultiplier * 100f) / 100f;
-	/// <summary> inventory icon for ToolResourceScanner display </summary>
+	/// <summary> Returns my inventory icon sprite — ToolResourceScanner shows this when the
+	/// player looks at me with the scanner tool equipped. Null if no icon assigned. </summary>
 	public Sprite GetIcon() => _inventoryIcon;
 
-	/// <summary> return to pool (replaces Destroy) </summary>
+	/// <summary> Returns me to the pool instead of Destroy — OrePiecePoolManager deactivates me,
+	/// resets my velocity/drag/tags, and enqueues me for reuse by the next SpawnPooledOre call. </summary>
 	public void Delete()
 	{
+		// → return to pool: deactivate, reset physics, re-tag Grabbable, enqueue
 		Singleton<OrePiecePoolManager>.Ins.ReturnToPool(this);
 	}
-	/// <summary> sell after delay — detach from magnet, mark for destruction, coroutine </summary>
+	/// <summary> Called by SellerMachine when I enter its trigger. Detaches me from magnet if held,
+	/// tags me as MarkedForDestruction so other triggers skip me, then starts a 2-second coroutine
+	/// that sells me (adds money via EconomyManager, fires OnOreSold, returns me to pool). </summary>
 	public void SellAfterDelay(float delay = 2f)
 	{
-		if (CurrentMagnetTool != null) CurrentMagnetTool.DetachBody(Rb);
-		gameObject.tag = "MarkedForDestruction";
+		// → detach from magnet so it stops pulling me
+		CurrentMagnetTool?.DetachBody(Rb);
+		// → tag so other triggers (other sellers, conveyors) skip me
+		gameObject.SetTag(TagType.MarkedForDestruction);
+		// → after 2s: add money to EconomyManager, fire OnOreSold for quest tracking, return to pool
 		StartCoroutine(DelayThenSell(delay));
 	}
-	/// <summary> try crush into 2x crushed pieces — used by ToolPickaxe </summary>
+	/// <summary> Called by ToolPickaxe when it hits me with _canBreakOreIntoCrushed enabled. Spawns
+	/// 2 crushed pieces at my position via the pool, then deletes me. Returns false if I have no
+	/// _crushedPrefab assigned (some ore types can't be crushed). </summary>
 	public bool TryConvertToCrushed()
 	{
 		if (!gameObject.activeSelf || _crushedPrefab == null) return false;
@@ -13232,8 +13919,11 @@ public class OrePiece : BaseSellableItem
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> Picks a random mesh from _possibleMeshes, applies it to MeshFilter + MeshCollider,
+	/// randomizes scale within _scaleVariance, and sets a random price multiplier (0.9-1.1). </summary>
 	private void Start()
 	{
+		// → pick random mesh variant
 		if (_possibleMeshes.Length > 0)
 		{
 			if (_useRandomMesh) meshID = UnityEngine.Random.Range(0, _possibleMeshes.Length);
@@ -13250,24 +13940,34 @@ public class OrePiece : BaseSellableItem
 		}
 		randomPriceMultiplier = UnityEngine.Random.Range(0.9f, 1.1f);
 	}
+	/// <summary> Adds me to the static AllOrePieces list so OreManager and OreLimitManager can
+	/// iterate all active pieces. Called when I'm spawned from pool (SetActive true). </summary>
 	protected override void OnEnable()
 	{
 		base.OnEnable();
 		AllOrePieces.Add(this);
 	}
+	/// <summary> Removes me from AllOrePieces when I'm returned to pool (SetActive false) or
+	/// destroyed. Keeps the list clean — only active pieces are counted. </summary>
 	protected override void OnDisable()
 	{
 		base.OnDisable();
 		AllOrePieces.Remove(this);
 	}
+	/// <summary> Waits delay seconds, then adds my sell value to EconomyManager, fires OnOreSold
+	/// so the quest system can track resource deposits, and returns me to the pool via Delete. </summary>
 	IEnumerator DelayThenSell(float delay)
 	{
+		// → wait for the sell delay (default 2s)
 		yield return new WaitForSeconds(delay);
 		if (this == null || !isActiveAndEnabled) yield break;
+		// → add my sell value to EconomyManager (triggers OnMoneyChanged)
 		float price = GetSellValue();
 		Singleton<EconomyManager>.Ins.AddMoney(price);
+		// → fire OnOreSold so quest system (Phase F) can track resource deposits
 		// purpose: quest system tracks resource deposits (Phase F subscribes)
 		GameEvents.RaiseOreSold(price, _resourceType, _pieceType);
+		// → return me to pool for reuse
 		Delete();
 	}
 	#endregion
@@ -13277,7 +13977,14 @@ public class OrePiece : BaseSellableItem
 using UnityEngine;
 
 /// <summary>
-/// shows/hides ore limit warning text — subscribes to OnOreLimitChanged
+/// I show/hide a warning panel on the UI when the ore limit is reached. I subscribe to
+/// OnOreLimitChanged from OreLimitManager. At Regular state I hide myself entirely. At
+/// SlightlyLimited/HighlyLimited I show the soft limit warning text. At Blocked I show
+/// the hard limit warning text. I'm fully decoupled from OreLimitManager — I just react
+/// to the event, no direct reference.
+///
+/// Who uses me: Canvas (placed as a child of the main Canvas).
+/// Events I subscribe to: OnOreLimitChanged.
 /// </summary>
 public class PhysicsLimitUIWarning : MonoBehaviour
 {
@@ -13293,6 +14000,8 @@ public class PhysicsLimitUIWarning : MonoBehaviour
 		GameEvents.OnOreLimitChanged += HandleLimitChanged;
 		HandleLimitChanged(OreLimitState.Regular);
 	}
+	/// <summary> Switches between hidden (Regular), soft limit warning (Slightly/Highly), and
+	/// hard limit warning (Blocked) by toggling _softLimitObject and _hardLimitObject GOs. </summary>
 	void HandleLimitChanged(OreLimitState state)
 	{
 		switch (state)
@@ -13320,14 +14029,24 @@ public class PhysicsLimitUIWarning : MonoBehaviour
 using UnityEngine;
 
 /// <summary>
-/// sells ore that enters trigger for money — waits, then adds money + fires event
+/// I sell anything that enters my trigger collider (IsTrigger=true). When an OrePiece enters,
+/// I call SellAfterDelay which tags it MarkedForDestruction (so other triggers skip it), waits
+/// 2 seconds, then adds money via EconomyManager and fires OnOreSold. The OrePiece returns to
+/// pool automatically. For non-OrePiece BaseSellableItems, I sell immediately and Destroy them.
+/// I skip anything already tagged MarkedForDestruction or without a Rigidbody.
+///
+/// Who uses me: Scene (placed as a funnel/hopper for ore to fall into).
+/// Events I fire: OnOreSold (indirectly via OrePiece.SellAfterDelay).
 /// </summary>
 public class SellerMachine : MonoBehaviour
 {
 	#region Unity Life Cycle
+	/// <summary> When any collider enters my trigger: skips MarkedForDestruction and no-Rigidbody objects.
+	/// If it's an OrePiece, calls SellAfterDelay (2s delay → money → pool). If it's a BaseSellableItem,
+	/// sells immediately and Destroys the GO. </summary>
 	private void OnTriggerEnter(Collider other)
 	{
-		if (other.CompareTag("MarkedForDestruction") || other.attachedRigidbody == null) return;
+		if (other.HasTag(TagType.MarkedForDestruction) || other.attachedRigidbody == null) return;
 		OrePiece orePiece = other.GetComponentInParent<OrePiece>();
 		if (orePiece != null)
 		{
@@ -13381,13 +14100,13 @@ using UnityEngine;
 /// </summary>
 public static class UtilsPhaseC
 {
-	/// <summary> generic weighted random — used by OreNode, AutoMiner, OrePiece sieving/cluster </summary>
+	/// <summary> Picks one item from a list using weighted random selection. Higher weight = more
+	/// likely to be chosen. Used everywhere ore drops are selected: OreNode, AutoMiner, OrePiece sieving. </summary>
 	public static T WeightedRandom<T>(List<T> items, Func<T, float> getWeight)
 	{
 		if (items == null || items.Count == 0) return default;
 		if (items.Count == 1) return items[0];
-		float total = 0f;
-		foreach (var item in items) total += getWeight(item);
+		float total = items.sum(getWeight);
 		float roll = UnityEngine.Random.value * total;
 		float cumulative = 0f;
 		foreach (var item in items)
@@ -13398,7 +14117,8 @@ public static class UtilsPhaseC
 		return items[items.Count - 1];
 	}
 
-	/// <summary> pick weighted ore prefab from a list, optionally filtering out gems </summary>
+	/// <summary> Convenience method that reads a WeightedOreChance list (from SO_AutoMinerResourceDefinition),
+	/// optionally filters out gems, then calls WeightedRandom to pick one OrePiece prefab. </summary>
 	public static OrePiece PickOrePrefab(List<WeightedOreChance> list, bool canProduceGems)
 	{
 		if (list == null || list.Count == 0) return null;
@@ -14720,4 +15440,17 @@ The PlayerController is a textbook God Object but splitting it would be a refact
 - **Status tracking is critical:** Added a Current Status table showing exactly what exists (typed, generated, planned). This is the first thing the user sees — no ambiguity about where things stand.
 - **Avoided inflating hours for scene work:** Scene setup time is real but unpredictable (depends on Unity Editor speed, prefab complexity). Captured it as a risk factor rather than padding every phase estimate.
 - **Phase E is fastest scripts-per-hour despite highest count:** 32 scripts but all follow the same trigger I/O machine pattern. Estimated 16h = 0.5h/script — lower than average because repetition.
+
+---
+
+## Prompt: "Where do I stand with this rebuild — honest assessment"
+
+**What I thought:**
+- Read GOAL.md (876 lines), NewAgent.md, ARCHITECTURE.md (1259 lines), Estimate.md, all phase folders, surfer.md, original source count to give a grounded answer, not a generic cheerful one.
+- Counted actual artifacts: 35 hand-typed .cs, 58 generated .cs, ~270 original source files. The 43% "touched" number is misleading — only 35 scripts are truly done (hand-typed), which is ~16% of 216.
+- Architecture quality is genuinely top-tier for a solo Unity project. The `2-Data/` independence rule + DEBUG_Check testing + partial GameEvents + TagType enum are decisions that pay dividends at scale. Most solo devs don't even attempt this.
+- The real risk is execution stamina, not architecture. 137h of typing at 36h/week = ~4 weeks. Phase B (32 scripts, hardest phase) is the immediate bottleneck.
+- Avoided: recommending generating all phases upfront — Phase B typing will refine patterns, and generating D–J now risks rework.
+- Avoided: sugarcoating the timeline. 11% done by hours is the truth. But the hardest intellectual work (architecture design) IS done — the remaining 89% is execution, which is the easier problem.
+- Noted that Phase G (save/load) is the cross-cutting risk because it touches every earlier phase — the ISaveLoadable stubs in Phase B are smart forward planning.
 
