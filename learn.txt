@@ -15645,3 +15645,16 @@ The PlayerController is a textbook God Object but splitting it would be a refact
 - **GUIDE.md + FLOW.md beginner-friendly requirement** — user wants future agents to write docs that someone with zero knowledge can follow. Added to both GOAL.md and NewAgent.md.
 - **The calibration pattern is working:** Phase B needed ~8 corrections. Phase C needed ~6. Each correction gets codified. Phase D should need fewer. By Phase E the docs should catch everything upfront.
 
+---
+
+## Post Convention Hardening — Documentation Polish Pass
+
+**What I thought:**
+- **Vertical Slice Tests in GUIDE.md rewritten to beginner level:** Previously just bullet lists of prerequisites + controls + checklist. Now each test has: conversational intro explaining what it proves, "what you need / don't need", numbered step-by-step scene setup with wiring tables, "how to test" key→expect table, "full test flow" for complex tests (ordered do→expect steps), and comprehensive checklist. Applied to all 5 Phase B tests + 2 Phase C tests.
+- **IEnumerableUtilsPhaseAll added to phase-All:** User created `.sum()` and `.GetOrCreate()` extensions. These reduce verbose patterns across all phases — `foreach` accumulation → `.sum(selector)`, `TryGetValue + new` → `.GetOrCreate(key)`.
+- **C# Features section in GOAL.md expanded:** Was just "Allowed: $"", ?., LINQ". Now lists every allowed pattern with examples: `?.`, `??`, `=>`, ternary, full LINQ catalog (`.Any()`, `.All()`, `.OrderBy()`, `.GroupBy()`, `.Distinct()`, `.Aggregate()`, etc.), custom extensions, `var`. Plus "Reduce verbosity wherever possible" with concrete before→after examples. Scoped to Unity 6000.3+ / .NET 2.0+.
+- **TagType helpers moved from UtilsPhaseB → UtilsPhaseAll:** User correctly identified that tag extensions are cross-phase (any script in any phase calls `collider.HasTag()`). C# extension methods auto-resolve without class name, so the move is seamless.
+- **StructureMap.md updated with phase-All section:** Now shows the full folder tree (0-Core, 1-Managers, 2-Data/Enums, 4-Utils) with every file and its purpose.
+- **All docs are now beginner-friendly across the board:** GUIDE.md (tests + scene setup), FLOW.md (data flows), Manual/*.md (setup guides + DO/EXPECT), script summaries (class + method + lifecycle + `// →`). The user wants someone with zero knowledge to follow any of these — that's the bar.
+- **Current state:** Phase B (43 files packed) + Phase C (29 files packed) + phase-All (6 files) + learn.txt (122 files packed). All conventions locked in GOAL.md (894 lines) + NewAgent.md (226 lines). Ready for Phase D generation.
+
