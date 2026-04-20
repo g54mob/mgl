@@ -1648,7 +1648,8 @@ function _renderContent(content, lang, ext, isMd) {
             breaks: false,
             renderer: buildMarkedRenderer()
         });
-        div.innerHTML = marked.parse(content);
+        const mdContent = content.replace(/(?<![~`\\])~(?!~)([^~\n]+?)~(?!~)/g, '~~$1~~');
+        div.innerHTML = marked.parse(mdContent);
         // Apply hljs to any code blocks that weren't handled by renderer (fallback)
         div.querySelectorAll('pre code:not(.hljs)').forEach(block => {
             hljs.highlightElement(block);
