@@ -1648,8 +1648,7 @@ function _renderContent(content, lang, ext, isMd) {
             breaks: false,
             renderer: buildMarkedRenderer()
         });
-        const mdContent = content.replace(/(?<![~`\\])~(?!~)([^~\n]+?)~(?!~)/g, '~~$1~~');
-        div.innerHTML = marked.parse(mdContent);
+        div.innerHTML = marked.parse(content);
         // Apply hljs to any code blocks that weren't handled by renderer (fallback)
         div.querySelectorAll('pre code:not(.hljs)').forEach(block => {
             hljs.highlightElement(block);
@@ -2108,6 +2107,9 @@ document.addEventListener('click', e => {
 
 // ── hljs config ───────────────────────────────────────────────
 hljs.configure({ tabReplace: '    ' });
+
+// ── Disable GFM strikethrough (~ used for "approximately") ────
+marked.use({ tokenizer: { del() {} } });
 </script>
 </body>
 </html>
