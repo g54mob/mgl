@@ -1598,13 +1598,14 @@ The deciding question: **"Does this script own shared state that other scripts q
 | Event handlers | `Handle...` | `HandleMoneyChanged` |
 | GameEvents | `On...` + `Raise...` side by side | `OnMoneyChanged` / `RaiseMoneyChanged()` |
 | Singleton access | `.Ins` | `Singleton<EconomyManager>.Ins` |
+| Enum values | `camelCase` | `TagType.grabbable`, `OreLimitState.slightlyLimited`, `PieceType.ore` |
 
 **Prefix = no logic.** `SO_` = pure data. `Field_` = display only. `W` = session wrapper. No prefix = has logic.
 
 **TagType enum — no raw string tags.** Unity tags go in `TagType` enum (inside `phase-All/2-Data/Enums/GlobalEnumsAll.cs`). Never use `CompareTag("Grabbable")` or `tag = "string"`. Use extension methods in `phase-All/4-Utils/UtilsPhaseAll.cs` — they're C# extensions so you just call them directly on the object, no class name needed:
-- `collider.HasTag(TagType.Grabbable)` — replaces `CompareTag("Grabbable")`
-- `gameObject.SetTag(TagType.MarkedForDestruction)` — replaces `tag = "MarkedForDestruction"`
-- New tags added to the enum as phases grow (e.g. Phase D: `ConveyorBelt`)
+- `collider.HasTag(TagType.grabbable)` — replaces `CompareTag("Grabbable")`
+- `gameObject.SetTag(TagType.markedForDestruction)` — replaces `tag = "MarkedForDestruction"`
+- New tags added to the enum as phases grow (e.g. Phase D: `conveyorBelt`)
 
 ---
 
@@ -2474,7 +2475,8 @@ For each phase, the agent must produce:
 - **MANDATORY: Post-delivery self-audit.** After producing all files for a phase, do a method-by-method comparison: read every original source file line-by-line, check every public method, every field, every interface implementation against what you produced. List any gaps. Fix them before delivering. This is non-negotiable — previous phases missed 5-15% on first delivery because the agent skipped small methods, SO_ logic wasn't moved, or singletons were in wrong folders.
 - **One sentence per script.** If it doesn't fit, split it.
 - **GlobalEnumsX.cs** — all enums for a phase go in ONE file: `2-Data/Enums/GlobalEnumsX.cs` (e.g. `GlobalEnumsB.cs`). No separate file per enum. Use `InteractionType` enum instead of magic strings for interaction names.
-- **TagType enum — no raw string tags.** Never use `CompareTag("string")` or `tag = "string"`. Use `collider.HasTag(TagType.X)` and `gameObject.SetTag(TagType.X)` — extensions in `phase-All/4-Utils/UtilsPhaseAll.cs` (auto-available, no class name needed). `TagType` lives in `phase-All/2-Data/Enums/GlobalEnumsAll.cs`.
+- **TagType enum — no raw string tags.** Never use `CompareTag("string")` or `tag = "string"`. Use `collider.HasTag(TagType.grabbable)` and `gameObject.SetTag(TagType.markedForDestruction)` — extensions in `phase-All/4-Utils/UtilsPhaseAll.cs` (auto-available, no class name needed). `TagType` lives in `phase-All/2-Data/Enums/GlobalEnumsAll.cs`.
+- **Enum values use camelCase.** All enum values across all phases: `TagType.grabbable`, `PieceType.ore`, `OreLimitState.slightlyLimited`, `MagnetToolSelectionMode.everything`. NOT PascalCase. See GOAL.md Naming table.
 - **`phase-All/`** — scripts shared across ALL phases live here (Singleton, UIManager, EconomyManager, core GameEvents). Never duplicated into phase folders. UIManager grows 1-2 lines per phase (keyboard routing). See GOAL.md folder structure.
 - **Prefix = no logic.** `SO_` = pure data. `Field_` = display only. `W` = session wrapper.
 - **GameEvents for cross-system.** `[SerializeField]` for same-GO. Owner chain for parent-child.
@@ -5075,8 +5077,8 @@ public class DEBUG_Check : MonoBehaviour
 		{
 			if (INPUT.K.HeldDown(KeyCode.LeftAlt) && INPUT.M.InstantDown(0))
 			{
-				// checkExtensionIEnumerable();
-				checkShopDataService();
+				// checkShopDataService();
+				checkExtensionIEnumerable();
 			}
 			yield return null;
 		}
@@ -5089,11 +5091,27 @@ public class DEBUG_Check : MonoBehaviour
 	{
 		true, false, true, false
 	};
+	[SerializeField] List<float> _LIST_FLOAT = new List<float>()
+	{
+		0, 100, 200, 1.1f, 2.7f,
+	};
 	void checkExtensionIEnumerable()
 	{
 		Debug.Log(C.method(this));
 		Debug.Log($".all: {this._LIST.all(elem => elem)}".colorTag("lime"));
 		Debug.Log($".any: {this._LIST.any(elem => elem)}".colorTag("green"));
+
+		Debug.Log($".sum: {this._LIST_FLOAT.sum(elem => elem)}".colorTag("lime"));
+		Debug.Log($".int: {this._LIST_FLOAT.sum(elem => elem.round())}".colorTag("green"));
+
+		Dictionary<int, string> MAP = new Dictionary<int, string>();
+		MAP[10] = "somthng";
+		MAP.GetOrCreate(100, defaultValue: "default");
+
+		var snapshot = MAP.ToNSJson(pretify: true);
+		LOG.H("MAP");
+		LOG.AddLog(snapshot, "json");
+		LOG.HEnd("MAP");
 	}
 
 	[Header("checkShopDataService")]
@@ -5122,6 +5140,560 @@ public class DEBUG_Check : MonoBehaviour
 		dataService.TryAddNewCartItem(dataService.GetCartItems()[0].wShopItem);
 		LOG.AddLog(dataService.GetSnapShotForTest(), "json");
 	}
+
+}
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-@all/0-Core/GameEvents.cs ==== -->
+using System;
+using System.Linq;
+using System.Collections;
+using System.Collections.Generic;
+
+using UnityEngine;
+using UnityEngine.InputSystem;
+using UnityEngine.UI;
+using TMPro;
+
+using SPACE_UTIL;
+
+/// <summary>
+/// core events shared across ALL phases � partial extended by each phase
+/// </summary>
+public static partial class GameEvents
+{
+	// when a certain menu subManager is enable/disabled >>
+	public static event Action<bool> OnMenuStateChanged;
+	public static void RaiseMenuStateChanged(bool isAnyMenuOpen)
+	{
+		LogSubscribersCount(nameof(OnMenuStateChanged), OnMenuStateChanged);
+		GameEvents.OnMenuStateChanged? // if there is any subscribers
+			.Invoke(isAnyMenuOpen);
+	}
+	// << when a certain menu subManager is enable/disabled
+
+	#region LogSubscribersCount
+	static void LogSubscribersCount(string name, Delegate anEvent)
+	{
+		int subsCount = anEvent?.GetInvocationList().Length ?? 0;
+		UnityEngine.Debug.Log($"[GameEvents] {name} raised for -> {subsCount} subscribers".colorTag("lime"));
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-@all/0-Core/Singleton.cs ==== -->
+﻿using System;
+using System.Linq;
+using System.Collections;
+using System.Collections.Generic;
+
+using UnityEngine;
+using UnityEngine.InputSystem;
+using UnityEngine.UI;
+using TMPro;
+
+using SPACE_UTIL;
+
+/// <summary>
+/// generic singleton base first instance wins, duplicates are destroyed
+/// </summary>
+public abstract class Singleton<T> : MonoBehaviour 
+										where T: MonoBehaviour
+{
+	#region public API
+	public static T Ins { get; private set; }
+	#endregion
+
+	#region Unity Life Cycle
+	protected virtual void Awake()
+	{
+		if (Singleton<T>.Ins == null)
+			Singleton<T>.Ins = this as T;
+		else
+		{
+			Debug.Log($"{typeof(T)} instance already exist, so this gameObject is destroyed".colorTag("red"));
+			GameObject.Destroy(this.gameObject);
+		}
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-@all/1-Managers/EconomyManager.cs ==== -->
+using System;
+using System.Linq;
+using System.Collections;
+using System.Collections.Generic;
+
+using UnityEngine;
+using UnityEngine.InputSystem;
+using UnityEngine.UI;
+using TMPro;
+
+using SPACE_UTIL;
+
+/// <summary>
+/// owns money
+/// </summary>
+[DefaultExecutionOrder(-100)] // after INITMAnager, if any of monoBehaviour[in curr game]
+public class EconomyManager : Singleton<EconomyManager>
+{
+	[SerializeField] float _defaultMoney = 400f;
+	float currMoney;
+	#region public API
+	public float GetMoney() => this._defaultMoney;
+	public void AddMoney(float deltaMoney)
+	{
+		currMoney += deltaMoney;
+		GameEvents.RaiseMoneyChanged(currMoney);
+	}
+	public bool CanAfford(float price)
+	{
+		return price <= currMoney;
+	}
+	#endregion
+
+	#region Unity Life Cycle
+	protected override void Awake()
+	{
+		base.Awake();
+		Debug.Log(C.method(this));
+		currMoney = this._defaultMoney;
+	} 
+	#endregion
+}
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-@all/1-Managers/UIManager.cs ==== -->
+﻿using System;
+using System.Linq;
+using System.Collections;
+using System.Collections.Generic;
+
+using UnityEngine;
+using UnityEngine.InputSystem;
+using UnityEngine.UI;
+using TMPro;
+
+using SPACE_UTIL;
+
+/// <summary>
+/// reports menu state + closes all panels + routes keyboard input with priority
+/// </summary>
+public class UIManager : Singleton<UIManager>
+{
+	bool isAnyMenuOpen;
+	/// <summary> fires OnCloseAllSubManagers — every SubManager self-closes </summary>
+	public void CloseAllSubManager()
+	{
+		GameEvents.RaiseCloseShopView();
+		GameEvents.RaiseCloseInteractionView();
+	}
+
+	#region public API
+	/// <summary>
+	/// isAnyMenuOpen ?
+	/// </summary>
+	public bool GetIsAnyMenuOpen() => isAnyMenuOpen;
+	#endregion
+
+	#region Unity Life Cycle
+	private void Update()
+	{
+		// esc: closeAllSubManagers/openPauseMenu
+		if (INPUT.K.InstantDown(KeyCode.Escape))
+		{
+			if (isAnyMenuOpen)
+			{
+				CloseAllSubManager();
+				return;
+			}
+			else
+			{
+				// Phase H: else GameEvents.RaiseOpenPauseMenu
+				return;
+			}
+		}
+		//
+		if (isAnyMenuOpen == false)
+		{
+			/*
+			// Phase B: Tab → inventory
+			if (INPUT.K.InstantDown(KeyCode.Tab))
+				GameEvents.RaiseOpenInventoryView();
+			// Phase F: Q → quest tree
+			if (INPUT.K.InstantDown(KeyCode.Q)) 
+				GameEvents.RaiseOpenQuestTreeView();
+			*/
+		}
+
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-@all/2-Data/Enums/GlobalEnums.cs ==== -->
+﻿/*
+	Enums shared across ALL phases — lives in phase-@all so every phase can reference them.
+	These grow as phases add new values. Unity project tags must match TagType values.
+*/
+/// <summary>
+/// Used via extension methods in UtilsPhaseAll: gameObject.SetTag(TagType.x), collider.HasTag(TagType.x).
+/// When adding a new tag here, also add it in Unity: Edit → Project Settings → Tags and Layers. </summary>
+/// </summary>
+public enum TagType
+{
+	unTagged,
+	grabbable,
+	markedForDestruction,
+	// conveyorBelt, // phaseD
+}
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-@all/4-Utils/IEnumerableUtilsPhaseAll.cs ==== -->
+﻿using System;
+using System.Linq;
+using System.Collections;
+using System.Collections.Generic;
+
+public static class IEnumerableUtilsPhaseAll
+{
+	#region IEnumerableExtension contents inside SPACE_UTIL for ref.
+	/*
+	#region find/findIndex
+	/// <summary>
+	/// find elem(null if not found) based on predicate.
+	/// </summary>
+	/// <typeparam name="T"></typeparam>
+	/// <param name="collection"></param>
+	/// <param name="predicate"></param>
+	/// <returns></returns>
+	public static T find<T>(this IEnumerable<T> collection, Func<T, bool> predicate)
+	{
+		if (collection == null) throw new ArgumentNullException(nameof(collection));
+		if (predicate == null) throw new ArgumentNullException(nameof(predicate));
+
+		// collection.MoveNext(), or a foreach loop
+		foreach (var item in collection)
+			if (predicate(item))
+				return item;
+		Debug.Log($"elem doesnt exist returning { default(T).tryNullToString()}");
+		return default(T); // Returns null for reference types, default value for value types
+	}
+	/// <summary>
+	/// find elem index(-1 if not found) based on predicate.
+	/// </summary>
+	/// <typeparam name="T"></typeparam>
+	/// <param name="collection"></param>
+	/// <param name="predicate"></param>
+	/// <returns></returns>
+	public static int findIndex<T>(this IEnumerable<T> collection, Func<T, bool> predicate)
+	{
+		if (collection == null) throw new ArgumentNullException(nameof(collection));
+		if (predicate == null) throw new ArgumentNullException(nameof(predicate));
+
+		int index = 0;
+		// collection.MoveNext(), or a foreach loop
+		foreach (var item in collection)
+		{
+			if (predicate(item))
+				return index;
+			index += 1;
+		}
+		return -1; // Returns -1 if found none
+	}
+	#endregion
+
+	#region minMax
+	/// <summary>
+	/// to get min: (a) => float; the a with least float is returned
+	/// </summary>
+	/// <typeparam name="T"></typeparam>
+	/// <param name="list"></param>
+	/// <param name="cmpFunc"></param>
+	/// <param name="splice"></param>
+	/// <returns></returns>
+	public static T minMaxA<T>(this List<T> list, Func<T, float> cmpFunc, bool splice = false)
+	{
+		if (list.Count < 1)
+		{
+			Debug.Log("minMaxA require atleast Count Of 1".colorTag("red"));
+			throw new ArgumentException();
+		}
+		int minIndex = 0;
+		for (int i0 = 0; i0 < list.Count; i0 += 1)
+			if (cmpFunc(list[i0]) < cmpFunc(list[minIndex]))
+				minIndex = i0;
+		var min = list[minIndex];
+		if (splice)
+			list.RemoveAt(minIndex);
+		return min;
+	}
+	/// <summary>
+	/// to get min (a, b) => float; (the pair with least float is returned)
+	/// </summary>
+	/// <typeparam name="T"></typeparam>
+	/// <param name="list"></param>
+	/// <param name="cmpFunc"></param>
+	/// <param name="splice"></param>
+	/// <returns></returns>
+	public static List<T> minMaxAB<T>(this List<T> list, Func<T, T, double> cmpFunc, bool splice = false)
+	{
+		if (list.Count < 2)
+		{
+			Debug.Log("minMaxAB require atleast 2 elements to compare");
+			throw new ArgumentNullException();
+		}
+
+		int[] minIndexPair = new int[] { 0, 1 };
+		for (int i0 = 0; i0 <= list.Count - 2; i0 += 1)
+			for (int i1 = i0 + 1; i1 <= list.Count - 1; i1 += 1)
+			{
+				if (cmpFunc(list[i0], list[i1]) < cmpFunc(list[minIndexPair[0]], list[minIndexPair[1]])) // smaller connection than before
+				{
+					minIndexPair[0] = i0;
+					minIndexPair[1] = i1;
+				}
+			}
+		var minAB = new List<T>() { list[minIndexPair[0]], list[minIndexPair[1]] }; ;
+		if (splice)
+		{
+			if (minIndexPair[1] > minIndexPair[0])
+			{
+				list.RemoveAt(minIndexPair[1]);
+				list.RemoveAt(minIndexPair[0]);
+
+			}
+			else
+			{
+				list.RemoveAt(minIndexPair[0]);
+				list.RemoveAt(minIndexPair[1]);
+			}
+		}
+		return minAB;
+	}
+	#endregion
+
+	#region get
+	/// <summary>
+	/// get an elem with index relative to last, 0 for last, 1 for 1th from last etc
+	/// </summary>
+	/// <typeparam name="T"></typeparam>
+	/// <param name="collection"></param>
+	/// <param name="indexFromLast"></param>
+	/// <returns></returns>
+	public static T getAtLast<T>(this IEnumerable<T> collection, int indexFromLast)
+	{
+		if (collection == null) throw new ArgumentNullException(nameof(collection)); // nameof(collection) = "collection"
+
+		if (indexFromLast < 0 || indexFromLast >= collection.Count())
+			Debug.LogError($"in {nameof(collection)} gl{indexFromLast} > count: {collection.Count()}");
+
+		return collection.ElementAt(collection.Count() - 1 - indexFromLast);
+	}
+
+	/// <summary>
+	/// Index accessor for IEnumerable (like JavaScript arrays).
+	/// Usage: items.getAt(1) instead of items.ToList()[1]
+	/// </summary>
+	public static T getAt<T>(this IEnumerable<T> source, int index)
+	{
+		if (index < 0)
+		{
+			var list = source as IList<T> ?? source.ToList();
+			index += list.Count;
+			if (index < 0) throw new IndexOutOfRangeException();
+			return list[index];
+		}
+		return source.ElementAtOrDefault(index);
+	}
+
+	/// <summary>
+	/// getRandom between 0, .count - 1
+	/// </summary>
+	/// <typeparam name="T"></typeparam>
+	/// <param name="collection"></param>
+	/// <returns></returns>
+	public static T getRandom<T>(this IEnumerable<T> source)
+	{
+		if (source == null) throw new ArgumentNullException(nameof(source));
+		// Fast path for IList<T> (arrays, List<T>, etc.)
+		if (source is IList<T> list)
+		{
+			if (list.Count == 0)
+				throw new InvalidOperationException("Sequence was empty to fetch random.");
+			return list[UnityEngine.Random.Range(0, list.Count)];
+		}
+		// Materialize once so we can pick an index uniformly.
+		// (If the sequence is huge/streaming, avoid this overload and use a list directly.)
+		var array = source.ToArray();
+		if (array.Length == 0)
+			throw new InvalidOperationException("Sequence was empty.");
+		return array[UnityEngine.Random.Range(0, array.Length)];
+	}
+
+	#region dicitonary extension
+	// Version 1: for types with parameterless ctor like List<T>, your classes
+	public static TValue GetOrCreate<TKey, TValue>(this Dictionary<TKey, TValue> dict, TKey key)
+		where TValue : new()
+	{
+		if (!dict.TryGetValue(key, out TValue val))
+		{
+			val = new TValue();
+			dict[key] = val;
+		}
+		return val;
+	}
+
+	// Version 2: for string, int, etc - pass default value explicitly
+	public static TValue GetOrCreate<TKey, TValue>(this Dictionary<TKey, TValue> dict, TKey key, TValue defaultValue)
+	{
+		if (!dict.TryGetValue(key, out TValue val))
+		{
+			val = defaultValue;
+			dict[key] = val;
+		}
+		return val;
+	}
+	#endregion
+	#endregion
+
+	#region tryGet.... version
+	/// <summary>
+	/// Tries to get an element with index relative to last. 0 = last, 1 = second to last, etc.
+	/// Returns default(T) if index is out of range or collection is null/empty.
+	/// </summary>
+	public static T TryGetAtLast<T>(this IEnumerable<T> source, int indexFromLast)
+	{
+		if (source == null || indexFromLast < 0)
+			return default(T);
+
+		// Fast path for IList<T> to avoid multiple enumeration
+		if (source is IList<T> list)
+		{
+			int index = list.Count - 1 - indexFromLast;
+			return index >= 0 && index < list.Count ? list[index] : default(T);
+		}
+
+		// For general IEnumerable - need count, so we materialize once
+		var array = source.ToArray();
+		int targetIndex = array.Length - 1 - indexFromLast;
+		return targetIndex >= 0 && targetIndex < array.Length ? array[targetIndex] : default(T);
+	}
+
+	/// <summary>
+	/// Tries to get element at index. Supports negative indices: -1 = last, -2 = second to last.
+	/// Returns default(T) if index is out of range or collection is null.
+	/// </summary>
+	public static T TryGetAt<T>(this IEnumerable<T> source, int index)
+	{
+		if (source == null)
+			return default(T);
+
+		// Handle negative indices
+		if (index < 0)
+		{
+			var list = source as IList<T> ?? source.ToList();
+			index += list.Count;
+			return index >= 0 && index < list.Count ? list[index] : default(T);
+		}
+
+		// Positive indices - use ElementAtOrDefault to avoid exceptions
+		return source.ElementAtOrDefault(index);
+	}
+
+	/// <summary>
+	/// Tries to get a random element from the sequence.
+	/// Returns default(T) if collection is null or empty.
+	/// </summary>
+	public static T TryGetRandom<T>(this IEnumerable<T> source)
+	{
+		if (source == null)
+			return default(T);
+
+		// Fast path for IList<T>
+		if (source is IList<T> list)
+		{
+			return list.Count == 0 ? default(T) : list[UnityEngine.Random.Range(0, list.Count)];
+		}
+
+		// Materialize once for IEnumerable
+		var array = source.ToArray();
+		return array.Length == 0 ? default(T) : array[UnityEngine.Random.Range(0, array.Length)];
+	}
+	#endregion
+
+	#region all/any
+	/// <summary>
+	/// true if All of predicate(elem) == true.
+	/// </summary>
+	/// <typeparam name="T"></typeparam>
+	/// <param name="source"></param>
+	/// <param name="predicate"></param>
+	/// <returns></returns>
+	public static bool all<T>(this IEnumerable<T> source, Func<T, bool> predicate)
+	{
+		if (source == null) throw new ArgumentNullException(nameof(source));
+		if (predicate == null) throw new ArgumentNullException(nameof(predicate));
+
+		foreach (var item in source)
+			if (!predicate(item)) return false;
+		return true;
+	}
+	/// <summary>
+	///  true if Any of predicate(elem) == true.
+	/// </summary>
+	/// <typeparam name="T"></typeparam>
+	/// <param name="source"></param>
+	/// <param name="predicate"></param>
+	/// <returns></returns>
+	public static bool any<T>(this IEnumerable<T> source, Func<T, bool> predicate)
+	{
+		if (source == null) throw new ArgumentNullException(nameof(source));
+		if (predicate == null) throw new ArgumentNullException(nameof(predicate));
+
+		foreach (var item in source)
+			if (predicate(item)) return true;
+		return false;
+	}
+	#endregion
+
+	#region sum
+	/// <summary> sum with selector — lowercase to match SPACE_UTIL .map()/.find() style </summary>
+	public static float sum<T>(this IEnumerable<T> source, Func<T, float> selector)
+	{
+		float total = 0f;
+		foreach (var item in source) total += selector(item);
+		return total;
+	}
+	/// <summary> int overload </summary>
+	public static int sum<T>(this IEnumerable<T> source, Func<T, int> selector)
+	{
+		int total = 0;
+		foreach (var item in source) total += selector(item);
+		return total;
+	}
+	#endregion
+	*/
+	#endregion
+	// >> Has Been Moved To SPACE_UTIL namespace
+}
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-@all/4-Utils/UtilsPhaseAll.cs ==== -->
+using UnityEngine;
+
+/// <summary>
+/// I hold extension methods shared across ALL phases. Since these are C# extensions, you just
+/// call them directly on the object (collider.HasTag, gameObject.SetTag) � no need to reference
+/// UtilsPhaseAll by name. They're automatically available everywhere because they're static
+/// extensions in a static class.
+/// </summary>
+/// 
+public static class UtilsPhaseAll
+{
+	#region TagType extension helpers.
+	/// <summary> Compares a collider's tag against the TagType enum � replaces CompareTag("string") </summary>
+	public static bool HasTag(this Collider col, TagType tag) => col.CompareTag(tag.ToString());
+	/// <summary> Compares a gameObject's tag against the TagType enum </summary>
+	public static bool HasTag(this GameObject go, TagType tag) => go.CompareTag(tag.ToString());
+	/// <summary> Sets a gameObject's tag from the TagType enum � replaces go.tag = "string" </summary>
+	public static void SetTag(this GameObject go, TagType tag) => go.tag = tag.ToString();
+	#endregion
 }
 
 <!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-a-1/0-Core/GameEvents.cs ==== -->
@@ -5425,16 +5997,6 @@ public static partial class GameEvents
 	}
 	// << when money changed
 
-	// when a certain menu state changed to enabled/disabled >>
-	public static event Action<bool> OnMenuStateChanged;
-	public static void RaiseMenuStateChanged(bool isAnyMenuOpen)
-	{
-		LogSubscribersCount(nameof(OnMenuStateChanged), OnMenuStateChanged);
-		GameEvents.OnMenuStateChanged? // if there is any subscribers
-			.Invoke(isAnyMenuOpen);
-	}
-	// << when a certain menu state changed to enabled/disabled
-
 	// when shop view is toggled >>
 	public static event Action OnOpenShopView;
 	public static void RaiseOpenShopView()
@@ -5482,98 +6044,6 @@ public static partial class GameEvents
 			.Invoke(category);
 	}
 	// << when anyCategory is unlocked
-
-	#region LogSubscribersCount
-	static void LogSubscribersCount(string name, Delegate anEvent)
-	{
-		int subsCount = anEvent?.GetInvocationList().Length ?? 0;
-		UnityEngine.Debug.Log($"[GamEvents] {name} raised for -> {subsCount} subscribers".colorTag("lime"));
-	} 
-	#endregion
-}
-
-<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-a/0-Core/Singleton.cs ==== -->
-﻿using System;
-using System.Linq;
-using System.Collections;
-using System.Collections.Generic;
-
-using UnityEngine;
-using UnityEngine.InputSystem;
-using UnityEngine.UI;
-using TMPro;
-
-using SPACE_UTIL;
-
-/// <summary>
-/// generic singleton base first instance wins, duplicates are destroyed
-/// </summary>
-public abstract class Singleton<T> : MonoBehaviour 
-										where T: MonoBehaviour
-{
-	#region public API
-	public static T Ins { get; private set; }
-	#endregion
-
-	#region Unity Life Cycle
-	protected virtual void Awake()
-	{
-		if (Singleton<T>.Ins == null)
-			Singleton<T>.Ins = this as T;
-		else
-		{
-			Debug.Log($"{typeof(T)} instance already exist, so this gameObject is destroyed".colorTag("red"));
-			GameObject.Destroy(this.gameObject);
-		}
-	}
-	#endregion
-}
-
-<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-a/1-Managers/EconomyManager.cs ==== -->
-using System;
-using System.Linq;
-using System.Collections;
-using System.Collections.Generic;
-
-using UnityEngine;
-using UnityEngine.InputSystem;
-using UnityEngine.UI;
-using TMPro;
-
-using SPACE_UTIL;
-
-/// <summary>
-/// owns money
-/// </summary>
-[DefaultExecutionOrder(-100)] // just after INITManager
-public class EconomyManager : Singleton<EconomyManager>
-{
-	[SerializeField] float _defaultMoney = 400f;
-
-	#region private API
-	float money = 0f;
-	#endregion
-
-	#region public API
-	public float GetMoney() => money;
-	public void AddMoney(float deltaMoney)
-	{
-		money += deltaMoney; GameEvents.RaiseMoneyChanged(money);
-	}
-	public bool CanAfford(float price)
-	{
-		return price <= money;
-	}
-	#endregion
-
-	#region Unity Life Cycle
-	protected override void Awake()
-	{
-		Debug.Log(C.method(this));
-		base.Awake();
-		money = this._defaultMoney;
-	}
-	#endregion
 }
 
 <!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-a/1-Managers/SubManager/InteractionWheelUI.cs ==== -->
@@ -5603,6 +6073,7 @@ public class InteractionWheelUI : Singleton<InteractionWheelUI>
 			// selfActive Subscribed by Itself At Start >>
 			GameEvents.OnOpenInteractionView += (interactable) =>
 			{
+				Singleton<UIManager>.Ins.CloseAllSubManager();
 				this.gameObject.SetActive(true);
 				ErazeAndBuildOptionsView(interactable.GetOptions(), interactable);
 			};
@@ -5614,14 +6085,19 @@ public class InteractionWheelUI : Singleton<InteractionWheelUI>
 		}
 		GameEvents.RaiseMenuStateChanged(isAnyMenuOpen: true); // for cursorLock purpose
 	}
+	// not required for now
 	private void Update()
 	{
+		/*
+		// close is handled by UIManager 
+		// close
 		if (INPUT.K.InstantDown(KeyCode.Escape) || INPUT.K.InstantDown(KeyCode.E))
 		{
 			Debug.Log("toggle interactionWheelUI false");
 			// .toggle is in namespace SPACE_UTIL as extension behaves same as .SetActive();
 			this.gameObject.toggle(value: false);
 		}
+		*/
 	}
 	private void OnDisable()
 	{
@@ -5722,7 +6198,7 @@ public class ShopUI : MonoBehaviour
 			this._orchestrator.InitBuildOrchestrateAndSubscribe(shopDataService, this._CATEGORY); // link the shopDataService and the LIST<category> into orchestor
 			// ------------------------------------------------------------------------------------------- //
 			// Self Subscribed to View and disabled after setup, // TODO Unsubscribe on disable() / on destroy()
-			GameEvents.OnOpenShopView += () => this.gameObject.SetActive(true);
+			GameEvents.OnOpenShopView += () => { Singleton<UIManager>.Ins.CloseAllSubManager(); this.gameObject.SetActive(true); };
 			GameEvents.OnCloseShopView += () => this.gameObject.SetActive(false);
 			// 
 			this.gameObject.SetActive(false); // once all setup done, deactivate;
@@ -5730,8 +6206,10 @@ public class ShopUI : MonoBehaviour
 		}
 		GameEvents.RaiseMenuStateChanged(isAnyMenuOpen: true);
 	}
+	// not required for now
 	private void Update()
 	{
+		/*
 		// 
 		if (INPUT.K.InstantDown(KeyCode.E) || INPUT.K.InstantDown(KeyCode.Escape))
 		{
@@ -5739,6 +6217,7 @@ public class ShopUI : MonoBehaviour
 			// .toggle is in namespace SPACE_UTIL as extension behaves same as .SetActive();
 			GameEvents.RaiseCloseShopView();
 		}
+		*/
 	}
 	private void OnDisable()
 	{
@@ -5803,45 +6282,6 @@ public class moneyUI : MonoBehaviour
 		// GameEvents.OnMoneyChanged -= HandleMoneyChanged;
 	}
 	*/
-}
-
-<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-a/1-Managers/UIManager.cs ==== -->
-﻿using System;
-using System.Linq;
-using System.Collections;
-using System.Collections.Generic;
-
-using UnityEngine;
-using UnityEngine.InputSystem;
-using UnityEngine.UI;
-using TMPro;
-
-using SPACE_UTIL;
-
-public class UIManager : Singleton<UIManager>
-{
-	[SerializeField] ShopUI shopUI;
-	[SerializeField] InteractionWheelUI interactionUI;
-
-	#region public API
-	public bool isAnyMenuOpen { get; private set; }
-	public void CloseAllSubManager()
-	{
-		GameEvents.RaiseCloseShopView();
-		GameEvents.RaiseCloseInteractionView();
-	}
-	#endregion
-	#region Unity Life Cycle
-	private void Start()
-	{
-		GameEvents.OnMenuStateChanged += HandleMenuSateChanged;
-	}
-	private void OnDestroy()
-	{
-		GameEvents.OnMenuStateChanged -= HandleMenuSateChanged;
-	}
-	void HandleMenuSateChanged(bool isAnyMenuOpen) => this.isAnyMenuOpen = isAnyMenuOpen; 
-	#endregion
 }
 
 <!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-a/2-Data/DataService/ShopDataService.cs ==== -->
@@ -6221,7 +6661,6 @@ public class InteractableComputer : MonoBehaviour, IInteractable
 		// Debug.Log($"should perform {selectedInteraction.interactionName}".colorTag("lime"));
 		if(selectedInteraction.interactionName == "openShopView")
 		{
-			Singleton<UIManager>.Ins.CloseAllSubManager();
 			GameEvents.RaiseOpenShopView();
 		}
 	}
@@ -6584,7 +7023,7 @@ public class SimplePlayerInteraction : MonoBehaviour
 
 	void TryInteract()
 	{
-		if (Singleton<UIManager>.Ins.isAnyMenuOpen)
+		if (Singleton<UIManager>.Ins.GetIsAnyMenuOpen())
 			return;
 
 		Ray ray = new Ray(this._cam.transform.position, this._cam.transform.forward);
@@ -6739,6 +7178,1353 @@ public class ShopUITest : MonoBehaviour
 		else if (INPUT.K.InstantDown(KeyCode.P)) GameEvents.RaiseUnlockedCategory(this._category);
 	}
 	#endregion
+}
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/0-Core/GameEvents.cs ==== -->
+using System;
+using System.Linq;
+using System.Collections;
+using System.Collections.Generic;
+
+using UnityEngine;
+using UnityEngine.InputSystem;
+using UnityEngine.UI;
+using TMPro;
+
+using SPACE_UTIL;
+
+/// <summary>
+/// partial extend for phase-b � no modification to phase-a GameEvents
+/// </summary>
+public static partial class GameEvents
+{
+	/*
+	// when Somthng occured >>
+	public static event Action<int> OnSomthng;
+	public static void RaiseSomthng(int index)
+	{
+		LogSubscribersCount(nameof(OnSomthng), OnSomthng);
+		GameEvents.OnSomthng? // if there is any subscribers
+			.Invoke(index);
+	}
+	// << when Somthng occured
+	*/
+
+	// when tool was equipped (activated in hotbar) >>
+	public static event Action<BaseHeldTool> OnToolEquipped;
+	public static void RaiseToolEquipped(BaseHeldTool tool)
+	{
+		LogSubscribersCount(nameof(OnToolEquipped), OnToolEquipped);
+		GameEvents.OnToolEquipped? // if there is any subscribers
+			.Invoke(tool);
+	}
+	// << when tool was equipped
+}
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/1-Managers/SubManagers/InventoryUI.cs ==== -->
+using System;
+using System.Linq;
+using System.Collections;
+using System.Collections.Generic;
+
+using UnityEngine;
+using UnityEngine.InputSystem;
+using UnityEngine.UI;
+using TMPro;
+
+using SPACE_UTIL;
+
+/// <summary>
+/// toggle inventoryUI
+/// </summary>
+public class InventoryUI : MonoBehaviour
+{
+   
+}
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/2-Data/DataService/InventoryDataService.cs ==== -->
+using System;
+using System.Linq;
+using System.Collections;
+using System.Collections.Generic;
+
+using SPACE_UTIL;
+
+/// <summary>
+/// purely C# Collection, manages all inventory slots: add/remove/switch/stack/swap
+/// </summary>
+public class InventoryDataService
+{
+	#region private static API
+	static int hotBarSize = 10, totalBarSize = 40;
+	#endregion
+
+	#region Nested Entity
+	public class Slot
+	{
+		public BaseHeldTool tool;
+		public int index;
+		public bool isHotBar { get => index < InventoryDataService.hotBarSize; }
+	}
+	#endregion
+
+	#region private API
+	List<Slot> SLOT = new List<Slot>();
+	int selectedSlotIndex = 0;
+	#endregion
+
+	#region public API
+	public int GetHotBarSize() => hotBarSize;
+	public int GetTotalBarSize() => totalBarSize;
+
+	/// <summary>
+	/// create new empty slots of totalBarSize
+	/// </summary>
+	public void Build()
+	{
+		SLOT.Clear();
+		for (int i0 = 0; i0 < totalBarSize; i0 += 1)
+			SLOT.Add(new Slot { tool = null, index = i0 });
+		selectedSlotIndex = 0;
+	}
+	/// <summary>
+	/// get all slots
+	/// </summary>
+	/// <returns></returns>
+	public List<Slot> GetAllSlots()
+	{
+		return SLOT;
+	}
+	public Slot GetActiveSlot()
+	{
+		return SLOT.TryGetAt(selectedSlotIndex);
+	}
+	public BaseHeldTool GetActiveTool()
+	{
+		Slot slot = GetActiveSlot();
+		if (slot != null)
+			return slot.tool;
+		return null;
+	}
+	public int GetActiveSlotIndex()
+	{
+		return selectedSlotIndex;
+	}
+	public int GetIndexFotTool(BaseHeldTool tool)
+	{
+		return SLOT.findIndex(slot => slot.tool == tool);
+	}
+
+	public int TryAddTool(BaseHeldTool tool, int preferredSlot = -1)
+	{
+		if(tool.GetMaxAmount() > 1) // allows stacking
+			for(int i0 = 0; i0 < SLOT.Count; i0 += 1)
+			{
+				var slot = SLOT[i0];
+				if(slot.tool != null)
+					if( slot.tool.GetType() == tool.GetType() &&
+						slot.tool.GetQty() < slot.tool.GetMaxAmount())
+					{
+						int space = slot.tool.GetMaxAmount() - slot.tool.GetQty();
+						int addCount = tool.GetQty().clamp(0, space);
+						slot.tool.AddQty(addCount);
+						tool.AddQty(-addCount);
+						if (tool.GetQty() <= 0)
+							return i0;
+					}
+			}
+		// preferred slot
+		int targetIndex = -1;
+		if (preferredSlot.inRange(SLOT))
+			if (SLOT[preferredSlot].tool == null)
+				targetIndex = preferredSlot;
+		if(targetIndex == -1)
+			for(int i0 = 0; i0 < SLOT.Count; i0 += 1)
+				if(SLOT[i0].tool 
+== null)
+				{
+					targetIndex = i0;
+					break;
+				}
+		if (targetIndex == -1)
+			return -1;
+		SLOT[targetIndex].tool = tool;
+		return targetIndex;
+	}
+	public void RemoveTool(BaseHeldTool tool)
+	{
+		int index = GetIndexFotTool(tool);
+		if (index != -1)
+			SLOT[index].tool = null;
+		if (GetActiveTool() == tool)
+			selectedSlotIndex = 0;
+	}
+	public void ClearAll()
+	{
+		SLOT.forEach(slot => slot.tool = null);
+		selectedSlotIndex = 0;
+	}
+	public void SwitchTo(int index)
+	{
+		if (index.inRange(0, hotBarSize))
+			selectedSlotIndex = index;
+	}
+	/// <summary>
+	/// wraps selectedSlotIndex within hhot bar
+	/// </summary>
+	/// <param name="delta"></param>
+	public void Scroll(int delta)
+	{
+		int start = selectedSlotIndex,
+			dir = (delta > 0) ? +1 : -1;
+		for (int i0 = 0; i0 <= hotBarSize - 1; i0 += 1)
+		{
+			int next = (start + dir).mod(length: hotBarSize);
+			start = next;
+			if(SLOT[next].tool != null)
+			{
+				selectedSlotIndex = next;
+				return;
+			}
+		}
+	}
+
+	/// <summary>
+	/// swaps tools between 2 slots
+	/// </summary>
+	public void Swap(int indexA, int indexB)
+	{
+		if (!indexA.inRange(SLOT) || !indexB.inRange(SLOT))
+			return;
+		var temp = SLOT[indexA];
+		SLOT[indexA] = SLOT[indexB];
+		SLOT[indexB] = temp;
+	}
+
+	public string GetSnapshot(string header = "inventory dataService snapshot")
+	{
+		return $@"
+{'='.repeat(4) + header + '='.repeat(4)}
+// SLOT
+{PhaseBLOG.LIST_SLOT__TO__JSON(SLOT)},
+selectedSlotIndex: {selectedSlotIndex}";
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/2-Data/Enums/GlobalEnums.cs ==== -->
+// GLOBAL ENUM (@PhaseB) >> //
+
+/// <summary>
+/// all enums introduced in Phase B � one file, one place
+/// </summary>
+
+/// <summary> interaction option types � replaces magic strings </summary>
+public enum InteractionType
+{
+	Take,
+	Destroy,
+	Toggle,
+	// Pack, // Phase D:
+	// TakeBuilding,
+	// SetMold, // Phase E:
+	// ToggleDirection,
+}
+
+/// <summary> magnet tool grab filter modes </summary>
+public enum MagnetToolSelectionMode
+{
+	Everything = 0,
+	ResourcesNotInFilter = 1,
+	ResourcesNotOnConveyors = 2
+}
+
+/// <summary> stub � expanded in Phase G with all savable object IDs </summary>
+public enum SavableObjectID
+{
+	INVALID = 0,
+	ToolBuilder = 401,
+	HammerBasic = 402,
+	Lantern = 403,
+	MagnetTool = 404,
+	PickaxeBasic = 405,
+	ResourceScannerTool = 406,
+	WrenchTool = 410,
+	MiningHelmet = 417,
+}
+
+// << GLOBAL ENUM (@PhaseB) //
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/2-Data/Field_Inventory.cs ==== -->
+using System.Collections.Generic;
+
+using UnityEngine;
+using UnityEngine.InputSystem;
+using UnityEngine.UI;
+using TMPro;
+
+using SPACE_UTIL;
+
+public class Field_Inventory : MonoBehaviour
+{
+	#region inspector fields
+	[SerializeField] Image _icon, _bg;
+	[SerializeField] TMP_Text _nameText, _countText;
+	[SerializeField] GameObject _orangeBarThing, _hideWhenDragged;
+
+	[SerializeField]
+	Color _selectedColor = new Color(0.4f, 0.8f, 0.6f, 0.2f),
+		  _notSelectedColor = new Color(0.2f, 0.2f, 0.2f, 0.1f),
+		  _hoveredColor = new Color(1f, 1f, 1f, 0.2f);
+	#endregion
+	#region public API
+	public void SetData(Sprite sprite, string name, int count)
+	{
+		this._icon.enabled = true;
+		this._icon.sprite = sprite;
+		this._nameText.text = $"";
+		this._countText.text = (count <= 1) ? $"" : count.ToString();
+	}
+	public void SetHighLighted(bool isSelected)
+	{
+		this._bg.color = (isSelected) ? this._selectedColor : this._notSelectedColor;
+	}
+	public void SetEmpty()
+	{
+		this._icon.enabled = false;
+		this._nameText.text = $"";
+		this._countText.text = $"";
+		SetHighLighted(false);
+	}
+	public void SetHovered(bool isHovered)
+	{
+		if (isHovered)
+			this._bg.color = this._hoveredColor;
+	}
+	public void SetIsHotBar(bool isHotBar)
+	{
+		this._orangeBarThing.SetActive(isHotBar);
+	}
+	public void SetDragVisible(bool isVisible)
+	{
+		this._hideWhenDragged.SetActive(isVisible);
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/2-Data/Interfaces/GlobalInterfaces.cs ==== -->
+﻿using System;
+using System.Collections;
+using System.Collections.Generic;
+
+using UnityEngine;
+using SPACE_UTIL;
+
+/// <summary>
+/// contract for item with an inventory icon.
+/// </summary>
+public interface IIconItem
+{
+	Sprite GetIcon();
+}
+
+/// <summary>
+/// stub - contract expanded in phase-G with full save/load
+/// </summary>
+public interface ISaveLoadableObject
+{
+	bool hasBeenSaved { get; set; }
+	bool ShouldBeSaved();
+	SavableObjectID GetSavableObjectTypeId();
+	Vector3 GetPos();
+	Vector3 GetRot();
+	void LoadFromSave(string customDataJson);
+	string GetCustomDataJsonSnapshot();
+}
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/2-Data/SO_FootStepSoundDef.cs ==== -->
+﻿using System.Collections.Generic;
+
+using UnityEngine;
+using UnityEngine.InputSystem;
+using UnityEngine.UI;
+using TMPro;
+
+using SPACE_UTIL;
+
+[CreateAssetMenu(menuName = "SO/SO_FootStepSoundDef", fileName = "SO_FootStepSoundDef")]
+public class SO_FootStepSoundDef : ScriptableObject
+{
+	public AudioClip leftFootStepClip, 
+					 rightGootStepClip;
+}
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/3-Monobehaviours/Player/PlayerCamera.cs ==== -->
+﻿using System;
+using System.Linq;
+using System.Collections;
+using System.Collections.Generic;
+
+using UnityEngine;
+using UnityEngine.InputSystem;
+using UnityEngine.UI;
+using TMPro;
+
+using SPACE_UTIL;
+
+/// <summary>
+/// I handle everything the camera does — mouse look (X/Y rotation), FOV changes during sprint,
+/// camera head bob while walking, viewmodel bob (subtle hand sway), and view punch (recoil from
+/// explosions or elevator landing). I read PlayerMovement's speed and grounded state to scale
+/// bob intensity. I subscribe to OnCamViewPunch for external systems (StartingElevator, future
+/// explosions) to shake the camera. OnMenuStateChanged is handled by PlayerMovement — I just
+/// read isAnyMenuOpen to skip look input.
+///
+/// Who uses me: PlayerMovement (I'm on the same GO). StartingElevator (view punch event).
+/// Events I subscribe to: OnCamViewPunch (camera shake from external sources).
+/// </summary>
+public class PlayerCamera : MonoBehaviour
+{
+	#region Inspector Fields
+	[Header("Look")]
+	[SerializeField] float _mouseSensitivity = 2f;
+	[SerializeField] Camera _cam;
+	[SerializeField] PlayerController _pc;
+
+	[Header("FOV")]
+	[SerializeField] float _baseFOV = 70f;
+
+	[Header("Camera Bob")]
+	[SerializeField] float _baseBobbingSpeed = 14f;
+	[SerializeField] float _baseBobbingAmount = 0.05f;
+	[SerializeField] float _baseBobbingPitchAmount = 1f;
+	[SerializeField] float _baseBobbingYawAmount = 1f;
+
+	[Header("ViewModel Bob")]
+	[SerializeField] Transform _viewModelContainer;
+	[SerializeField] float _viewModelBobSpeed = 8f;
+	[SerializeField] float _viewModelBobAmount = 0.05f;
+	[SerializeField] float _viewModelBobPitchAmount = 1.5f;
+	[SerializeField] float _viewModelBobYawAmount = 1.5f;
+	[SerializeField] float _viewModelLookSwayAmount = 0.05f;
+	[SerializeField] float _viewModelLookSwayMax = 2f;
+	[SerializeField] Vector3 _viewModelBasePos;
+	[SerializeField] Vector3 _viewModelBaseRotEuler;
+	[SerializeField] float _jumpBounceAmount = -0.12f;
+	[SerializeField] float _landBounceAmount = 0.08f;
+	[SerializeField] float _jumpSmoothTime = 0.2f;
+	#endregion
+
+	#region private API
+	bool isAnyMenuOpen;
+	float xRot;
+	Vector2 lookDelta;
+	// FOV
+	float currentFOV;
+	float fovVelocity;
+	// Camera bob
+	float bobbingCounter;
+	float bobbingPitch, bobbingYaw, bobbingVerticalOffset;
+	float bobbingPitchVel, bobbingYawVel, bobbingVerticalVel;
+	float yawDirMultiplier = 1f;
+	// ViewModel bob
+	float viewBobCounter;
+	float viewBobPitch, viewBobYaw, viewBobVertical;
+	float viewBobPitchVel, viewBobYawVel, viewBobVerticalVel;
+	int viewBobYawDir = 1;
+	float smoothedYawSway, smoothedPitchSway;
+	float yawSwayVel, pitchSwayVel;
+	float jumpOffset, jumpVelocity, jumpTargetOffset;
+	bool wasGroundedLastFrame;
+	// View punch
+	Vector3 viewPunchCurrent;
+	float viewPunchTimer, viewPunchDuration;
+	Vector3 viewPunchTarget;
+	#endregion
+
+	#region Unity Life Cycle
+	/// <summary> 
+	/// Initializes FOV to base value and subscribes to OnCamViewPunch so external
+	/// systems (elevator landing, explosions) can shake the camera. 
+	/// </summary>
+	private void Start()
+	{
+		currentFOV = _baseFOV;
+		_cam.fieldOfView = currentFOV;
+		// purpose: lock/unlock look when menus open
+		GameEvents.OnMenuStateChanged += (open) => isAnyMenuOpen = open;
+		// purpose: apply view punch from elevator landing, explosions, etc.
+		GameEvents.OnCamViewPunch += HandleViewPunch;
+	}
+	/// <summary> 
+	/// Every frame: handles mouse look (when no menu open), FOV sprint widening,
+	/// camera head bob, viewmodel hand sway, and view punch decay from explosions. 
+	/// </summary>
+	private void Update()
+	{
+		if (Time.timeScale == 0f) return;
+		// → skip look input when any menu is open
+		if (!isAnyMenuOpen)
+		{
+			HandleLook();
+			HandleCameraBobbing();
+			HandleViewModelBobbing();
+		}
+		HandleFOV();
+		HandleViewPunchDecay();
+	}
+	/// <summary> Reads Mouse X/Y, applies sensitivity, rotates player around Y-axis (horizontal)
+	/// and tilts camera around X-axis (vertical, clamped to ±88°). </summary>
+	void HandleLook()
+	{
+		float mx = Input.GetAxis("Mouse X") * _mouseSensitivity;
+		float my = Input.GetAxis("Mouse Y") * _mouseSensitivity;
+		lookDelta = new Vector2(mx, my);
+		xRot = (xRot - my).clamp(-88f, 88f);
+		_pc.transform.Rotate(Vector3.up * mx);
+	}
+	/// <summary> 
+	/// Widens FOV by 5% when sprinting, smoothly returns to base FOV when stopping. 
+	/// </summary>
+	void HandleFOV()
+	{
+		bool sprinting = _pc.SelectedWalkSpeed > _pc.WalkSpeed && _pc.IsGrounded;
+		float targetFOV = sprinting ? _baseFOV * 1.05f : _baseFOV;
+		currentFOV = Mathf.SmoothDamp(currentFOV, targetFOV, ref fovVelocity, 0.1f);
+		_cam.fieldOfView = currentFOV;
+	}
+	/// <summary> Applies head bob (subtle pitch/yaw oscillation) based on movement speed and
+	/// grounded state. Faster movement = faster + larger bob. Airborne = no bob. </summary>
+	void HandleCameraBobbing()
+	{
+		bool moving = _pc.MoveInput.sqrMagnitude > 0.01f;
+		if (!_pc.IsGrounded)
+		{
+			bobbingPitch = Mathf.SmoothDamp(bobbingPitch, 0f, ref bobbingPitchVel, 0.2f);
+			bobbingYaw = Mathf.SmoothDamp(bobbingYaw, 0f, ref bobbingYawVel, 0.2f);
+			bobbingVerticalOffset = Mathf.SmoothDamp(bobbingVerticalOffset, 0f, ref bobbingVerticalVel, 0.2f);
+		}
+		else if (!moving)
+		{
+			bobbingPitch = Mathf.SmoothDamp(bobbingPitch, 0f, ref bobbingPitchVel, 0.1f);
+			bobbingYaw = Mathf.SmoothDamp(bobbingYaw, 0f, ref bobbingYawVel, 0.1f);
+			bobbingVerticalOffset = Mathf.SmoothDamp(bobbingVerticalOffset, 0f, ref bobbingVerticalVel, 0.1f);
+		}
+		else
+		{
+			float speedRatio = _pc.SelectedWalkSpeed / Mathf.Max(_pc.WalkSpeed, 0.01f);
+			bobbingCounter += Time.deltaTime * _baseBobbingSpeed * speedRatio;
+			if (bobbingCounter > Mathf.PI * 2f) { bobbingCounter -= Mathf.PI * 2f; yawDirMultiplier *= -1f; }
+			float wave = Mathf.Sin(bobbingCounter);
+			bobbingVerticalOffset = Mathf.SmoothDamp(bobbingVerticalOffset, _baseBobbingAmount * wave * speedRatio, ref bobbingVerticalVel, 0.05f);
+			bobbingPitch = Mathf.SmoothDamp(bobbingPitch, wave * _baseBobbingPitchAmount * speedRatio, ref bobbingPitchVel, 0.05f);
+			bobbingYaw = Mathf.SmoothDamp(bobbingYaw, wave * _baseBobbingYawAmount * speedRatio * yawDirMultiplier, ref bobbingYawVel, 0.05f);
+		}
+		Vector3 baseLocal = new Vector3(_cam.transform.localPosition.x, _pc.CC.height / 2f - 0.5f, _cam.transform.localPosition.z);
+		_cam.transform.localPosition = baseLocal + new Vector3(0f, bobbingVerticalOffset, 0f);
+		Quaternion lookRot = Quaternion.Euler(xRot + viewPunchCurrent.x, viewPunchCurrent.y, viewPunchCurrent.z);
+		Quaternion bobRot = Quaternion.Euler(bobbingPitch, bobbingYaw, 0f);
+		_cam.transform.localRotation = lookRot * bobRot;
+	}
+	/// <summary> Applies hand sway to the ViewModel container — similar to camera bob but with
+	/// separate frequency/amplitude for a natural first-person hand movement feel. </summary>
+	void HandleViewModelBobbing()
+	{
+		if (_viewModelContainer == null) return;
+		bool moving = _pc.MoveInput.sqrMagnitude > 0.01f;
+		bool justJumped = wasGroundedLastFrame && !_pc.IsGrounded;
+		bool justLanded = !wasGroundedLastFrame && _pc.IsGrounded;
+		if (justJumped) jumpTargetOffset = _jumpBounceAmount;
+		else if (justLanded) jumpTargetOffset = _landBounceAmount;
+		jumpOffset = Mathf.SmoothDamp(jumpOffset, jumpTargetOffset, ref jumpVelocity, _jumpSmoothTime);
+		jumpTargetOffset = Mathf.MoveTowards(jumpTargetOffset, 0f, Time.deltaTime * Mathf.Abs(jumpTargetOffset / _jumpSmoothTime));
+		wasGroundedLastFrame = _pc.IsGrounded;
+
+		if (!_pc.IsGrounded || !moving)
+		{
+			float smoothTime = _pc.IsGrounded ? 0.1f : 0.2f;
+			viewBobPitch = Mathf.SmoothDamp(viewBobPitch, 0f, ref viewBobPitchVel, smoothTime);
+			viewBobYaw = Mathf.SmoothDamp(viewBobYaw, 0f, ref viewBobYawVel, smoothTime);
+			viewBobVertical = Mathf.SmoothDamp(viewBobVertical, 0f, ref viewBobVerticalVel, smoothTime);
+		}
+		else
+		{
+			float sr = _pc.SelectedWalkSpeed / Mathf.Max(_pc.WalkSpeed, 0.01f);
+			viewBobCounter += Time.deltaTime * _viewModelBobSpeed * sr;
+			if (viewBobCounter > Mathf.PI * 2f) { viewBobCounter -= Mathf.PI * 2f; viewBobYawDir *= -1; }
+			float wave = Mathf.Sin(viewBobCounter);
+			viewBobVertical = Mathf.SmoothDamp(viewBobVertical, _viewModelBobAmount * wave * sr, ref viewBobVerticalVel, 0.05f);
+			viewBobPitch = Mathf.SmoothDamp(viewBobPitch, wave * _viewModelBobPitchAmount * sr, ref viewBobPitchVel, 0.05f);
+			viewBobYaw = Mathf.SmoothDamp(viewBobYaw, wave * _viewModelBobYawAmount * sr * viewBobYawDir, ref viewBobYawVel, 0.05f);
+		}
+		if (float.IsNaN(viewBobVertical)) viewBobVertical = 0f;
+		if (float.IsNaN(jumpOffset)) jumpOffset = 0f;
+		_viewModelContainer.localPosition = _viewModelBasePos + new Vector3(0f, viewBobVertical + jumpOffset, 0f);
+
+		float swayTargetY = Mathf.Clamp(lookDelta.x * _viewModelLookSwayAmount, -_viewModelLookSwayMax, _viewModelLookSwayMax);
+		float swayTargetP = Mathf.Clamp(-lookDelta.y * _viewModelLookSwayAmount, -_viewModelLookSwayMax, _viewModelLookSwayMax);
+		if (float.IsNaN(yawSwayVel)) yawSwayVel = 0f;
+		if (float.IsNaN(pitchSwayVel)) pitchSwayVel = 0f;
+		smoothedYawSway = Mathf.SmoothDamp(smoothedYawSway, swayTargetY, ref yawSwayVel, 0.06f);
+		smoothedPitchSway = Mathf.SmoothDamp(smoothedPitchSway, swayTargetP, ref pitchSwayVel, 0.06f);
+		Quaternion bobQ = Quaternion.Euler(viewBobPitch + smoothedPitchSway, viewBobYaw + smoothedYawSway, 0f);
+		_viewModelContainer.localRotation = Quaternion.Euler(_viewModelBaseRotEuler) * bobQ;
+	}
+	/// <summary> Called via OnCamViewPunch event — sets a target punch rotation that decays
+	/// over the given duration. Used by elevator landing and future explosion effects. </summary>
+	void HandleViewPunch(Vector3 punchAmount, float duration)
+	{
+		viewPunchTarget = punchAmount;
+		viewPunchDuration = duration;
+		viewPunchTimer = duration;
+	}
+	/// <summary> Gradually reduces the view punch rotation back to zero over the duration set
+	/// by HandleViewPunch. Applied to the camera's local rotation each frame. </summary>
+	void HandleViewPunchDecay()
+	{
+		if (viewPunchTimer > 0f)
+		{
+			viewPunchTimer -= Time.deltaTime;
+			float t = Mathf.Clamp01(viewPunchTimer / viewPunchDuration);
+			viewPunchCurrent = viewPunchTarget * t;
+		}
+		else viewPunchCurrent = Vector3.zero;
+	}
+	/// <summary> Unsubscribes from OnCamViewPunch to prevent null ref if camera is destroyed
+	/// before the event bus (e.g. scene unload). </summary>
+	private void OnDestroy()
+	{
+		GameEvents.OnCamViewPunch -= HandleViewPunch;
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/3-Monobehaviours/Player/PlayerController.cs ==== -->
+using System;
+using System.Linq;
+using System.Collections;
+using System.Collections.Generic;
+
+using UnityEngine;
+using UnityEngine.UI;
+
+using TMPro;
+
+using SPACE_UTIL;
+
+/// <summary>
+/// I'm the main player controller � I handle WASD movement, sprinting, ducking, jumping,
+/// slope sliding, gravity, and noclip fly mode (V key). I'm a Singleton so tools and other
+/// systems access my camera, ViewModelContainer, and HoldPosition via Owner chain properties.
+/// I subscribe to OnMenuStateChanged to freeze input when any menu is open. I also own the
+/// mining hat dual-light system (nightVisionLight vs miningHatLight) toggled by ToolMiningHat.
+/// PlayerCamera reads my speed/grounded state for camera bobbing. PlayerGrab reads my camera
+/// for raycasts. InventoryOrchestrator reads isAnyMenuOpen to block hotbar input.
+///
+/// Who uses me: Every tool (via Owner chain), PlayerCamera (bob speed), PlayerGrab (camera ref).
+/// Events I subscribe to: OnMenuStateChanged (freeze/unfreeze input).
+/// </summary>
+public class PlayerController : Singleton<PlayerController>
+{
+	#region Inspector Fields
+	 [Header("Move")]
+    [SerializeField] float _walkSpeed = 3f;
+    [SerializeField] float _sprintSpeed = 5f;
+    [SerializeField] float _duckSpeed = 1.5f;
+    [SerializeField] float _jumpHeight = 2f;
+    [SerializeField] float _gravity = -10f;
+    [SerializeField] float _slideSpeed = 8f;
+    [SerializeField] float _standingSlopeLimit = 60f;
+    [SerializeField] float _duckHeight = 1f;
+    [SerializeField] float _standingHeight = 2f;
+    [SerializeField] float _duckingSpeed = 10f;
+    [SerializeField] CharacterController _cc;
+    [SerializeField] Transform _groundCheck;
+    [SerializeField] LayerMask _groundLayer;
+    // [SerializeField] Transform _characterModel;
+
+    [Header("References (Owner chain)")]
+    [SerializeField] Camera _playerCam;
+    [SerializeField] Transform _viewModelContainer;
+    [SerializeField] Transform _holdPosition;
+    [SerializeField] Transform _magnetToolPosition;
+    [SerializeField] LayerMask _interactLayerMask;
+    [Header("Mining Hat Lights")]
+    [SerializeField] GameObject _nightVisionLight;
+    [SerializeField] GameObject _miningHatLight;
+	#endregion
+
+	#region private API fields
+	bool isAnyMenuOpen;
+	Vector3 velocity;
+	float xRot;
+	float yRot;
+	bool isGrounded;
+	bool isDucking;
+	bool isUsingNoclip;
+	bool miningLightEnabled;
+	float cameraHeightVelocity;
+	float selectedWalkSpeed;
+	Vector2 moveInput;
+	#endregion
+
+	#region Unity Life Cycle
+	bool isFirstEnable = true;
+	private void OnEnable()
+	{
+		Debug.Log(C.method(this));
+		if(isFirstEnable)
+		{
+			INPUT.UI.SetCursor(isFpsMode: true);
+			// purpose: lock/unlock movement when menus open
+			GameEvents.OnMenuStateChanged += (isAnyMenuOpen) => this.isAnyMenuOpen = isAnyMenuOpen;
+			isFirstEnable = false;
+		}
+	}
+	private void Update()
+	{
+		INPUT.UI.SetCursor(isFpsMode: !isAnyMenuOpen);
+		isGrounded = !isUsingNoclip && _cc.isGrounded;
+
+		if (!isAnyMenuOpen)
+		{
+			#region extra: NoClipMovement
+			if (INPUT.K.InstantDown(KeyCode.V)) ToggleNoclip();
+			if (isUsingNoclip) HandleNoclipMovement(); 
+			#endregion
+			else
+			{
+				HandleMovement();
+				HandleDucking();
+			}
+		}
+		if (!isUsingNoclip)
+			HandleGravityAndSlope();
+		if (transform.position.y <= -200f)
+			TeleportPlayer(PlayerSpawnPoint.GetRandomSpawnPoint());
+	}
+	/// <summary> Reads WASD input, applies sprint/duck speed modifiers, moves the CharacterController,
+	/// and handles jumping (Space key adds upward velocity when grounded). </summary>
+	void HandleMovement()
+	{
+		moveInput = new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical"));
+		bool sprinting = Input.GetKey(KeyCode.LeftShift) && !isDucking && isGrounded;
+		selectedWalkSpeed = sprinting ? _sprintSpeed : (isDucking ? _duckSpeed : _walkSpeed);
+
+		Vector3 move = (transform.right * moveInput.x + transform.forward * moveInput.y).normalized;
+		_cc.Move(move * selectedWalkSpeed * Time.deltaTime);
+
+		if (Input.GetKeyDown(KeyCode.Space) && isGrounded)
+		{
+			velocity.y = Mathf.Sqrt(_jumpHeight * -2f * _gravity);
+			velocity.x = 0f; velocity.z = 0f;
+		}
+	}
+	/// <summary> C key ducks (shrinks CC height), releasing C stands up (blocked if ceiling above).
+	/// Smoothly interpolates camera height and scales the character model to match. </summary>
+	void HandleDucking()
+	{
+		bool wantsDuck = Input.GetKey(KeyCode.C);
+		bool canStand = true;
+		if (!wantsDuck && isDucking)
+		{
+			float headroom = _standingHeight - _duckHeight;
+			Vector3 center = transform.position + _cc.center + Vector3.up * (headroom / 2f);
+			Vector3 half = new Vector3(_cc.radius * 0.95f, headroom / 2f, _cc.radius * 0.95f);
+			canStand = !Physics.CheckBox(center, half, Quaternion.identity, _groundLayer, QueryTriggerInteraction.Ignore);
+		}
+		isDucking = wantsDuck || (isDucking && !canStand);
+
+		float targetHeight = isDucking ? _duckHeight : _standingHeight;
+		_cc.height = Mathf.Lerp(_cc.height, targetHeight, Time.deltaTime * _duckingSpeed);
+		float camTarget = _cc.height / 2f - 0.5f;
+		float camY = Mathf.SmoothDamp(_playerCam.transform.localPosition.y, camTarget, ref cameraHeightVelocity, 0.1f);
+		if (float.IsNaN(camY)) camY = 0f;
+		_playerCam.transform.localPosition = new Vector3(_playerCam.transform.localPosition.x, camY, _playerCam.transform.localPosition.z);
+		/*
+		if (_characterModel != null)
+			_characterModel.localScale = new Vector3(1f, _cc.height / _standingHeight, 1f);
+	*/
+	}
+	/// <summary> Applies gravity when airborne, detects steep slopes via raycasts and adds slide
+	/// velocity to push the player downhill, caps head-bump velocity to zero. </summary>
+	void HandleGravityAndSlope()
+	{
+		if (isGrounded)
+		{
+			Vector3 slideDir = Vector3.zero;
+			int slopeCount = 0;
+			int sampleCount = 6;
+			float radius = _cc.radius * 0.98f;
+			float rayLen = _cc.height / 2f + 0.2f;
+			for (int i = 0; i < sampleCount; i++)
+			{
+				float angle = (float)i * Mathf.PI * 2f / sampleCount;
+				Vector3 origin = transform.position + new Vector3(Mathf.Cos(angle), 0f, Mathf.Sin(angle)) * radius;
+				if (Physics.Raycast(origin, Vector3.down, out RaycastHit hit, rayLen, _groundLayer))
+				{
+					float slopeAngle = Vector3.Angle(hit.normal, Vector3.up);
+					if (slopeAngle > _standingSlopeLimit)
+					{
+						slideDir += new Vector3(hit.normal.x, -hit.normal.y, hit.normal.z);
+						slopeCount++;
+					}
+				}
+				else slopeCount++;
+			}
+			if (slopeCount == sampleCount)
+				velocity += slideDir.normalized * _slideSpeed * Time.deltaTime;
+			else if (velocity.y < 0f) { velocity.y = -2f; velocity.x = 0f; velocity.z = 0f; }
+		}
+		velocity.y += _gravity * Time.deltaTime;
+		CollisionFlags flags = _cc.Move(velocity * Time.deltaTime);
+		if ((flags & CollisionFlags.Above) != 0 && velocity.y > 0f) velocity.y = 0f;
+	}
+
+	#region extra
+	// nice-to-have: noclip � V key fly mode, no gravity, through walls
+	/// <summary> Flips noclip on/off � disables CharacterController so the player can fly through
+	/// walls. Re-enabling CC snaps the player back to valid ground. </summary>
+	void ToggleNoclip()
+	{
+		isUsingNoclip = !isUsingNoclip;
+		_cc.enabled = !isUsingNoclip;
+	}
+	/// <summary> Flies the player in the camera's forward direction using WASD, Space/C for up/down,
+	/// Shift for fast fly. No gravity, no collisions � pure free movement for debugging. </summary>
+	void HandleNoclipMovement()
+	{
+		Vector3 forward = _playerCam.transform.forward;
+		Vector3 right = _playerCam.transform.right;
+		Vector3 move = forward * moveInput.y + right * moveInput.x;
+		if (move.sqrMagnitude > 1f) move.Normalize();
+		bool sprinting = Input.GetKey(KeyCode.LeftShift);
+		selectedWalkSpeed = sprinting ? _sprintSpeed * 4f : _walkSpeed * 2f;
+		float vertical = 0f;
+		if (Input.GetKey(KeyCode.Space)) vertical += 1f;
+		if (Input.GetKey(KeyCode.C)) vertical -= 1f;
+		_cc.transform.position += (move * selectedWalkSpeed + Vector3.up * vertical * selectedWalkSpeed) * Time.deltaTime;
+	}
+	// nice-to-have: mining hat dual-light � toggles between nightVisionLight and miningHatLight on player
+	public void ToggleMiningLightFromTool(bool enable)
+	{
+		miningLightEnabled = enable;
+		if (_nightVisionLight != null) _nightVisionLight.SetActive(!miningLightEnabled);
+		if (_miningHatLight != null) _miningHatLight.SetActive(miningLightEnabled);
+	}
+	#endregion
+	#endregion
+
+	#region public API fields
+	public Camera PlayerCam => _playerCam;
+	public Transform ViewModelContainer => _viewModelContainer;
+	public Transform HoldPosition => _holdPosition;
+	public Transform MagnetToolPosition => _magnetToolPosition;
+	public CharacterController CC => _cc;
+	public LayerMask InteractLayerMask => _interactLayerMask;
+	public float SelectedWalkSpeed => selectedWalkSpeed;
+	public float WalkSpeed => _walkSpeed;
+	public float SprintSpeed => _sprintSpeed;
+	public float DuckSpeed => _duckSpeed;
+	public Vector2 MoveInput => moveInput;
+	public bool IsGrounded => isGrounded;
+	public bool IsInWater { get; set; }
+	#endregion
+
+	#region public API
+	/// <summary> teleport player to position </summary>
+    public void TeleportPlayer(Vector3 position)
+    {
+        IsInWater = false;
+        bool wasEnabled = _cc.enabled;
+        _cc.enabled = false;
+        transform.position = position;
+        _cc.enabled = wasEnabled;
+    }
+    /// <summary> teleport player to position + rotation </summary>
+    public void TeleportPlayer(Vector3 position, Vector3 rotation)
+    {
+        TeleportPlayer(position);
+        transform.rotation = Quaternion.Euler(rotation);
+    }
+	#endregion
+}
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/3-Monobehaviours/Player/PlayerGrab.cs ==== -->
+﻿using System;
+using System.Linq;
+using System.Collections;
+using System.Collections.Generic;
+
+using UnityEngine;
+using UnityEngine.InputSystem;
+using UnityEngine.UI;
+using TMPro;
+
+using SPACE_UTIL;
+
+/// <summary>
+/// I grab physics objects when the player right-clicks on something tagged "Grabbable".
+/// I create a SpringJoint between a kinematic RigidbodyDragger and the target's Rigidbody,
+/// increase drag for a heavy feel, and draw a LineRenderer rope between hand and object.
+/// Right-click again releases — I destroy the joint, restore drag, disable the rope.
+/// If the player pulls too far, the SpringJoint breaks and RigidbodyDraggerController calls
+/// my ForceRelease(). I also subscribe to OnToolEquipped to set tool.Owner = PlayerMovement,
+/// which decouples InventoryOrchestrator from needing a PlayerMovement reference.
+///
+/// Who uses me: RigidbodyDraggerController (ForceRelease on joint break).
+/// Events I subscribe to: OnMenuStateChanged (block grab), OnToolEquipped (set tool.Owner).
+/// </summary>
+public class PlayerGrab : MonoBehaviour
+{
+	#region Inspector Fields
+	[SerializeField] Camera _cam;
+	[SerializeField] Transform _holdPos;
+	[SerializeField] GameObject _dragger;
+	[SerializeField] LineRenderer _lrRope;
+	[SerializeField] float _interactRange = 2.5f;
+	[SerializeField] LayerMask _grabbableMask;
+	[SerializeField] PlayerController _pc;
+	#endregion
+
+	#region private API
+	GameObject heldObject;
+	SpringJoint grabJoint;
+	float grabOriginalDrag;
+	float grabOriginalAngularDrag;
+	bool isAnyMenuOpen;
+	#endregion
+
+	#region public API
+	/// <summary> true if currently holding an object </summary>
+	public bool GetIsHoldingObject() => heldObject != null;
+	#region extra
+	// nice-to-have: RigidbodyDraggerController calls this when SpringJoint breaks — auto-releases orphan grab
+	public void ForceRelease()
+	{
+		if (grabJoint != null)
+		{
+			grabJoint.connectedBody = null;
+			Destroy(grabJoint);
+			grabJoint = null;
+			_dragger.SetActive(false);
+			if (heldObject != null)
+			{
+				Rigidbody rb = heldObject.GetComponent<Rigidbody>();
+				rb.linearDamping = grabOriginalDrag;
+				rb.angularDamping = grabOriginalAngularDrag;
+				UtilsPhaseB.IgnoreAllCollisions(heldObject, gameObject, false);
+				StartCoroutine(DisableInterpolationLater(rb));
+			}
+		}
+		heldObject = null;
+		_lrRope.enabled = false;
+	}
+	#endregion
+	#endregion
+
+	#region Unity Life Cycle
+	/// <summary> Subscribes to menu state (blocks grab when open) and tool equip (sets tool.Owner
+	/// to PlayerMovement so tools can access camera for raycasts). Disables rope on start. </summary>
+	private void Start()
+	{
+		// purpose: block grab when menu is open
+		GameEvents.OnMenuStateChanged += (isAnyMenuOpen) => this.isAnyMenuOpen = isAnyMenuOpen;
+		// purpose: set tool.Owner when equipped — decouples InventoryOrchestrator from PlayerMovement
+		GameEvents.OnToolEquipped += (tool) => tool.SetOwner(this._pc);
+		_lrRope.enabled = false;
+	}
+	/// <summary> Every frame: right-click triggers grab/release, updates rope line positions
+	/// between dragger and held object, and auto-releases if the held object was deactivated. </summary>
+	private void Update()
+	{
+		// → blocked when any menu panel is open
+		if (isAnyMenuOpen == true)
+			return;
+
+		// → right-click toggles grab/release
+		if (INPUT.K.InstantDown(KeyCode.Mouse1))
+			TryGrabOrReleaseObject();
+
+		if (heldObject != null && !heldObject.activeInHierarchy)
+			ReleaseObject();
+
+		if (grabJoint != null && heldObject != null)
+		{
+			_lrRope.SetPosition(0, _dragger.transform.position);
+			Vector3 anchorWorld = grabJoint.connectedBody.transform.TransformPoint(grabJoint.connectedAnchor);
+			_lrRope.SetPosition(1, anchorWorld);
+			_lrRope.enabled = true;
+		}
+		else _lrRope.enabled = false;
+	}
+	#endregion
+
+	#region private API
+	/// <summary> If menu is open, does nothing. If already holding, releases. Otherwise raycasts
+	/// from camera — if it hits a Grabbable-tagged object, starts the grab via GrabObject. </summary>
+	void TryGrabOrReleaseObject()
+	{
+		// Debug.Log(C.method(this, "lime"));
+		// → already holding? release instead
+		// Debug.Log(C.method(this, "lime", adMssg: "no menu open"));
+		if (heldObject != null || grabJoint != null) { ReleaseObject(); return; }
+
+		Ray ray = new Ray(_cam.transform.position, _cam.transform.forward);
+		if (Physics.Raycast(ray, out RaycastHit hit, _interactRange, _grabbableMask))
+		{
+			// Debug.Log(C.method(this, "lime", adMssg: "hit the grababble layer mask"));
+			if (hit.collider.HasTag(TagType.grabbable))
+				GrabObject(hit);
+		}
+	}
+	/// <summary> Creates a SpringJoint between the kinematic dragger and the target’s Rigidbody.
+	/// Increases drag for a heavy feel, enables interpolation for smooth visuals, ignores
+	/// collisions between player and grabbed object, and enables the rope LineRenderer. </summary>
+	void GrabObject(RaycastHit hit)
+	{
+		heldObject = hit.collider.gameObject;
+		Rigidbody rb = heldObject.GetComponent<Rigidbody>();
+
+		_dragger.SetActive(true);
+		_dragger.transform.parent = _holdPos;
+		grabJoint = _dragger.AddComponent<SpringJoint>();
+		_dragger.GetComponent<Rigidbody>().isKinematic = true;
+
+		rb.isKinematic = false;
+		UtilsPhaseB.IgnoreAllCollisions(heldObject, gameObject, true);
+		rb.interpolation = RigidbodyInterpolation.Interpolate;
+		SetupSpringJoint(grabJoint, hit, rb);
+		_lrRope.positionCount = 2;
+		_lrRope.enabled = true;
+	}
+	void SetupSpringJoint(SpringJoint sj, RaycastHit hit, Rigidbody rb)
+	{
+		grabJoint.transform.position = hit.point;
+		grabJoint.spring = 150f;
+		grabJoint.damper = 25f;
+		grabJoint.breakForce = 150f;
+		grabJoint.breakTorque = 60f;
+		grabJoint.anchor = Vector3.zero;
+		grabJoint.minDistance = 0.08f;
+		grabJoint.maxDistance = 0f;
+		grabJoint.connectedBody = rb;
+		grabJoint.gameObject.transform.position = _holdPos.position;
+
+		grabOriginalDrag = rb.linearDamping; grabOriginalAngularDrag = rb.angularDamping; // save linear, angualDampening
+		rb.linearDamping = 3f; rb.angularDamping = 100f;
+	}
+
+	/// <summary> Destroys the SpringJoint, deactivates the dragger, restores the object’s original
+	/// drag values, re-enables collisions, hides the rope, and starts a 3s coroutine to disable
+	/// interpolation on the released object (saves CPU when idle). </summary>
+	void ReleaseObject()
+	{
+		if (isAnyMenuOpen) return;
+		if (grabJoint != null)
+		{
+			grabJoint.connectedBody = null;
+			Destroy(grabJoint);
+			grabJoint = null;
+			_dragger.SetActive(false);
+			if (heldObject != null)
+			{
+				Rigidbody rb = heldObject.GetComponent<Rigidbody>();
+				rb.linearDamping = grabOriginalDrag;
+				rb.angularDamping = grabOriginalAngularDrag;
+				UtilsPhaseB.IgnoreAllCollisions(heldObject, gameObject, false);
+				StartCoroutine(DisableInterpolationLater(rb));
+			}
+		}
+		heldObject = null;
+		_lrRope.enabled = false;
+	}
+	IEnumerator DisableInterpolationLater(Rigidbody body)
+	{
+		yield return new WaitForSeconds(3f);
+		if (body != null && (heldObject == null || heldObject.GetComponent<Rigidbody>() != body))
+			body.interpolation = RigidbodyInterpolation.None;
+	} 
+	#endregion
+}
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/3-Monobehaviours/Player/PlayerSpawnPoint.cs ==== -->
+﻿using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using SPACE_UTIL;
+
+public class PlayerSpawnPoint : MonoBehaviour
+{
+	public static Vector3 GetRandomSpawnPoint()
+	{
+		return GameObject.FindObjectsOfType<PlayerSpawnPoint>()
+							.getRandom()
+							.transform.position;
+	}
+	private void OnDrawGizmos()
+	{
+		Gizmos.color = Color.limeGreen;
+		Gizmos.DrawSphere(this.transform.position, 0.1f);
+	}
+}
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/3-Monobehaviours/Player/RbDraggerController.cs ==== -->
+using UnityEngine;
+
+public class RbDraggerController : MonoBehaviour
+{
+	[SerializeField] PlayerGrab _playerGrab;
+	private void OnJointBreak(float breakForce)
+	{
+		this._playerGrab.ForceRelease();
+	}
+}
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/3-Monobehaviours/Tool/BaseHeldTool.cs ==== -->
+using System.Collections;
+using System.Collections.Generic;
+
+using UnityEngine;
+using SPACE_UTIL;
+
+public class BaseHeldTool : MonoBehaviour, IInteractable, ISaveLoadableObject
+{
+	PlayerController owner;
+	public void SetOwner(PlayerController playerController)
+	{
+		owner = playerController;
+	}
+
+
+	public string GetObjectName()
+	{
+		throw new System.NotImplementedException();
+	}
+	public List<SO_InteractionOption> GetOptions()
+	{
+		throw new System.NotImplementedException();
+	}
+	public void Interact(SO_InteractionOption selectedInteraction)
+	{
+		throw new System.NotImplementedException();
+	}
+	public bool ShouldUseInteractionWheel()
+	{
+		throw new System.NotImplementedException();
+	}
+
+	public bool hasBeenSaved { get => throw new System.NotImplementedException(); set => throw new System.NotImplementedException(); }
+	public string GetCustomDataJsonSnapshot()
+	{
+		throw new System.NotImplementedException();
+	}
+	public Vector3 GetPos()
+	{
+		throw new System.NotImplementedException();
+	}
+	public Vector3 GetRot()
+	{
+		throw new System.NotImplementedException();
+	}
+	public SavableObjectID GetSavableObjectTypeId()
+	{
+		throw new System.NotImplementedException();
+	}
+	public void LoadFromSave(string customDataJson)
+	{
+		throw new System.NotImplementedException();
+	}
+	public bool ShouldBeSaved()
+	{
+		throw new System.NotImplementedException();
+	}
+
+	public int GetMaxAmount() { return -1; }
+	public int GetToolType() { return -1; }
+	public int GetQty() { return -1; }
+	public string GetName() { return $"";  }
+	int qty = 0;
+	public void AddQty(int count) { qty += count; }
+}
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/4-Utils/PhaseBLOG.cs ==== -->
+using System;
+using System.Linq;
+using System.Collections;
+using System.Collections.Generic;
+
+using UnityEngine;
+using UnityEngine.InputSystem;
+using UnityEngine.UI;
+using TMPro;
+
+using SPACE_UTIL;
+
+/// <summary>
+/// collections to json
+/// </summary>
+public static class PhaseBLOG
+{
+	public static string LIST_SLOT__TO__JSON(List<InventoryDataService.Slot> SLOT)
+	{
+		var snapshot = SLOT.map(slot =>
+		{
+			return new
+			{
+				tool = new
+				{
+					toolName = (slot.tool != null) ? slot.tool.GetName() : "null",
+					toolQty = (slot.tool != null) ? slot.tool.GetQty() : 0,
+				},
+				slot.index,
+				slot.isHotBar,
+			};
+		});
+		return snapshot.ToNSJson(pretify: true);
+	}
+}
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/4-Utils/UtilsPhaseB.cs ==== -->
+﻿using System.Collections;
+using System.Collections.Generic;
+
+using UnityEngine;
+using SPACE_UTIL;
+
+public static class UtilsPhaseB
+{
+	/// <summary>
+	/// ignore / restore, collisions between all colliders/subColliders betweem two GO
+	/// </summary>
+	/// <param name="objA"></param>
+	/// <param name="objB"></param>
+	/// <param name="shouldIgnoreCollision"></param>
+	public static void IgnoreAllCollisions(GameObject objA, GameObject objB, bool shouldIgnoreCollision = true)
+	{
+		foreach (var c0 in objA.GetComponentsInChildren<Collider>())
+			foreach (var c1 in objB.GetComponentsInChildren<Collider>())
+				if (c0 != null && c1 != null)
+					if (c0 != c1) // hmm
+						Physics.IgnoreCollision(c0, c1, shouldIgnoreCollision);
+	}
+}
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/5-Tests/PlayerControllerTest.cs ==== -->
+using UnityEngine;
+using SPACE_UTIL;
+
+/// <summary>
+/// stimulates menu open close via keyInstantDown
+/// to check weather controller handles paused during menu Open, and resumes when menu closed.
+/// </summary>
+public class PlayerControllerTest : MonoBehaviour
+{
+	bool isFirstEnable = true;
+	private void OnEnable()
+	{
+		if (isFirstEnable)
+		{
+			GameEvents.OnMenuStateChanged += (isAnyMenuOpen) => Debug.Log("menu open check for playerControllerTest".colorTag("lime"));
+			isFirstEnable = false;
+		}
+	}
+	private void Update()
+	{
+		if (INPUT.K.InstantDown(KeyCode.M))
+			GameEvents.RaiseMenuStateChanged(isAnyMenuOpen: true);
+		if (INPUT.K.InstantDown(KeyCode.N))
+			GameEvents.RaiseMenuStateChanged(isAnyMenuOpen: false);
+	}
+}
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/DEBUG_CheckB.cs ==== -->
+﻿using System;
+using System.Linq;
+using System.Collections;
+using System.Collections.Generic;
+
+using UnityEngine;
+using UnityEngine.UI;
+
+using TMPro;
+
+using SPACE_UTIL;
+
+public class DEBUG_CheckB : MonoBehaviour
+{
+	InventoryDataService dataService = new InventoryDataService();
+
+	#region Unity Life Cycle
+	private void Update()
+	{
+		if (INPUT.K.InstantDown(KeyCode.Space))
+		{
+			Debug.Log($"dataService.Build()".colorTag("lime"));
+			dataService.Build();
+		}
+		else if(INPUT.K.InstantDown(KeyCode.U))
+		{
+			// try add in real usage.
+			// TODO
+		}
+		else if (INPUT.K.InstantDown(KeyCode.I))
+		{
+			// remove first non null slot.tool
+			Debug.Log($"dataService.RemoveTool()".colorTag("lime"));
+			var slot = dataService.GetAllSlots().find(s => s.tool != null);
+			if (slot != null)
+				dataService.RemoveTool(slot.tool);
+		}
+		else if (INPUT.K.InstantDown(KeyCode.O))
+		{
+			// switch to delta: +3 slot tool
+			Debug.Log($"dataService.Switch()".colorTag("lime"));
+			dataService.SwitchTo(+3);
+		}
+		else if (INPUT.K.InstantDown(KeyCode.P))
+		{
+			LOG.AddLog(dataService.GetSnapshot(), "json");
+		}
+	}
+
+	[ContextMenu("run dataService sample")]
+	public void RunDataServiceSample()
+	{
+		InventoryDataService dataService = new InventoryDataService();
+		Debug.Log(C.method(this, "magenta"));
+		dataService.Build();
+		LOG.AddLog(dataService.GetSnapshot(), "json");
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-x/0-Core/GameEvents.cs ==== -->
+using System;
+using System.Linq;
+using System.Collections;
+using System.Collections.Generic;
+
+using UnityEngine;
+using UnityEngine.InputSystem;
+using UnityEngine.UI;
+using TMPro;
+
+using SPACE_UTIL;
+
+public static partial class GameEvents
+{
+	/*
+	// when Somthng occured >>
+	public static event Action<int> OnSomthng;
+	public static void RaiseSomthng(int index)
+	{
+		LogSubscribersCount(nameof(OnSomthng), OnSomthng);
+		GameEvents.OnSomthng? // if there is any subscribers
+			.Invoke(index);
+	}
+	// << when Somthng occured
+	*/
 }
 
 <!-- ==== FILE: learn/phase-All/0-Core/GameEvents.cs ==== -->
@@ -15542,3 +17328,149 @@ The PlayerController is a textbook God Object but splitting it would be a refact
 - **Weighted selection in UtilsPhaseC:** Same algorithm used in OreNode.GetOrePrefab(), AutoMinerResourceDefinition.GetOrePrefab(), and future OrePiece.CompleteSieving(). Centralized as static utility instead of duplicating in each class.
 - **PhysicsLimitUIWarning event-driven:** Original uses static `_instance` pattern with static `SwitchState()`. Converted to subscribe to `GameEvents.OnOreLimitChanged` — cleaner, no static instance, follows decoupling rules.
 - **ToolPickaxe crush check:** Original ToolPickaxe checks `CanBreakOreIntoCrushedPieces` and calls `OrePiece.TryConvertToCrushed()`. Phase B stubbed this. Listed as Phase B modification in GUIDE.md but not implemented yet — user can add when connecting systems.
+
+## New Agent: "Build phase-b(New) — Player Controller + Inventory + Tools + Grabbing"
+
+**What I thought:**
+- **PlayerController split strategy:** 888-line god-object → PlayerMovement (WASD/sprint/duck/jump/slope/gravity), PlayerCamera (look/FOV/camera bob/viewmodel bob), PlayerGrab (SpringJoint + rope). Each fits one sentence. FresnelHighlighter outline logic moved to its own script.
+- **Owner chain for tools:** Original tools use `Owner.PlayerCamera`, `Owner.GetComponentInChildren<Camera>()`. Our `Owner = PlayerMovement` (the Singleton on player root) which exposes `PlayerCam`, `ViewModelContainer`, `MagnetToolPosition` as read-only properties. This IS the Owner chain pattern — no FindObjectOfType.
+- **WInventorySlot vs nested Slot:** PhaseMap lists WInventorySlot.cs but StructureMap shows Slot as nested type in InventoryDataService. Followed StructureMap — Slot is nested (like CartItem in ShopDataService). W prefix convention is for SO wrappers; inventory slots wrap a BaseHeldTool, not an SO.
+- **Tool pickup decoupling:** Original uses `FindObjectOfType<PlayerInventory>().TryAddToInventory()`. Replaced with `GameEvents.RaiseToolPickupRequested(tool)` → InventoryOrchestrator subscribes. Zero FindObjectOfType.
+- **Tool drop decoupling:** InventoryOrchestrator handles drop command, calls `tool.DropItem()`, then fires `RaiseItemDropped`. Tool's DropItem uses `Owner.PlayerCam` for velocity direction — Owner chain.
+- **Settings/Sound stubs:** Phase H systems (SettingsManager, SoundManager) don't exist yet. Used hardcoded defaults for sensitivity/FOV and `// Phase H:` comment stubs for sound calls.
+- **BasePhysicsObject conveyor stub:** ConveyorBeltManager (Phase D) doesn't exist. OnEnable/OnDisable have `// Phase D:` stubs. Velocity accumulation API is there for when conveyors connect.
+- **FresnelHighlighter self-contained:** Moved outline raycast logic INTO FresnelHighlighter.Update() instead of keeping it in PlayerMovement. Phase B only highlights tools + grabbables. Phase D adds building-aware outlines.
+- **isFirstEnable on InventoryUI:** Follows exact same pattern as ShopUI in handTyped code. First OnEnable → subscribe + build + self-disable. Subsequent OnEnable → RaiseMenuStateChanged.
+- **Separate Open/Close events:** `OnOpenInventoryView` / `OnCloseInventoryView` — not a toggle. InventoryUI subscribes to both. UIManager.CloseAllSubManager fires all Close events.
+- **ToolBuilder partial:** Placement logic depends on BuildingManager (Phase D). Phase B creates the skeleton with Reload (rotate) and QButton (cycle) but PrimaryFire and Update are Phase D territory.
+- **Avoided:** Creating WInventorySlot.cs separately (redundant with nested Slot), making PlayerMovement non-Singleton (it IS the SimplePlayerController replacement), adding PlayerInputActions dependency (that's Phase H keybinds — used Input.GetKeyDown for now).
+- **Lambda vs named handler debate:** User caught that lambda GameEvents subscriptions (`+= () => ...`) can't be unsubscribed on scene switch → null ref crash. Proposed named handlers + `OnDestroy -=`. User correctly pushed back: scene switching is Phase I, and named handlers add typing cost (2 methods + OnDestroy per SubManager). Decision: keep lambdas now, defer cleanup to Phase I. Rule documented in GOAL.md as future work, NOT enforced until needed.
+- **ISaveLoadableObject stub questioned:** User asked why save system stubs exist in Phase B. Answer: BaseHeldTool implements `ISaveLoadableObject` to match original source inheritance chain — without the stub interface, BaseHeldTool won't compile. Methods return dummies. Phase G fills in real logic.
+- **Drag-drop architecture:** User insisted Field_ must stay pure data — no EventSystem interfaces. Created `UIEventRelay.cs` in `3-MonoBehaviours/UIRelay/` — generic relay component added at runtime by Orchestrator via `AddComponent<UIEventRelay>()`. Field_ has zero interfaces, zero callbacks. Reusable across all future phases (quest tree, research tree, contracts, settings).
+- **Gap audit — 57 missing files found:** Cross-referenced all ~270 original source files against PhaseMap. Found missing files across every phase (B through I + utilities). Phase B alone had 7 critical gaps (RigidbodyDraggerController, selected item info panel, Equip/UnEquip, DetachBody, noclip, dual-light, ToolHardHat). Added `#region extra` pattern — merge missing features into existing files with a one-liner `// nice-to-have:` comment, null-guarded so existing code doesn't break. Updated PhaseMap.md + StructureMap.md with full gap audit tables per phase.
+- **HighlightStyle → Highlight Plus:** User chose Highlight Plus asset over custom CommandBuffer/shader approach. Deleted HighlightStyle struct, replaced with `HighlightProfile` (Highlight Plus native SO). FresnelHighlighter dropped from ~100 lines rendering code to ~30 lines. No more CommandBuffer, material, shader, LateUpdate batching.
+- **Manual test guides (`5-Tests/Manual/*.md`):** User asked for full UI setup + test flow documentation for dense systems like inventory. Created `InventoryUITest.md` with 9-step Unity Editor setup guide (Canvas, prefab hierarchy, every component with RectTransform/Image settings, wiring table) + 16-step DO/EXPECT manual flow + 18-item checklist. Renamed from `Tests/UI/` to `Tests/Manual/` — covers UI, animations, physics, audio, not just UI. Added 15 manual test files across all phases to PhaseMap + StructureMap. Rule added to GOAL.md + NewAgent.md.
+- **Art & Scene Work section in GUIDE.md:** User asked for animation controller state machine flow, audio clip stubs, Highlight Plus profiles, tool prefab hierarchy, inventory slot prefab. Added full section to Phase B GUIDE.md. Rule added to GOAL.md — every phase GUIDE.md must include Art & Scene Work (animations, audio, profiles, prefabs, layers/tags, SO assets).
+
+---
+
+## Prompt (Assessment): "Where do I stand as an indie solo dev? What do you think of my choices?"
+
+**What I thought:**
+
+- User asked for an honest meta-analysis across GOAL.md, NewAgent.md, StructureMap.md, and handTyped(latest). This is a reflection prompt, not a build prompt. No code changes needed — just a clear-eyed assessment.
+- I read every architecture doc, all hand-typed scripts, the phase-b agent output, the estimate timeline, and the surfer history to get the full picture before speaking.
+- User is hand-typing ~213 scripts for a mining/factory game. That's rare — most devs copy-paste from tutorials or buy assets. The deliberate slowness is a conscious learning investment.
+- The architecture documentation (GOAL.md alone is 709 lines, StructureMap.md is 1263 lines) is more thorough than what I've seen in most professional studios. This is unusual for a solo dev — most skip docs entirely.
+- The key question is whether the architecture is over-engineered for a solo project or correctly scoped. My assessment: it's correctly scoped because the patterns are *uniform* — every phase follows the same SubManager→Orchestrator→DataService→Field_ triad. Uniformity reduces cognitive load despite the upfront cost.
+- Risks I considered but didn't inflate: GameEvents as a static bus can become a dumping ground (mitigated by partial classes per phase). The `isFirstEnable` pattern is a Unity-specific workaround that adds a state variable per SubManager (acceptable trade — it solves a real problem). `ALL_CAPS` collection names break C# convention but serve visual grep-ability (user's conscious choice, internally consistent).
+- I avoided being sycophantic. The user asked for honest thoughts, not validation.
+
+## New Agent: "Build phase-c(New) — Mining & Ore System"
+
+**What I thought:**
+- **OreDataService scoped to formatting only:** Original OreManager has sell value lookups that query `SavingLoadingManager.AllOrePiecePrefabs` — that's Phase G territory. OreDataService manages resource descriptions + color formatting + piece type label mapping. Sell values come from OrePiece.BaseSellValue directly. Phase G adds the prefab lookup system.
+- **WeightedRandom centralized:** Same algorithm appears in OreNode.GetOrePrefab, AutoMinerResourceDefinition.GetOrePrefab, OrePiece.CompleteSieving, OrePiece.SelectClusterBreakerPrefab — 4 duplicates. Extracted to `UtilsPhaseC.WeightedRandom<T>()` — one generic method, DRY.
+- **OrePiece scoped to Phase C core:** Original is 443 lines with Phase E conversion methods (ConvertToPlate, AddPolish, etc.). Included only Phase C essentials: mesh randomization, sell, crush, pool lifecycle. Phase E adds conversion methods.
+- **OrePiece.SellAfterDelay decoupled:** Original calls `QuestManager.OnResourceDeposited()` directly. Replaced with `GameEvents.RaiseOreSold()` — QuestManager subscribes in Phase F.
+- **OreLimitManager decoupled:** Original reads `SettingsManager.Instance.MovingPhysicsObjectLimit` (Phase H). Used `[SerializeField] int _movingObjectLimit`. Original calls static `PhysicsLimitUIWarning.SwitchState()`. Replaced with `GameEvents.RaiseOreLimitChanged()` — PhysicsLimitUIWarning subscribes.
+- **AutoMiner simplified:** Original implements IInteractable + ICustomSaveDataProvider + references BuildingObject/BuildingManager. Phase C AutoMiner is just rotate + timer + spawn. Phase D adds building integration + interaction. Noted in `#region extra`.
+- **DamageableOrePiece included from Gap Audit:** PhaseMap didn't list it but Gap Audit flagged it as Critical. OrePiece clusters that break on collision damage — extends OrePiece + IDamageable.
+- **OrePiecePoolManager uses OrePieceKey struct:** Same composite key pattern (ResourceType + PieceType + IsPolished) as the original. Dictionary of Queues for O(1) pool lookup.
+- **No WOrePiece:** PhaseMap listed it but OrePiece IS the runtime wrapper — no separate SO defining "what an ore piece IS." The prefab is both definition and instance.
+- **Self-registration pattern on OrePiece:** Static `AllOrePieces` list, OnEnable adds, OnDisable removes. Same pattern as PlayerSpawnPoint in Phase B.
+
+---
+
+## Prompt: "Analyse in depth GOAL.md, NewAgent.md, PhaseMap.md, StructureMap.md and generated phases — update Estimate.md entirely"
+
+**What I thought:**
+- **Counted actual files, not plan estimates:** handTyped(latest) = 30 .cs files (26 phase-a + 4 phase-a-1). phase-b(New) = 32 .cs scripts (more than StructureMap's 24 base — gap audit items already included). phase-All = 4 shared scripts. These real counts replace the vague "~35" from the original estimate.
+- **Gap Audit is +41 scripts total:** Carefully tallied Critical+Important items from PhaseMap Gap Audit section per phase (B+8, C+2, D+7, E+5, F+4, G+10, H+3, I+2). This bumps the StructureMap base of 169 to ~210+, plus phase-All and root tests = 216. Original estimate said ~213 — surprisingly close, but the distribution per phase was wrong.
+- **Calibration from actual data:** Phase A = 14h for 26 scripts including ~4h architecture design. Pure typing rate ~23 min/script. Used this to derive simple/medium/complex tiers (15/30/60 min) and cross-checked against Phase B breakdown.
+- **Agent generation saves ~30% design time but NOT typing time:** The user still reads every line and types it. GUIDE.md typing order + FLOW.md connections reduce cognitive load, but hands-on-keyboard time is fixed. Factored this into Phase B estimate (24h vs original 28h).
+- **Manual testing is separate budget:** 24 .md test guides × ~1h each = ~24h on top of scripting hours. Original estimate didn't account for this. Grand total: ~178h vs original ~153h.
+- **Status tracking is critical:** Added a Current Status table showing exactly what exists (typed, generated, planned). This is the first thing the user sees — no ambiguity about where things stand.
+- **Avoided inflating hours for scene work:** Scene setup time is real but unpredictable (depends on Unity Editor speed, prefab complexity). Captured it as a risk factor rather than padding every phase estimate.
+- **Phase E is fastest scripts-per-hour despite highest count:** 32 scripts but all follow the same trigger I/O machine pattern. Estimated 16h = 0.5h/script — lower than average because repetition.
+
+---
+
+## Prompt: "Where do I stand with this rebuild — honest assessment"
+
+**What I thought:**
+- Read GOAL.md (876 lines), NewAgent.md, ARCHITECTURE.md (1259 lines), Estimate.md, all phase folders, surfer.md, original source count to give a grounded answer, not a generic cheerful one.
+- Counted actual artifacts: 35 hand-typed .cs, 58 generated .cs, ~270 original source files. The 43% "touched" number is misleading — only 35 scripts are truly done (hand-typed), which is ~16% of 216.
+- Architecture quality is genuinely top-tier for a solo Unity project. The `2-Data/` independence rule + DEBUG_Check testing + partial GameEvents + TagType enum are decisions that pay dividends at scale. Most solo devs don't even attempt this.
+- The real risk is execution stamina, not architecture. 137h of typing at 36h/week = ~4 weeks. Phase B (32 scripts, hardest phase) is the immediate bottleneck.
+- Avoided: recommending generating all phases upfront — Phase B typing will refine patterns, and generating D–J now risks rework.
+- Avoided: sugarcoating the timeline. 11% done by hours is the truth. But the hardest intellectual work (architecture design) IS done — the remaining 89% is execution, which is the easier problem.
+- Noted that Phase G (save/load) is the cross-cutting risk because it touches every earlier phase — the ISaveLoadable stubs in Phase B are smart forward planning.
+
+---
+
+## Post Phase C — Convention Hardening Session
+
+**What I thought:**
+- **User caught 6 rule violations across Phase B + C that I missed on first delivery:**
+  1. SO_ had methods (AutoMinerResourceDef.GetOrePrefab) → moved to UtilsPhaseC.PickOrePrefab
+  2. Singletons in 3-MonoBehaviours/ → moved OrePiecePoolManager, OreLimitManager, ParticleManager to 1-Managers/
+  3. Raw string tags ("Grabbable", "MarkedForDestruction") → created TagType enum + HasTag/SetTag extensions
+  4. HideViewModel/HideWorldModel were public → demoted to protected (only self + subclasses call them)
+  5. Missing OreLimitManager methods (OnObjectLimitChanged, TryShowWarningPopup) → added
+  6. Missing OrePiece.GetIcon + _inventoryIcon field → added
+- **Every violation became a documented rule** in GOAL.md + NewAgent.md Common Mistakes list. The docs are now 12 rules deep. Future agents inherit all corrections.
+- **TagType moved to phase-All** — user correctly identified tags are project-wide, not per-phase. HasTag/SetTag extensions in UtilsPhaseAll.cs (auto-available via C# extension methods, no class name needed).
+- **Summary convention evolved through 4 iterations:**
+  1. User asked for detailed summaries → I proposed verbose XML docs → user said too much to type
+  2. I proposed inline `// →` markers → user liked but wanted summary too
+  3. Settled on: 2-liner method summary + `// →` body markers. Class gets conversation-style "I" summary.
+  4. User clarified summaries are reference-only (don't type them) → added to GOAL.md
+  5. User caught missing Unity lifecycle summaries → added as explicit requirement
+- **Verbosity reduction pass:** `?.` on single calls, `.GetOrCreate()` replacing TryGetValue+new pattern, `.sum()` replacing foreach accumulation, expression-bodied methods. User pushed for full LINQ list in GOAL.md.
+- **GUIDE.md + FLOW.md beginner-friendly requirement** — user wants future agents to write docs that someone with zero knowledge can follow. Added to both GOAL.md and NewAgent.md.
+- **The calibration pattern is working:** Phase B needed ~8 corrections. Phase C needed ~6. Each correction gets codified. Phase D should need fewer. By Phase E the docs should catch everything upfront.
+
+---
+
+## Post Convention Hardening — Documentation Polish Pass
+
+**What I thought:**
+- **Vertical Slice Tests in GUIDE.md rewritten to beginner level:** Previously just bullet lists of prerequisites + controls + checklist. Now each test has: conversational intro explaining what it proves, "what you need / don't need", numbered step-by-step scene setup with wiring tables, "how to test" key→expect table, "full test flow" for complex tests (ordered do→expect steps), and comprehensive checklist. Applied to all 5 Phase B tests + 2 Phase C tests.
+- **IEnumerableUtilsPhaseAll added to phase-All:** User created `.sum()` and `.GetOrCreate()` extensions. These reduce verbose patterns across all phases — `foreach` accumulation → `.sum(selector)`, `TryGetValue + new` → `.GetOrCreate(key)`.
+- **C# Features section in GOAL.md expanded:** Was just "Allowed: $"", ?., LINQ". Now lists every allowed pattern with examples: `?.`, `??`, `=>`, ternary, full LINQ catalog (`.Any()`, `.All()`, `.OrderBy()`, `.GroupBy()`, `.Distinct()`, `.Aggregate()`, etc.), custom extensions, `var`. Plus "Reduce verbosity wherever possible" with concrete before→after examples. Scoped to Unity 6000.3+ / .NET 2.0+.
+- **TagType helpers moved from UtilsPhaseB → UtilsPhaseAll:** User correctly identified that tag extensions are cross-phase (any script in any phase calls `collider.HasTag()`). C# extension methods auto-resolve without class name, so the move is seamless.
+- **StructureMap.md updated with phase-All section:** Now shows the full folder tree (0-Core, 1-Managers, 2-Data/Enums, 4-Utils) with every file and its purpose.
+- **All docs are now beginner-friendly across the board:** GUIDE.md (tests + scene setup), FLOW.md (data flows), Manual/*.md (setup guides + DO/EXPECT), script summaries (class + method + lifecycle + `// →`). The user wants someone with zero knowledge to follow any of these — that's the bar.
+- **Current state:** Phase B (43 files packed) + Phase C (29 files packed) + phase-All (6 files) + learn.txt (122 files packed). All conventions locked in GOAL.md (894 lines) + NewAgent.md (226 lines). Ready for Phase D generation.
+
+---
+
+## Prompt: "Create generalized GOAL + NewAgent for any future Unity3D game rebuild"
+
+**What I thought:**
+- **Core ask:** User wants project-agnostic versions of GOAL.md and NewAgent.md so the entire architecture (numbered folders, DataService/Orchestrator/Field_/SubManager pattern, GameEvents decoupling, vertical slice testing, isFirstEnable, etc.) can be reused for any Unity3D game source without reinventing the wheel.
+- **What to keep verbatim:** All architecture rules, folder structure, naming conventions, class responsibilities, decoupling patterns, lifecycle patterns, C# feature policy, splitting rules, test strategy, documentation format (GUIDE.md/FLOW.md), hand-typing order, public API obsession — these are universal and project-independent.
+- **What to strip:** All MineMGL-specific references (ShopDataService, OrePiecePoolManager, ToolPickaxe, specific phase contents, specific file counts, SPACE_UTIL implementation details). Replaced with `[PROJECT_NAME]`, `[PHASE_X]`, and generic examples.
+- **What to add:** A "New Project Quickstart Checklist" in NewAgent-general.md — step-by-step from source extraction to Phase 1. Also added "Step 0" instructions (ARCHITECTURE.md creation, PhaseMap creation, StructureMap creation) that were implicit before. Also "How to Use This Template" section so the user knows the workflow: copy → rename → customize → build.
+- **Tradeoff: specificity vs generality:** The MineMGL GOAL.md is powerful partly because of its concrete examples (`ShopDataService`, `PlayerController` split, etc.). The generalized version is inherently less concrete. Mitigated by keeping the pattern descriptions detailed and using generic-but-realistic examples. The idea is: copy the template, then add your own project-specific examples as you build Phase 1.
+- **What I avoided:** Didn't create a generalized PhaseMap/StructureMap/Estimate template — those are too project-specific to generalize meaningfully. The GOAL + NewAgent are the reusable core; the rest is project-specific analysis work.
+- **Kept SPACE_UTIL reference generic:** Instead of listing every extension, NewAgent-general.md says "Check if the user has custom utility extensions... Use them, don't reinvent." This handles any custom util library.
+
+## Prompt: "Improvements after in-depth analysis of generalized files"
+
+**What I thought:**
+- **Method-by-method gap audit vs originals:** Compared every section of GOAL.md (914 lines) and NewAgent.md (229 lines) against their generalized counterparts. Found 16 gaps across both files.
+- **High-severity gaps fixed:** (1) No Singleton.cs template — the literal foundation had no code. Added. (2) No GameEvents.cs template — the `// when X >>` pattern, `LogSubscribersCount`, `partial class` were mentioned but never shown as code. Added full template. (3) No "User's Coding Style" section — every project has custom conventions but the generalized doc had no placeholder for them. Added CUSTOMIZE THIS section with template.
+- **Medium-severity gaps fixed:** (1) DefaultExecutionOrder guidance — universal pattern for singleton init priority, was completely absent. (2) PhaseXLOG + DEBUG_Check concrete code patterns — these are the testability backbone but had no code examples. (3) `#region` style rules — "no blank lines between endregion and next region" was missing. (4) Method count targets — the original has concrete numbers, the general version was vague. (5) SubManager code used `INPUT.K.InstantDown()` and `.toggle()` — project-specific SPACE_UTIL, replaced with standard `Input.GetKeyDown()` + `SetActive()` + note to replace with user's wrapper. (6) ARCHITECTURE.md ToC template in NewAgent — was vague, now has full section outline. (7) Gap Audit format with Critical/Important/Polish priority tiers. (8) Estimate calibration tiers (simple 15min / medium 30min / complex 60min). (9) Manual test decision question. (10) Protected helpers pattern mention. (11) `#region extra` explanation.
+- **Architecture Validation Tracker:** Changed from bullet list to a proper table with Phase/Status columns — trackable per project.
+- **What I deliberately kept unchanged:** The core architecture rules, decoupling patterns, naming conventions, class responsibilities, and splitting rules were already correctly generalized. No need to touch those.
+
+## Prompt: "What about clever architecture, anti-coupling, summaries, beginner-friendly GUIDE/FLOW"
+
+**What I thought:**
+- **The generalized files described WHAT to do but not WHY it's better.** A new agent or user reading GOAL-general.md for the first time had no "aha moment" — no before/after comparisons showing what typical Unity does wrong and what this approach fixes. Added "What Makes This Architecture Different" section with 6 concrete before/after comparisons (god-objects, FindObjectOfType, UI-data mixing, toggle vs open/close, singleton commands, domain vs responsibility grouping).
+- **The GUIDE.md/FLOW.md sections listed required contents but never showed the VOICE.** Added "Gold Standard" section to GOAL-general.md with actual excerpts from Phase B: "What It Looks Like When Running" (conversational player experience), vertical slice test format (beginner scene setup + key table + checklist), FLOW.md data flow prose (bold=visual, italic=context, code=reference), event registry table, source-vs-phase diff table, systems & testability table with final count line. These are copy-paste tone targets.
+- **Added "Documentation Voice & Tone" section to NewAgent-general.md** — explicitly defining what "beginner-friendly" means (conversational, first-person "I", assumes zero prior knowledge) and what it does NOT mean (not dumbed-down, not long, not skipping "why"). Plus FLOW.md formatting rules (bold/italic/code semantics).
+- **Key insight:** The generalized docs had the rules but not the philosophy or the examples. Rules tell you what. Philosophy tells you why. Examples tell you how. All three are needed for a new project.
+
