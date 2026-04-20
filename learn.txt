@@ -2083,6 +2083,25 @@ These are purely hand-tested — no script automates them. The `.md` is the test
 
 ---
 
+## MANDATORY: Beginner-Level Documentation
+
+**The following files MUST be written for someone with almost zero knowledge** — both zero knowledge of this codebase AND zero knowledge of Unity scene setup. This is non-negotiable. If a beginner can't follow it from scratch, it's not done.
+
+| File | Audience Assumption |
+|------|-------------------|
+| `GUIDE.md` | Never seen this codebase. Needs: what each script does in one sentence, exact typing order, exact scene setup with every GO/component/wiring, full test steps with DO/EXPECT |
+| `FLOW.md` | Understands basic coding but not this architecture. Needs: conversation-style prose explaining data flow, ASCII system maps, event registry |
+| `5-Tests/*.cs` | Never used these test scripts. Needs: summary comment with prerequisites, NOT required, "How to test for that specific system" steps, controls, what console output to expect |
+| `5-Tests/Manual/*.md` | A Fully Detailed Comprehensive Guide For Never used Unity Editor. Needs: every GO to create (name, parent), every component to add, every `[SerializeField]` to wire (`\| Field \| Drag From \|` tables), prefab hierarchies with RectTransform values, numbered DO/EXPECT steps, edge cases, summary checklist |
+
+**"Beginner-level" means:**
+- No "see GUIDE.md for details" shortcuts in Manual tests — each `.md` is **self-contained**
+- No assumed knowledge of which singletons exist or what they do — list every one needed
+- No assumed knowledge of Unity concepts — explain "IsTrigger = true" means "objects pass through but fire OnTriggerEnter", explain "tag" means "a label you set in Inspector"
+- Inspector wiring uses `| Field | Drag From |` tables — never "wire the usual refs"
+- Every GO in scene setup has: name, parent, components, and field values
+- Every test has: initial state → primary action → edge cases → error conditions → checklist
+
 ## GUIDE.md Per Phase
 
 **GUIDE.md is beginner-friendly** — same voice as FLOW.md. Written so someone who has never seen this codebase can follow it. Explains *why* each script exists, not just *what* it is. Uses plain English, avoids jargon, includes concrete examples where helpful.
@@ -2379,6 +2398,8 @@ Now build phase-b(New) with:
 ---
 
 ## What The Agent Must Deliver
+
+**MANDATORY: All documentation files (`GUIDE.md`, `FLOW.md`, `5-Tests/*.cs`, `5-Tests/Manual/*.md`) MUST be written at beginner level — assume the reader has almost zero knowledge of both this codebase AND Unity scene setup.** No shortcuts like "see GUIDE.md" in manual tests. Each file is self-contained. Every GO, component, field, wiring, and inspector value must be explicit. See GOAL.md "MANDATORY: Beginner-Level Documentation" section for the full spec.
 
 For each phase, the agent must produce:
 
