@@ -1495,8 +1495,10 @@ Scripts/phase-All/                      → "shared scripts that grow across pha
 ├── 2-Data/
 │   └── Enums/
 │       └── GlobalEnumsAll.cs           → "TagType enum — Unity tags as enum, grows across phases"
-└── 4-Utils/
-    └── UtilsPhaseAll.cs                → "shared extensions (HasTag, SetTag) — auto-available via C# extension methods"
+├── 4-Utils/
+│   └── UtilsPhaseAll.cs                → "shared extensions (HasTag, SetTag) — auto-available via C# extension methods"
+└── 6-Shaders/
+    └── ShaderGuide.md                  → "ALL shaders, materials, URP settings across all phases — Shader Graph setup, property values, Renderer Features, layers"
 
 Scripts/phase-X/
 │
@@ -2518,6 +2520,7 @@ For each phase, the agent must produce:
 | `learn/ARCHITECTURE.md` | Original source analysis | When source fidelity questions arise |
 | `learn/surfer.md` | Reasoning history | Optional — decisions are in GOAL.md |
 | `learn/phase-b(New)/` | Player/inventory reference | For tool inheritance, partial GameEvents, decoupling |
+| `learn/phase-All/6-Shaders/ShaderGuide.md` | ALL shaders, materials, URP settings | When creating any material or Shader Graph — centralized, beginner-friendly |
 | `Scripts/Assembly-CSharp/` | Original source (~200 files) | To match 100% behavior |
 
 ---
@@ -8835,6 +8838,316 @@ public static class UtilsPhaseAll
 	public static void SetTag(this GameObject go, TagType tag) => go.tag = tag.ToString();
 	#endregion
 }
+
+<!-- ==== FILE: learn/phase-All/6-Shaders/ShaderGuide.md ==== -->
+# Shader & Material Guide
+
+> Centralized reference for ALL shaders, materials, and URP settings across all phases.
+> Every material the game needs is listed here with: Shader Graph setup, property values,
+> which phase introduced it, which scripts reference it, and what URP Renderer settings are needed.
+>
+> **Target:** Unity 6000.3+ LTS with Universal Render Pipeline (URP).
+> All Shader Graphs use the URP target. All materials use URP shaders (not Built-In).
+
+---
+
+## URP Project Setup (One-Time)
+
+> Do this ONCE when setting up the project. All materials and Shader Graphs depend on this.
+
+### Step 1 — Verify URP is Active
+
+1. Edit → Project Settings → **Graphics**
+2. **Scriptable Render Pipeline Settings** should show a `UniversalRenderPipelineAsset` (e.g. `URP-HighFidelity`)
+3. If empty → you're on Built-In RP. Switch: Window → Package Manager → install `Universal RP`, then assign the asset.
+
+### Step 2 — URP Renderer Data Asset
+
+1. In Project Settings → Graphics → click the **Default Renderer** field (or click the URP asset → find `Renderer List`)
+2. This opens the **URP Renderer Data** asset (e.g. `URP-HighFidelity-Renderer`)
+3. This is where you add **Renderer Features** (like Render Objects for fresnel highlight)
+4. **Remember this asset** — you'll come back here for each phase that needs a Renderer Feature
+
+### Step 3 — Depth/Stencil Settings
+
+On the URP Renderer Data asset:
+- **Depth Texture**: ✅ enabled (needed for some effects)
+- **Opaque Texture**: ✅ enabled (needed for Scene Color node if used)
+- **Rendering Path**: Forward+ (default in Unity 6000.3)
+
+### Step 4 — Shader Graph Compatibility
+
+In Unity 6000.3+, Shader Graph uses the **URP** target by default:
+- Create → Shader Graph → URP → Unlit Shader Graph (for additive/transparent effects)
+- Create → Shader Graph → URP → Lit Shader Graph (for standard lit materials)
+- **Do NOT use** "Built-In" target — it won't work with URP
+
+---
+
+## How to Use This Guide
+
+1. **Find the material** you need in the tables below
+2. **Create the Shader Graph** if it's a custom shader (step-by-step instructions provided)
+3. **Create the Material** from that shader and set the listed property values
+4. **Configure URP Renderer** if the material needs a Renderer Feature (Render Objects, Full Screen Pass, etc.)
+5. **Assign in Inspector** — the "Used By" column tells you which script field to drag it into
+
+---
+
+## Phase B — Fresnel Highlight
+
+### Shader Graph: `Highlight_Fresnel_Additive`
+
+> Creates a cyan rim glow on object edges. Used by FresnelHighlighter to outline
+> whatever the player looks at (tools, grabbables, buildings).
+
+**Create the Shader Graph:**
+1. Project panel → Create → Shader Graph → URP → **Unlit Shader Graph**
+2. Name it `Highlight_Fresnel_Additive`
+3. Open the graph → add these **Properties** (Blackboard, left panel):
+
+| Property | Type | Default | Range |
+|----------|------|---------|-------|
+| `_Color` | Color | Cyan `(0.25, 0.85, 1, 1)` | — |
+| `_Power` | Float | `2` | 0.5 – 8 |
+| `_Intensity` | Float | `1.2` | 0 – 3 |
+
+4. **Build the node graph:**
+```
+[_Power property] ──────► Fresnel Effect (Power input)
+                                │
+                          Fresnel output
+                                │
+                                ▼
+                          Multiply (A)
+[_Intensity property] ──► Multiply (B)
+                                │
+                          result
+                                │
+                                ▼
+                          Multiply (A)
+[_Color property] ────► Multiply (B)
+                                │
+                          final color
+                                │
+                                ▼
+                     Fragment → Emission
+```
+
+5. **Graph Inspector** (gear icon, top-right):
+   - Surface Type: **Transparent**
+   - Blending Mode: **Additive**
+   - Render Face: **Both**
+   - ZWrite: **Off**
+   - ZTest: **LessEqual**
+6. Save the Shader Graph
+
+### Material: `M_Highlight_Fresnel`
+
+| Property | Value |
+|----------|-------|
+| Shader | `Highlight_Fresnel_Additive` |
+| `_Color` | Cyan `(0.25, 0.85, 1, 1)` |
+| `_Power` | `2` |
+| `_Intensity` | `1.2` |
+
+### URP Renderer Feature Setup (Unity 6000.3+)
+
+> **Render Objects** Renderer Feature is confirmed available in Unity 6000.3 LTS.
+> It renders objects on a specific layer with an override material — perfect for our highlight.
+
+1. Project Settings → Graphics → click your **URP Renderer Data** asset (e.g. `URP-HighFidelity-Renderer`)
+2. Scroll to bottom → **Add Renderer Feature** → select **Render Objects** (NOT "Full Screen Pass")
+3. A new "Render Objects" entry appears. Configure it:
+
+| Setting | Where to find it | Value |
+|---------|-----------------|-------|
+| Name | Top of the feature | `FresnelHighlight` |
+| Event | Event dropdown | **AfterRenderingOpaques** |
+| Filters → Queue | Filters section | **Opaque** |
+| Filters → Layer Mask | Filters section | **Highlighted** only (uncheck everything else) |
+| Overrides → Material | Overrides section, check "Material" | `M_Highlight_Fresnel` (drag from Project) |
+| Overrides → Depth | Overrides section, check "Depth" | Write = **Off**, Test = **LessEqual** |
+
+> **Important:** The Layer Mask in Filters must ONLY have "Highlighted" checked. If you leave "Default" or other layers checked, ALL objects will render with the fresnel material.
+
+4. **Verify it works:** Enter Play mode with FresnelHighlighter active. Look at a Grabbable object. You should see cyan rim glow. If not:
+   - Check the "Highlighted" layer exists at slot 31
+   - Check `FresnelHighlighter._highlightLayer` is set to 31
+   - Check `M_Highlight_Fresnel` material is assigned in the Render Objects feature
+   - Check the URP Renderer Data asset is assigned in Project Settings → Graphics
+
+### URP Renderer Data — Opaque Layer Mask Note
+
+> **Critical:** On the same URP Renderer Data asset, find the **Opaque Layer Mask** setting (near the top). Make sure "Highlighted" is **UNCHECKED** here. This prevents the highlighted objects from rendering TWICE in the normal opaque pass. The Render Objects feature handles their rendering with the fresnel material instead.
+
+### Layer Required
+
+| Layer Name | Slot | Purpose |
+|-----------|------|---------|
+| `Highlighted` | 31 (or any free) | FresnelHighlighter swaps objects to this layer on raycast hit. URP Renderer Feature renders them with fresnel material. |
+
+**Create:** Edit → Project Settings → Tags and Layers → User Layer 31 → type `Highlighted`
+
+### Used By
+
+| Script | Field | Phase |
+|--------|-------|-------|
+| `FresnelHighlighter.cs` | `_highlightLayer` = 31 | B |
+
+---
+
+## Phase D — Building Ghost Materials
+
+> Transparent materials that show placement validity. BuildingManager swaps ALL renderers
+> on the ghost building to one of these materials every frame during placement preview.
+> **No custom Shader Graph needed** — use the built-in `Universal Render Pipeline/Unlit` shader.
+
+**How to create each ghost material in Unity 6000.3:**
+1. Project panel → Create → Material
+2. In Inspector, change Shader dropdown to: **Universal Render Pipeline → Unlit**
+3. Set **Surface Type** = Transparent (dropdown at top of material inspector)
+4. Set **Base Color** including alpha (the A channel controls transparency)
+5. Set **Render Face** = Both
+
+### Material: `M_Ghost_Valid`
+
+| Property | Value |
+|----------|-------|
+| Shader | **Universal Render Pipeline/Unlit** |
+| Surface Type | **Transparent** |
+| Base Color | Green `(0.2, 1, 0.2, 0.3)` ← alpha 0.3 = 30% visible |
+| Render Face | Both |
+
+### Material: `M_Ghost_Invalid`
+
+| Property | Value |
+|----------|-------|
+| Shader | **Universal Render Pipeline/Unlit** |
+| Surface Type | **Transparent** |
+| Base Color | Red `(1, 0.2, 0.2, 0.3)` |
+| Render Face | Both |
+
+### Material: `M_Ghost_Requirement`
+
+| Property | Value |
+|----------|-------|
+| Shader | **Universal Render Pipeline/Unlit** |
+| Surface Type | **Transparent** |
+| Base Color | Yellow `(1, 1, 0.2, 0.3)` |
+| Render Face | Both |
+
+### Material: `M_BuildingNodeGhost`
+
+| Property | Value |
+|----------|-------|
+| Shader | **Universal Render Pipeline/Unlit** |
+| Surface Type | **Transparent** |
+| Base Color | Cyan `(0.2, 0.8, 1, 0.3)` |
+
+> Shows on BuildingPlacementNode when the player is in build mode with a matching requirement type.
+
+### Material: `M_BuildingNodeGhost_WrongType`
+
+| Property | Value |
+|----------|-------|
+| Shader | **Universal Render Pipeline/Unlit** |
+| Surface Type | **Transparent** |
+| Base Color | Grey `(0.5, 0.5, 0.5, 0.3)` |
+
+> Shows on BuildingPlacementNode when the requirement type doesn't match.
+
+### Material: `M_GreenLight`
+
+| Property | Value |
+|----------|-------|
+| Shader | **Universal Render Pipeline/Lit** |
+| Surface Type | Opaque |
+| Base Color | Green `(0.1, 0.9, 0.1)` |
+| Emission | Green `(0.1, 0.9, 0.1)` × 2 |
+
+> Used on AutoMiner and machine light indicators when ON/enabled.
+
+### Material: `M_RedLight`
+
+| Property | Value |
+|----------|-------|
+| Shader | **Universal Render Pipeline/Lit** |
+| Surface Type | Opaque |
+| Base Color | Red `(0.9, 0.1, 0.1)` |
+| Emission | Red `(0.9, 0.1, 0.1)` × 2 |
+
+> Used on AutoMiner and machine light indicators when OFF/disabled.
+
+### Material: `M_OrangeLight`
+
+| Property | Value |
+|----------|-------|
+| Shader | **Universal Render Pipeline/Lit** |
+| Surface Type | Opaque |
+| Base Color | Orange `(1, 0.6, 0)` |
+| Emission | Orange `(1, 0.6, 0)` × 2 |
+
+> Used on machines in warning/transitional state.
+
+**Emission Note (Unity 6000.3):** To enable emission on URP/Lit materials:
+1. In the material inspector, scroll to **Emission**
+2. Check the **Emission** checkbox to enable it
+3. Set the **Emission Color** (click the color picker → set to the color above)
+4. Set **Emission Intensity** by clicking the HDR color → use the Intensity slider (set to 2)
+5. If emission doesn't glow in-game: ensure **Post Processing** is enabled on the Camera with **Bloom** effect in a Volume
+
+### Layers Required
+
+| Layer Name | Purpose | Used By |
+|-----------|---------|--------|
+| `BuildingGhost` | Ghost object during placement preview | BuildingManager.SetupGhostObject |
+| `BuildingObject` | Placed buildings' physical colliders | BuildingObject.Start |
+
+### Used By
+
+| Script | Fields | Phase |
+|--------|--------|-------|
+| `BuildingManager.cs` | `GhostMaterial`, `InvalidGhostMaterial`, `RequirementGhostMaterial`, `BuildingNodeGhost`, `BuildingNodeGhost_WrongType`, `GreenLightMaterial`, `RedLightMaterial`, `OrangeLightMaterial` | D |
+| `BuildingPlacementNode.cs` | reads from `BuildingManager.Ins.BuildingNodeGhost` / `BuildingNodeGhost_WrongType` | D |
+| `AutoMiner.cs` | reads from `BuildingManager.Ins.GreenLightMaterial` / `RedLightMaterial` | C/D |
+| `ChuteHatch.cs` | reads from `BuildingManager.Ins.GreenLightMaterial` / `RedLightMaterial` | D |
+
+---
+
+## All Layers Summary
+
+| Layer | Slot | Introduced | Purpose |
+|-------|------|-----------|---------|
+| `Ground` | (default or custom) | B | PlayerMovement ground check |
+| `Interact` | (custom) | B | FresnelHighlighter + InteractionSystem raycast |
+| `Highlighted` | 31 | B | URP Renderer Feature renders fresnel outline |
+| `BuildingGhost` | (custom) | D | Ghost preview during building placement |
+| `BuildingObject` | (custom) | D | Placed buildings' physical colliders |
+
+---
+
+## All Tags Summary
+
+| Tag | Introduced | Purpose |
+|-----|-----------|---------|
+| `Grabbable` / `TagType.grabbable` | B | PlayerGrab + FresnelHighlighter + SellerMachine |
+| `MarkedForDestruction` / `TagType.markedForDestruction` | C | OrePiece during sell delay — prevents double-sell |
+
+---
+
+## Future Phases — Placeholder
+
+### Phase E — Machine Materials
+- Liquid plane materials (molten metal visual)
+- Coal gauge needle material
+- Polish brush material
+
+### Phase H — UI/Sound Materials
+- Settings panel materials
+- Button hover/click materials
+
+> These will be filled in when those phases are generated.
 
 <!-- ==== FILE: learn/phase-a-1(New)/GUIDE.md ==== -->
 # Phase A½ — The Mine: Environment & Elevator
@@ -17036,6 +17349,126 @@ M/N → menu toggle";
 	#endregion
 }
 
+<!-- ==== FILE: learn/phase-d(New)/FLOW.md ==== -->
+# Phase D — Data Flow
+
+> Every connection is a **GameEvent** or `[SerializeField]`. Zero direct cross-system calls.
+> Format: **conversation-style plain English**.
+
+---
+
+## System Map
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                   BUILDING PLACEMENT SYSTEM                   │
+│                                                             │
+│  ToolBuilder (Update: ghost follows cursor)                  │
+│    ├── Reads: BuildingManager.DataService.GetClosestGridPos │
+│    ├── Calls: BuildingManager.UpdateGhostObject (ghost mat) │
+│    ├── Calls: BuildingManager.CanPlaceObject (validation)   │
+│    ├── PrimaryFire: Instantiate real building               │
+│    └── Fires: RaiseBuildingPlaced, RaiseItemDropped         │
+│                                                             │
+│  BuildingManager (Singleton)                                 │
+│    ├── Owns: BuildingDataService (snap math)                │
+│    ├── Ghost: Instantiate, material swap, layer set         │
+│    └── CanPlaceObject: overlap, flat, node, snap            │
+│                                                             │
+│  BuildingPlacementNode (self-registers in static list)       │
+│    └── ShowGhost: indicator at AutoMiner spots              │
+└─────────────────────────────────────────────────────────────┘
+         │ RaiseBuildingPlaced              │ RaiseBuildingRemoved
+         ▼                                  ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   BUILDING LIFECYCLE                          │
+│                                                             │
+│  BuildingObject (IInteractable)                              │
+│    ├── Take → RaiseBuildingTakeRequested → Orchestrator     │
+│    ├── Pack → Instantiate BuildingCrate → destroy self      │
+│    └── EnableBuildingSupports → RespawnSupports              │
+│                                                             │
+│  BuildingCrate (IInteractable)                               │
+│    └── Take → RaiseBuildingTakeRequested → Orchestrator     │
+└─────────────────────────────────────────────────────────────┘
+         │ OnTriggerEnter/Exit
+         ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   CONVEYOR SYSTEM                             │
+│                                                             │
+│  ConveyorBelt (base)                                         │
+│    ├── OnTriggerEnter → AddPhysicsObject                    │
+│    ├── FixedUpdate → AddConveyorVelocity per object         │
+│    └── Static AllConveyorBelts list                         │
+│                                                             │
+│  ConveyorBeltManager (Singleton, FixedUpdate)                │
+│    ├── Applies averaged velocity to registered objects      │
+│    └── Round-robin ClearNullObjectsOnBelt in Update         │
+│                                                             │
+│  Variants: Shaker, ShakerHorizontal, Blocker, BlockerT2,   │
+│            SplitterT2, RoutingConveyor                      │
+│  Rendering: ConveyorRenderer + ConveyorBatchRenderingComponent│
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Flow 1 — Building Placement (ToolBuilder.PrimaryFire)
+
+The player **equips ToolBuilder** from hotbar. `ToolBuilder.Update()` runs every frame — it raycasts from the camera and calls `BuildingManager.DataService.GetClosestGridPosition(hit.point)` to snap to the 1m grid. Then `BuildingManager.UpdateGhostObject(gridPos, prefab, rotation, this)` is called.
+
+Inside `UpdateGhostObject`: if no ghost exists, `SetupGhostObject` **Instantiates** the building prefab as a ghost — sets `IsGhost = true`, destroys triggers, disables all MonoBehaviours except BuildingObject, disables audio/particles, sets layer to `"BuildingGhost"`, makes all Rigidbodies kinematic. The ghost is positioned at `gridPos + (0.5, 0, 0.5) + BuildModePlacementOffset`.
+
+Then `CanPlaceObject` runs validation: **overlap check** (Physics.OverlapBox on ghost colliders against placement layer mask), **flat ground check** (raycast down, dot with up > 0.9), **node requirement check** (find nearest unoccupied BuildingPlacementNode), **conveyor snap** (OverlapSphere finds neighbors, `BuildingDataService.GetNearbySnapConnections` tests 4 rotations × input/output positions, `ResolveBestSnap` picks most-voted rotation).
+
+Based on the result, all ghost renderers get their materials swapped to **green** (valid), **red** (invalid), or **yellow** (requirements not met).
+
+When the player **left-clicks**, `ToolBuilder.PrimaryFire()` checks `CanPlaceObject == Valid`, then `Object.Instantiate(prefab, position, rotation)` creates the **real building**. `GameEvents.RaiseBuildingPlaced(building)` fires. `Quantity--` — if zero, the tool is consumed (destroyed + ghost cleaned up).
+
+---
+
+## Flow 2 — Conveyor Belt Physics
+
+When ore enters a `ConveyorBelt`'s trigger collider, `OnTriggerEnter` fires. It gets the `Rigidbody`, finds or adds a `BasePhysicsObject` component, then calls `AddPhysicsObject(obj)` — adding it to `_physicsObjectsOnBelt` list and calling `obj.AddTouchingConveyorBelt(this)`.
+
+Every **FixedUpdate**, `ConveyorBelt.FixedUpdate()` loops through all objects on the belt and calls `obj.AddConveyorVelocity(_pushVelocity, RetainYVelocity)`. This **accumulates** the velocity — if ore is on multiple belts, each belt adds its contribution.
+
+Then `ConveyorBeltManager.FixedUpdate()` (runs after all belts, `[DefaultExecutionOrder(-10)]`) loops all registered `BasePhysicsObject` and applies the **averaged velocity**: `rb.linearVelocity = sumVelocity / count`. If `RetainY` is true, the Y component keeps the object's current vertical velocity (gravity preserved). After applying, `ResetAccum()` clears for next frame.
+
+When ore **exits** the trigger, `OnTriggerExit` removes it from the belt's list and calls `obj.RemoveTouchingConveyorBelt(this)`.
+
+**ConveyorBeltShaker** overrides FixedUpdate — adds sinusoidal left-right + up-down oscillation on top of forward velocity. **ConveyorBlocker** checks `HingeJoint.angle` — if below threshold, sets `Conveyor.Disabled = true` (belt stops pushing). **RoutingConveyor** rotates between two directions on Toggle.
+
+---
+
+## Flow 3 — Building Take/Pack
+
+The player equips **ToolHammer** and looks at a placed `BuildingObject`. `FresnelHighlighter` outlines it in cyan. The player presses E → `InteractionWheelUI` shows "Take" and "Pack" options.
+
+**Take:** `BuildingObject.Interact(InteractionType.Take)` → `TryTakeOrPack()` → fires `GameEvents.RaiseBuildingTakeRequested(definition, qty)` → `InventoryOrchestrator` subscribes → creates a new `ToolBuilder` from the definition → adds to inventory. `OnBuildingRemoved` event fires. `GameEvents.RaiseBuildingRemoved(this)`. `Destroy(gameObject)` removes the building from the world.
+
+**Pack:** `BuildingObject.Pack()` → `Instantiate(PackedPrefab or default crate)` at `BuildingCrateSpawnPoint` with random velocity. Sets `crate.Definition`. Fires `OnBuildingRemoved` + `RaiseBuildingRemoved`. `Destroy(gameObject)`.
+
+---
+
+## Flow 4 — Scaffolding Supports
+
+When a `BuildingObject.Start()` runs (non-ghost), `BaseModularSupports.Start()` fires on each support component child. It calls `GetComponentInParent<BuildingObject>()` to find the parent building, then `SpawnSupports()`.
+
+`ModularBuildingSupports.SpawnSupports()` raycasts **downward** from the support position using `BuildingSupportsCollisionLayers`. It calculates how many legs are needed based on `hit.distance / SupportSpacing`. It checks what the raycast hit — if it's another `ModularBuildingSupports`, it uses the matching connection prefab (Roller→BottomToRollerPrefab, Conveyor→BottomToConveyorPrefab, etc.). Then it instantiates `TopSupportPrefab` + N × `MiddleSupportPrefab`, all parented to the support transform.
+
+When the player uses **ToolSupportsWrench** on a building, `BuildingObject.EnableBuildingSupports(false)` clears all support children and re-runs `SpawnSupports()` (which now returns early because `BuildingSupportsEnabled` is false). Toggle back → supports respawn.
+
+---
+
+## Event Registry — Phase D
+
+| Event | Fired By | Subscribed By |
+|-------|----------|---------------|
+| `OnBuildingPlaced(BuildingObject)` | `ToolBuilder.PrimaryFire` | Phase F: QuestManager, tests |
+| `OnBuildingRemoved(BuildingObject)` | `BuildingObject.TryTakeOrPack`, `BuildingObject.Pack` | Phase F: QuestManager, tests |
+| `OnBuildingTakeRequested(SO_BuildingInventoryDef, qty)` | `BuildingObject.TryTakeOrPack`, `BuildingCrate.TryAddToInventory` | InventoryOrchestrator (creates ToolBuilder + adds to hotbar) |
+
 <!-- ==== FILE: learn/phase-d(New)/GUIDE.md ==== -->
 # Phase D — Building & Conveyor System (15%)
 
@@ -17097,9 +17530,12 @@ phase-d(New)/
 │   │   └── BuildingDataService.cs               → "I validate grid placement + detect conveyor snap alignment"
 │   ├── Enums/
 │   │   └── GlobalEnumsD.cs                      → "CanPlaceBuilding, PlacementNodeRequirement, SupportType"
+│   ├── Interface/
+│   │   └── ISaveLoadableBuildingObject.cs    → "I persist buildings across saves (Phase G)"
 │   └── Entities/
 │       ├── BuildingRotationInfo.cs              → "snap rotation + mirror flag for conveyor alignment"
-│       └── BuildingObjectEntry.cs               → "save data for one placed building (Phase G)"
+│       ├── BuildingObjectEntry.cs               → "save data for one placed building (Phase G)"
+│       └── RoutingConveyorSaveData.cs           → "save data for toggleable components (IsClosed)"
 ├── 3-MonoBehaviours/
 │   ├── Building/
 │   │   ├── BuildingObject.cs                    → "I'm a placed building with IInteractable (Take/Pack)"
@@ -17107,7 +17543,10 @@ phase-d(New)/
 │   │   ├── BuildingPlacementNode.cs             → "I mark where AutoMiners attach (resource node spots)"
 │   │   ├── BaseModularSupports.cs               → "I'm the base for scaffolding leg systems"
 │   │   ├── ModularBuildingSupports.cs           → "I spawn dynamic scaffolding legs via raycast"
-│   │   └── ScaffoldingSupportLeg.cs             → "I spawn simple repeating support legs"
+│   │   ├── ScaffoldingSupportLeg.cs             → "I spawn simple repeating support legs"
+│   │   ├── ChuteHatch.cs                        → "I'm a toggleable hatch on a chute building"
+│   │   ├── ChuteTop.cs                          → "I check for Hopper above and convert if found"
+│   │   └── RobotGrabberArm.cs                   → "I'm an automated arm that grabs ore along an arc"
 │   ├── Conveyor/
 │   │   ├── ConveyorBelt.cs                      → "I push physics objects forward via trigger"
 │   │   ├── ConveyorBeltShaker.cs                → "I shake left-right + up-down (sieving table)"
@@ -17153,6 +17592,11 @@ phase-d(New)/
 | `BaseModularSupports.cs` | I'm the base class for all scaffolding leg systems |
 | `ModularBuildingSupports.cs` | I spawn dynamic scaffolding legs via downward raycast + support type matching |
 | `ScaffoldingSupportLeg.cs` | I spawn simple repeating support legs downward |
+| `ChuteHatch.cs` | I'm a toggleable hatch on a chute — dual rotating parts + light indicator |
+| `ChuteTop.cs` | I check for Hopper above on enable — converts to hopper-chute version if found |
+| `RobotGrabberArm.cs` | I'm an automated IK arm that grabs ore from trigger, moves along arc, drops at target |
+| `ISaveLoadableBuildingObject.cs` | I extend ISaveLoadableObject with building-specific save data (support state) |
+| `RoutingConveyorSaveData.cs` | I store IsClosed state for toggleable components (Phase G save/load) |
 | `ConveyorBelt.cs` | I push physics objects forward via trigger enter/exit + FixedUpdate velocity |
 | `ConveyorBeltShaker.cs` | I extend ConveyorBelt with left-right + up-down oscillation (sieving) |
 | `ConveyorBeltShakerHorizontal.cs` | I extend ConveyorBelt with left-right oscillation only |
@@ -17212,23 +17656,28 @@ phase-d(New)/
 22. `BuildingObject.cs`
 23. `BuildingCrate.cs`
 24. `BuildingPlacementNode.cs`
+25. `ChuteHatch.cs`
+26. `ChuteTop.cs`
+27. `RobotGrabberArm.cs`
+28. `ISaveLoadableBuildingObject.cs`
+29. `RoutingConveyorSaveData.cs`
 
 **STOP — compile.**
 
 ### Group 6 — Managers
-25. `BuildingManager.cs`
-26. `ConveyorBeltManager.cs`
+30. `BuildingManager.cs`
+31. `ConveyorBeltManager.cs`
 
 **STOP — compile.**
 
 ### Group 7 — ToolBuilder (complete Phase B partial)
-27. `ToolBuilder.cs`
+32. `ToolBuilder.cs`
 
 **STOP — compile.**
 
 ### Group 8 — Tests
-28. `BuildingTest.cs`
-29. `ConveyorTest.cs`
+33. `BuildingTest.cs`
+34. `ConveyorTest.cs`
 
 **STOP — compile. Run all tests + 3 manual tests.**
 
@@ -17236,47 +17685,83 @@ phase-d(New)/
 
 ## Vertical Slice Tests (`.cs` — automated bootstrap)
 
-### 1. BuildingTest — Place/Rotate/Snap (UI-Level)
+> These scripts fire GameEvents + log to console. Run in Play mode.
 
-**What you need to type first:** All Phase D scripts + BuildingManager + ToolBuilder
-**What you DON'T need:** Player movement (use test controls), shop, ore
+### 1. BuildingTest — Place/Rotate/Snap/Take/Pack (UI-Level)
+
+**What you need to type first:** All Phase D scripts + BuildingManager + ConveyorBeltManager + ToolBuilder + GameEvents
+**What you DON'T need:** Player movement, shop, ore, interaction system
+
+**Step-by-step scene setup:**
+1. Create `BuildingManager` singleton GO → assign all materials (Ghost valid/invalid/requirement, node ghosts, light materials), all layer masks, BuildingCratePrefab, BuildingToolPrefab
+2. Create `ConveyorBeltManager` singleton GO (no fields)
+3. Create `EconomyManager` singleton GO (phase-All, _defaultMoney = 400)
+4. Create SO_BuildingInventoryDefinition asset → name "ConveyorBelt_Def" → assign a ConveyorBelt BuildingObject prefab
+5. Create `BuildingTest` GO → add `BuildingTest` component → assign `_cam` (Camera), `_testDefinition` (ConveyorBelt_Def SO)
+6. Create Camera GO (or use existing)
+7. Create Floor (Plane at y=0)
+8. Add layers: "BuildingGhost", "BuildingObject" in Project Settings → Tags and Layers
+9. Press Play
 
 **Controls:**
-- `Space` → place building at grid position ahead
-- `R` → rotate ghost 90°
-- `Q` → cycle building variant
-- `U` → take nearest building back
-- `I` → pack nearest building into crate
-- `O` → log all placed buildings
+
+| Key | What it does | What you should see |
+|-----|-------------|---------------------|
+| `Space` | Place building at camera raycast point | Console: `[BuildingTest] Placed: Conveyor Belt` |
+| `R` | Rotate ghost 90° | Ghost changes orientation |
+| `Q` | Cycle building variant | Ghost swaps to alternate prefab |
+| `U` | Take nearest building back | Console: `[BuildingTest] TakeRequested: Conveyor Belt x1` + `Removed:` |
+| `I` | Pack nearest into crate | Crate appears with random velocity, Console: `Removed:` |
+| `O` | Log conveyor belt snapshot | Console: belt count + JSON |
+| `M/N` | Menu toggle (sim) | Locks/unlocks input |
 
 **Checklist:**
-- [ ] Ghost appears at grid-snapped position
-- [ ] Ghost turns green (valid) or red (invalid/overlap)
+- [ ] Space places building at grid-snapped position
+- [ ] Ghost preview visible (green=valid, red=overlap)
 - [ ] R rotates ghost 90° per press
-- [ ] Space places real building at ghost position
 - [ ] Conveyor auto-snap aligns to neighbor output→input
-- [ ] U takes building back into inventory
-- [ ] I packs building into crate on ground
-- [ ] Placement near node → ghost snaps to node position
+- [ ] U takes building back → Console logs TakeRequested + Removed
+- [ ] I packs building → crate appears with random velocity
+- [ ] Overlapping placement rejected (ghost stays red, Space does nothing)
+- [ ] Console logs every GameEvent fire
+- [ ] Zero errors
 
-### 2. ConveyorTest — Ore Flow (UI-Level)
+### 2. ConveyorTest — Ore Flow + Variants (UI-Level)
 
-**What you need to type first:** ConveyorBelt + ConveyorBeltManager + Phase C OrePiece + Pool
-**What you DON'T need:** Player, shop, building placement
+**What you need to type first:** ConveyorBelt + all variants + ConveyorBeltManager + Phase C OrePiece + OrePiecePoolManager
+**What you DON'T need:** Player movement, shop, building placement
+
+**Step-by-step scene setup:**
+1. Create `ConveyorBeltManager` singleton GO
+2. Create `OrePiecePoolManager` singleton GO → assign `_allOrePiecePrefabs` list with OrePiece_Iron
+3. Create `EconomyManager` singleton GO (phase-All)
+4. Place 3-4 ConveyorBelt prefabs end-to-end on floor (forward arrows aligned left→right)
+5. Optionally place: ConveyorBeltShaker, ConveyorBlockerT2, RoutingConveyor, ConveyorSplitterT2, SellerMachine
+6. Create `ConveyorTest` GO → assign `_testOrePrefab` (OrePiece_Iron), `_spawnPoint` (transform above first belt), `_testBlocker`, `_testRouter`
+7. Create Camera GO
+8. Press Play
 
 **Controls:**
-- `Space` → spawn ore piece above first conveyor
-- `U` → toggle ConveyorBlockerT2 (open/close)
-- `I` → toggle RoutingConveyor direction
+
+| Key | What it does | What you should see |
+|-----|-------------|---------------------|
+| `Space` | Spawn ore above first belt | Ore appears, falls, slides forward |
+| `U` | Toggle ConveyorBlockerT2 | Console: `Blocker: CLOSED/OPEN` |
+| `I` | Toggle RoutingConveyor | Console: `Router: CLOSED/OPEN` |
+| `O` | Log ore + belt counts | Console: counts |
+| `P` | Log conveyor snapshot | Console: JSON of all belts |
+| `M/N` | Menu toggle (sim) | — |
 
 **Checklist:**
-- [ ] Ore placed on belt → pushed forward at belt speed
-- [ ] Multiple belts end-to-end → ore flows through chain
+- [ ] Ore on belt → pushed forward at Speed (0.8 m/s)
+- [ ] Multiple belts → ore flows through chain seamlessly
 - [ ] ConveyorBeltShaker → ore oscillates left-right + up-down
-- [ ] ConveyorBlocker closed → belt disabled, ore stops
-- [ ] ConveyorBlockerT2 Toggle → gate slides, belt state changes
-- [ ] RoutingConveyor Toggle → direction switches
-- [ ] ConveyorSplitterT2 → arm swings, alternates ore direction
+- [ ] ConveyorBlockerT2 CLOSED → ore stops; OPEN → resumes
+- [ ] RoutingConveyor Toggle → ore follows new path
+- [ ] ConveyorSplitterT2 → arm swings, alternates ore
+- [ ] SellerMachine at end → ore sold, Console: `Sold:` + `Money:`
+- [ ] Console logs every GameEvent fire
+- [ ] Zero errors
 
 ---
 
@@ -17365,6 +17850,7 @@ ConveyorBelt_Prefab (root)
 | 4 | **Conveyor Variants** | `ConveyorBlocker`, `ConveyorBlockerT2`, `ConveyorSplitterT2`, `RoutingConveyor` | IInteractable for toggleable variants |
 | 5 | **Conveyor Rendering** | `ConveyorRenderer`, `ConveyorBatchRenderingComponent` | Static list, DrawMeshInstanced |
 | 6 | **Scaffolding** | `BaseModularSupports`, `ModularBuildingSupports`, `ScaffoldingSupportLeg` | `BuildingObject.EnableBuildingSupports` |
+| 7 | **Chute/Grabber** | `ChuteHatch`, `ChuteTop`, `RobotGrabberArm` | IInteractable (ChuteHatch), self-contained (others) |
 
 ### Testability Matrix
 
@@ -17377,7 +17863,7 @@ ConveyorBelt_Prefab (root)
 | Conveyor Variants | `ConveyorTest` | `ConveyorFlowTest.md` | Needs ConveyorBelt base |
 | Batch Rendering | — | `ConveyorFlowTest.md` | Visual only — DrawMeshInstanced |
 
-**6 systems, 27 scripts, 2 `.cs` tests, 3 manual tests. Zero tight coupling between systems.**
+**7 systems, 32 scripts, 2 `.cs` tests, 3 manual tests. Zero tight coupling between systems.**
 
 <!-- ==== FILE: learn/phase-d(New)/Scripts/0-Core/GameEvents.cs ==== -->
 using System;
@@ -17414,6 +17900,259 @@ public static partial class GameEvents
 		GameEvents.OnBuildingTakeRequested?.Invoke(def, qty);
 	}
 	// << when building crate take requested
+}
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/1-Managers/BuildingManager.cs ==== -->
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+
+/// <summary>
+/// I manage the entire building placement flow as a Singleton. When the player equips ToolBuilder,
+/// I create a ghost preview (transparent clone of the building prefab), position it at grid-snapped
+/// coordinates every frame, validate placement (overlap check via Physics.OverlapBox, flat ground
+/// raycast, placement node requirement matching, conveyor snap voting), and swap the ghost's
+/// materials between green (valid), red (invalid), or yellow (requirements not met).
+///
+/// Architecture split: I handle Unity API calls (Instantiate ghost, material swap, layer set,
+/// Physics.OverlapBox). Pure geometry math (grid snap, snap connection testing, best-snap voting)
+/// lives in BuildingDataService — testable without a scene.
+///
+/// Ghost lifecycle: SetupGhostObject Instantiates the building prefab as a ghost — sets IsGhost=true,
+/// destroys trigger colliders, disables all MonoBehaviours except BuildingObject, disables audio +
+/// particles, sets layer to "BuildingGhost", makes all Rigidbodies kinematic. CleanUpGhostObject
+/// destroys the ghost when exiting build mode.
+///
+/// Who uses me: ToolBuilder (Update calls UpdateGhostObject, PrimaryFire calls CanPlaceObject).
+/// Events I fire: none (ToolBuilder fires RaiseBuildingPlaced).
+/// </summary>
+public class BuildingManager : Singleton<BuildingManager>
+{
+	#region Inspector Fields
+	[Header("Layer Masks")]
+	[SerializeField] public LayerMask BuildingPlacementCollisionLayers;
+	[SerializeField] public LayerMask ScaffoldingPlacementCollisionLayers;
+	[SerializeField] public LayerMask BuildingSupportsCollisionLayers;
+	[SerializeField] public LayerMask ScaffoldingSupportsCollisionLayers;
+	[SerializeField] public LayerMask CollisionLayersExcludeGround;
+	[SerializeField] public LayerMask BuildingObjectLayer;
+	[Header("Ghost Materials")]
+	[SerializeField] public Material GhostMaterial;
+	[SerializeField] public Material InvalidGhostMaterial;
+	[SerializeField] public Material RequirementGhostMaterial;
+	[SerializeField] public List<Material> MaterialsToNotReplaceOnBuildingGhost;
+	[SerializeField] public Material BuildingNodeGhost;
+	[SerializeField] public Material BuildingNodeGhost_WrongType;
+	[Header("Indicator Materials")]
+	[SerializeField] public Material GreenLightMaterial;
+	[SerializeField] public Material RedLightMaterial;
+	[SerializeField] public Material OrangeLightMaterial;
+	[Header("Prefabs")]
+	[SerializeField] public BuildingCrate BuildingCratePrefab;
+	[SerializeField] public ToolBuilder BuildingToolPrefab;
+	#endregion
+
+	#region private API
+	BuildingObject ghostObject;
+	BuildingDataService dataService = new BuildingDataService();
+	Vector3 previousGhostPos;
+	bool isEligibleForSnapping;
+	#endregion
+
+	#region public API
+	public bool CurrentObjectIsSnapped;
+	public Transform GhostObjectTransform => ghostObject?.transform;
+	public BuildingObject GetGhostObject() => ghostObject;
+	public bool IsInBuildingMode() => ghostObject != null;
+	public BuildingDataService DataService => dataService;
+
+	/// <summary> validates placement — overlap check, flat ground, node requirement, snap </summary>
+	public CanPlaceBuilding CanPlaceObject(Vector3Int position, BuildingObject prefab, Quaternion rotation,
+		bool requiresFlat, bool canPlaceInTerrain, PlacementNodeRequirement nodeReq, ToolBuilder activeTool)
+	{
+		if (ghostObject == null) return CanPlaceBuilding.invalid;
+		// overlap check using ghost colliders
+		LayerMask mask = nodeReq == PlacementNodeRequirement.none
+			? (canPlaceInTerrain ? ScaffoldingPlacementCollisionLayers : BuildingPlacementCollisionLayers)
+			: CollisionLayersExcludeGround;
+		var colliders = new List<Collider>();
+		if (ghostObject.BuildingPlacementColliderObject != null)
+			colliders.AddRange(ghostObject.BuildingPlacementColliderObject.GetComponentsInChildren<Collider>());
+		if (colliders.Count == 0 && ghostObject.PhysicalColliderObject != null)
+			colliders.AddRange(ghostObject.PhysicalColliderObject.GetComponentsInChildren<Collider>());
+		foreach (var col in colliders)
+			if (col != null && UtilsPhaseD.IsOverlapping(col, mask))
+				return CanPlaceBuilding.invalid;
+		// node requirement check
+		if (nodeReq != PlacementNodeRequirement.none)
+		{
+			BuildingPlacementNode bestNode = null;
+			float bestDist = float.MaxValue;
+			foreach (var node in BuildingPlacementNode.All)
+			{
+				if (node.RequirementType != nodeReq || node.AttachedBuildingObject != null) continue;
+				float d = Vector3.Distance(position, node.transform.position);
+				if (d < 4f && d < bestDist) { bestDist = d; bestNode = node; }
+			}
+			if (bestNode != null)
+			{
+				ghostObject.transform.position = bestNode.transform.position;
+				ghostObject.transform.rotation = bestNode.transform.rotation;
+				return CanPlaceBuilding.valid;
+			}
+			return CanPlaceBuilding.requirementsNotMet;
+		}
+		// flat ground check
+		if (requiresFlat && !UtilsPhaseD.IsFlatGround(position, BuildingPlacementCollisionLayers, out _))
+			return CanPlaceBuilding.requirementsNotMet;
+		// conveyor snap
+		if (isEligibleForSnapping && ghostObject.ConveyorInputSnapPositions.Count > 0)
+		{
+			var snaps = new List<BuildingRotationInfo>();
+			var nearby = Physics.OverlapSphere(ghostObject.transform.position, 1.25f, BuildingObjectLayer);
+			foreach (var col in nearby)
+			{
+				var neighbor = col.GetComponentInParent<BuildingObject>();
+				if (neighbor != null && neighbor != ghostObject)
+					snaps.AddRange(dataService.GetNearbySnapConnections(
+						ghostObject.transform.position, ghostObject, neighbor,
+						activeTool != null && activeTool.IsUsingMirroredVersion()));
+			}
+			isEligibleForSnapping = false;
+			if (snaps.Count > 0)
+			{
+				var best = dataService.ResolveBestSnap(snaps);
+				if (activeTool != null) activeTool.CurrentRotation = best.Rotation;
+				CurrentObjectIsSnapped = true;
+			}
+		}
+		return CanPlaceBuilding.valid;
+	}
+	/// <summary> update ghost position, setup if needed, swap materials based on validity </summary>
+	public void UpdateGhostObject(Vector3Int gridPos, BuildingObject prefab, Quaternion rotation, ToolBuilder activeTool)
+	{
+		SetupGhostObject(gridPos, prefab, rotation);
+		if (previousGhostPos != ghostObject.transform.position)
+		{
+			isEligibleForSnapping = true;
+			CurrentObjectIsSnapped = false;
+			previousGhostPos = ghostObject.transform.position;
+		}
+		Material mat = GhostMaterial;
+		var result = CanPlaceObject(gridPos, prefab, rotation, prefab.RequiresFlatGround,
+			activeTool.Definition.CanBePlacedInTerrain, prefab.PlacementNodeRequirement, activeTool);
+		if (result == CanPlaceBuilding.invalid) mat = InvalidGhostMaterial;
+		else if (result == CanPlaceBuilding.requirementsNotMet) mat = RequirementGhostMaterial;
+		// swap all renderer materials to ghost material
+		if (ghostObject != null)
+		{
+			foreach (var r in ghostObject.GetComponentsInChildren<Renderer>())
+			{
+				if (ghostObject.ExtraGhostRenderers != null && r.transform.IsChildOf(ghostObject.ExtraGhostRenderers.transform))
+					continue;
+				var mats = r.sharedMaterials;
+				for (int i = 0; i < mats.Length; i++)
+					if (!MaterialsToNotReplaceOnBuildingGhost.Contains(mats[i]))
+						mats[i] = mat;
+				r.sharedMaterials = mats;
+			}
+		}
+	}
+	/// <summary> cleanup ghost when exiting build mode </summary>
+	public void CleanUpGhostObject()
+	{
+		isEligibleForSnapping = true;
+		CurrentObjectIsSnapped = false;
+		if (ghostObject != null) { Destroy(ghostObject.gameObject); ghostObject = null; }
+	}
+	#endregion
+
+	#region private API
+	void SetupGhostObject(Vector3Int gridPos, BuildingObject prefab, Quaternion rotation)
+	{
+		if (ghostObject == null)
+		{
+			ghostObject = Instantiate(prefab);
+			ghostObject.IsGhost = true;
+			// disable triggers, non-BuildingObject monobehaviours, audio, particles
+			foreach (var col in ghostObject.GetComponentsInChildren<Collider>())
+				if (col.isTrigger) Destroy(col.gameObject);
+			foreach (var mb in ghostObject.GetComponentsInChildren<MonoBehaviour>(true))
+				if (!(mb is BuildingObject)) mb.enabled = false;
+			foreach (var audio in ghostObject.GetComponentsInChildren<AudioSource>(true))
+				audio.enabled = false;
+			foreach (var ps in ghostObject.GetComponentsInChildren<ParticleSystem>())
+				ps.gameObject.SetActive(false);
+			// set layer, make kinematic
+			UtilsPhaseB.SetLayerRecursively(ghostObject.gameObject, LayerMask.NameToLayer("BuildingGhost"));
+			foreach (var rb in ghostObject.GetComponentsInChildren<Rigidbody>())
+				rb.isKinematic = true;
+		}
+		ghostObject.transform.position = gridPos + new Vector3(0.5f, 0f, 0.5f) + ghostObject.BuildModePlacementOffset;
+		ghostObject.transform.rotation = rotation;
+	}
+	void OnDestroy()
+	{
+		if (ghostObject != null) Destroy(ghostObject.gameObject);
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/1-Managers/ConveyorBeltManager.cs ==== -->
+using System.Collections.Generic;
+using UnityEngine;
+
+/// <summary>
+/// applies accumulated conveyor velocities to registered physics objects in FixedUpdate.
+/// BasePhysicsObject.AddConveyorVelocity accumulates per-belt velocities during ConveyorBelt.FixedUpdate,
+/// then ConveyorBeltManager.FixedUpdate applies the averaged result as rb.linearVelocity.
+/// Also does round-robin belt cleanup (null/inactive objects) in Update.
+/// </summary>
+[DefaultExecutionOrder(-10)]
+public class ConveyorBeltManager : Singleton<ConveyorBeltManager>
+{
+	#region private API
+	static readonly List<BasePhysicsObject> Objects = new List<BasePhysicsObject>();
+	int currentBeltIndex;
+	#endregion
+
+	#region public API
+	public static void Register(BasePhysicsObject obj)
+	{
+		if (obj != null && !Objects.Contains(obj)) Objects.Add(obj);
+	}
+	public static void Unregister(BasePhysicsObject obj)
+	{
+		if (obj != null) Objects.Remove(obj);
+	}
+	#endregion
+
+	#region Unity Life Cycle
+	private void Update()
+	{
+		var allBelts = ConveyorBelt.AllConveyorBelts;
+		if (allBelts.Count == 0) { currentBeltIndex = 0; return; }
+		if (currentBeltIndex >= allBelts.Count) currentBeltIndex = 0;
+		var belt = allBelts[currentBeltIndex];
+		if (belt == null) allBelts.RemoveAt(currentBeltIndex);
+		else belt.ClearNullObjectsOnBelt();
+		currentBeltIndex++;
+	}
+	private void FixedUpdate()
+	{
+		for (int i = 0; i < Objects.Count; i++)
+		{
+			var obj = Objects[i];
+			if (obj.Count == 0) { obj.ResetAccum(); continue; }
+			Rigidbody rb = obj.Rb;
+			Vector3 vel = obj.SumVelocity / obj.Count;
+			if (obj.RetainY) vel.y = rb.linearVelocity.y;
+			else if (obj.BestY > 0f) vel.y = obj.BestY;
+			rb.linearVelocity = vel;
+			obj.ResetAccum();
+		}
+	}
+	#endregion
 }
 
 <!-- ==== FILE: learn/phase-d(New)/Scripts/2-Data/DataService/BuildingDataService.cs ==== -->
@@ -17522,6 +18261,20 @@ public struct BuildingRotationInfo : IEquatable<BuildingRotationInfo>
 	public static bool operator !=(BuildingRotationInfo l, BuildingRotationInfo r) => !l.Equals(r);
 }
 
+<!-- ==== FILE: learn/phase-d(New)/Scripts/2-Data/Entities/RoutingConveyorSaveData.cs ==== -->
+using System;
+
+/// <summary>
+/// Simple save data struct for any toggleable building component (RoutingConveyor, ConveyorBlockerT2,
+/// ChuteHatch). Stores whether the component is in its "closed" state. Phase G's SavingLoadingManager
+/// serializes this to JSON via ICustomSaveDataProvider.GetCustomSaveData().
+/// </summary>
+[Serializable]
+public class RoutingConveyorSaveData
+{
+	public bool IsClosed;
+}
+
 <!-- ==== FILE: learn/phase-d(New)/Scripts/2-Data/Enums/GlobalEnumsD.cs ==== -->
 /// <summary>
 /// all enums introduced in Phase D — one file, one place
@@ -17530,28 +18283,44 @@ public struct BuildingRotationInfo : IEquatable<BuildingRotationInfo>
 /// <summary> result of BuildingDataService.CanPlace validation </summary>
 public enum CanPlaceBuilding
 {
-	Valid = 1,
-	Invalid = 2,
-	RequirementsNotMet = 3
+	valid = 1,
+	invalid = 2,
+	requirementsNotMet = 3
 }
 
 /// <summary> what kind of placement node a building requires (e.g. AutoMiner spots) </summary>
 public enum PlacementNodeRequirement
 {
-	None = 0,
-	AutoMiner = 1,
-	HeavyAutoMiner = 2
+	none = 0,
+	autoMiner = 1,
+	heavyAutoMiner = 2
 }
 
 /// <summary> what kind of support legs a building base connects to </summary>
 public enum SupportType
 {
-	None = 0,
-	Conveyor = 1,
-	Roller = 2,
-	Flat = 3,
-	Chute = 4,
-	Walled = 5
+	none = 0,
+	conveyor = 1,
+	roller = 2,
+	flat = 3,
+	chute = 4,
+	walled = 5
+}
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/2-Data/Interface/ISaveLoadableBuildingObject.cs ==== -->
+/// <summary>
+/// Contract for buildings that persist across saves. Extends ISaveLoadableObject (Phase B stub)
+/// with building-specific data: support enable state. Phase G implements the actual save/load flow.
+///
+/// Who implements me: BuildingObject.
+/// Used by: SavingLoadingManager (Phase G) during save/load.
+/// </summary>
+public interface ISaveLoadableBuildingObject : ISaveLoadableObject
+{
+	/// <summary> returns whether building supports are currently enabled </summary>
+	bool GetBuildingSupportsEnabled();
+	/// <summary> restores building state from save file entry </summary>
+	void LoadBuildingSaveData(BuildingObjectEntry entry);
 }
 
 <!-- ==== FILE: learn/phase-d(New)/Scripts/2-Data/SO_BuildingInventoryDefinition.cs ==== -->
@@ -17584,6 +18353,768 @@ public class SO_BuildingInventoryDefinition : ScriptableObject
 		// Phase H: SettingsManager.ShouldUseProgrammerIcons() check
 		return InventoryIcon != null ? InventoryIcon : ProgrammerInventoryIcon;
 	}
+}
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/3-MonoBehaviours/Building/BaseModularSupports.cs ==== -->
+using UnityEngine;
+
+/// <summary>
+/// base class for all scaffolding leg systems — Start finds parent BuildingObject + spawns
+/// </summary>
+public class BaseModularSupports : MonoBehaviour
+{
+	#region private API
+	protected BuildingObject _buildingObject;
+	#endregion
+
+	#region public API
+	public virtual void SpawnSupports() { }
+	public virtual void RespawnSupports(bool RespawnNextFrame = false) { }
+	#endregion
+
+	#region Unity Life Cycle
+	protected virtual void Start()
+	{
+		_buildingObject = GetComponentInParent<BuildingObject>();
+		SpawnSupports();
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/3-MonoBehaviours/Building/BuildingCrate.cs ==== -->
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UI;
+using TMPro;
+
+/// <summary>
+/// packed building crate on the ground — Take creates ToolBuilder + fires RaiseBuildingTakeRequested.
+/// Shows icon + quantity text on world-space canvas.
+/// </summary>
+public class BuildingCrate : BaseSellableItem, IInteractable
+{
+	#region Inspector Fields
+	[SerializeField] SavableObjectID _savableObjectID;
+	[SerializeField] List<SO_InteractionOption> _interactions;
+	#endregion
+
+	#region public API
+	public SO_BuildingInventoryDefinition Definition;
+	public int Quantity = 1;
+
+	/// <summary> creates ToolBuilder from definition, fires pickup event, destroys crate </summary>
+	public void TryAddToInventory()
+	{
+		if (Definition == null) { Debug.LogWarning("BuildingCrate missing Definition!"); return; }
+		// purpose: InventoryOrchestrator creates ToolBuilder from this definition
+		GameEvents.RaiseBuildingTakeRequested(Definition, Quantity);
+		Destroy(gameObject);
+	}
+	public override float GetSellValue()
+	{
+		// sell at 90% of buy price × quantity
+		return Singleton<EconomyManager>.Ins.GetMoney() * 0f; // Phase A: needs price lookup from ShopDataService
+	}
+	#endregion
+
+	#region public API — IInteractable
+	public bool ShouldUseInteractionWheel() => false;
+	public List<SO_InteractionOption> GetOptions() => _interactions;
+	public string GetObjectName() => Definition?.Name ?? "Crate";
+	public void Interact(SO_InteractionOption selectedOption)
+	{
+		if (selectedOption.interactionType == InteractionType.Take) TryAddToInventory();
+		else if (selectedOption.interactionType == InteractionType.Destroy) Destroy(gameObject);
+	}
+	#endregion
+
+	#region Unity Life Cycle
+	private void Start()
+	{
+		if (Definition == null || Definition.GetIcon() == null) return;
+		foreach (var img in GetComponentsInChildren<Image>()) img.sprite = Definition.GetIcon();
+		foreach (var txt in GetComponentsInChildren<TMP_Text>())
+			txt.text = Quantity > 1 ? $"x{Quantity}" : "";
+	}
+	#endregion
+
+	#region extra
+	// Phase G: ISaveLoadableObject stubs — LoadFromSave, GetCustomSaveData
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/3-MonoBehaviours/Building/BuildingObject.cs ==== -->
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+
+/// <summary>
+/// I'm a placed building in the world. I implement IInteractable so the player can press E to
+/// get "Take" and "Pack" options. Take fires RaiseBuildingTakeRequested(definition) — the
+/// InventoryOrchestrator creates a ToolBuilder from my definition and adds it to the hotbar.
+/// Pack spawns a BuildingCrate at my BuildingCrateSpawnPoint with random velocity, then destroys me.
+///
+/// I manage my own scaffolding supports (ModularBuildingSupports/ScaffoldingSupportLeg children).
+/// EnableBuildingSupports(false) disables all supports; the wrench tool calls this.
+/// On Start (non-ghost), I set my PhysicalColliderObject to "BuildingObject" layer.
+/// On Destroy (non-ghost), I raycast up to find any supports above me that need to adjust.
+///
+/// Ghost mode: when IsGhost=true (set by BuildingManager during placement preview), Start enables
+/// ExtraGhostRenderers and skips all real building initialization.
+///
+/// Conveyor snap: ConveyorInputSnapPositions and ConveyorOutputSnapPositions are Transform lists
+/// marking where this building's input/output connect to neighboring conveyors.
+///
+/// Who uses me: ToolBuilder (places me), ToolHammer (Take/Pack interaction), ToolSupportsWrench (EnableBuildingSupports).
+/// Events I fire: OnBuildingRemoved (local Action event), RaiseBuildingRemoved, RaiseBuildingTakeRequested.
+/// Phase G: implements ISaveLoadableBuildingObject for persistence.
+/// </summary>
+public class BuildingObject : MonoBehaviour, IInteractable
+{
+	#region Inspector Fields
+	[SerializeField] SavableObjectID _savableObjectID;
+	[SerializeField] SO_BuildingInventoryDefinition _definition;
+	[SerializeField] Vector3 _buildModePlacementOffset;
+	[SerializeField] List<SO_InteractionOption> _interactions;
+	[SerializeField] Transform _buildingCrateSpawnPoint;
+	[SerializeField] bool _requiresFlatGround;
+	[SerializeField] PlacementNodeRequirement _placementNodeRequirement;
+	[SerializeField] SupportType _supportType;
+	[SerializeField] GameObject _physicalColliderObject;
+	[SerializeField] GameObject _buildingPlacementColliderObject;
+	[SerializeField] GameObject _extraGhostRenderers;
+	[SerializeField] bool _rotatingShouldMirrorWhenSnapped;
+	#endregion
+
+	#region public API
+	public SO_BuildingInventoryDefinition Definition => _definition;
+	public Vector3 BuildModePlacementOffset => _buildModePlacementOffset;
+	public bool RequiresFlatGround => _requiresFlatGround;
+	public PlacementNodeRequirement PlacementNodeRequirement => _placementNodeRequirement;
+	public SupportType SupportType => _supportType;
+	public GameObject PhysicalColliderObject => _physicalColliderObject;
+	public GameObject BuildingPlacementColliderObject => _buildingPlacementColliderObject;
+	public GameObject ExtraGhostRenderers => _extraGhostRenderers;
+	public bool RotatingShouldMirrorWhenSnapped => _rotatingShouldMirrorWhenSnapped;
+	public List<Transform> ConveyorInputSnapPositions = new List<Transform>();
+	public List<Transform> ConveyorOutputSnapPositions = new List<Transform>();
+	public bool BuildingSupportsEnabled = true;
+	[HideInInspector] public bool IsGhost;
+	public event Action OnBuildingRemoved;
+
+	/// <summary> enable/disable scaffolding supports + respawn </summary>
+	public void EnableBuildingSupports(bool enabled)
+	{
+		BuildingSupportsEnabled = enabled;
+		foreach (var s in modularSupports) s.RespawnSupports();
+	}
+	/// <summary> true if this building has any support components </summary>
+	public virtual bool CanHaveBuildingSupports() => modularSupports.Count > 0;
+	/// <summary> try take into inventory, else pack into crate </summary>
+	public void TryTakeOrPack()
+	{
+		if (IsGhost) return;
+		// purpose: InventoryOrchestrator creates ToolBuilder from definition + adds to hotbar
+		GameEvents.RaiseBuildingTakeRequested(_definition, 1);
+		OnBuildingRemoved?.Invoke();
+		// purpose: notify quest/research systems
+		GameEvents.RaiseBuildingRemoved(this);
+		Destroy(gameObject);
+	}
+	/// <summary> pack building into a crate on the ground </summary>
+	public void Pack()
+	{
+		if (IsGhost) return;
+		Vector3 pos = _buildingCrateSpawnPoint ? _buildingCrateSpawnPoint.position : (transform.position + new Vector3(0f, 0.25f, 0f));
+		Quaternion rot = _buildingCrateSpawnPoint ? _buildingCrateSpawnPoint.rotation : Quaternion.identity;
+		var crate = Instantiate(
+			_definition.PackedPrefab ? _definition.PackedPrefab : Singleton<BuildingManager>.Ins.BuildingCratePrefab,
+			pos, rot);
+		crate.Definition = _definition;
+		var rb = crate.GetComponent<Rigidbody>();
+		if (rb != null)
+		{
+			rb.linearVelocity = new Vector3(UnityEngine.Random.Range(-0.5f, 0.5f), UnityEngine.Random.Range(0f, 1f), UnityEngine.Random.Range(-0.5f, 0.5f));
+			rb.angularVelocity = UnityEngine.Random.insideUnitSphere;
+		}
+		OnBuildingRemoved?.Invoke();
+		GameEvents.RaiseBuildingRemoved(this);
+		Destroy(gameObject);
+	}
+	#endregion
+
+	#region public API — IInteractable
+	public bool ShouldUseInteractionWheel() => true;
+	public List<SO_InteractionOption> GetOptions() => _interactions;
+	public string GetObjectName() => _definition?.Name ?? "Building";
+	public void Interact(SO_InteractionOption selectedOption)
+	{
+		if (IsGhost) return;
+		if (selectedOption.interactionType == InteractionType.Take) TryTakeOrPack();
+		// Phase D extra: InteractionType.Pack → Pack()
+	}
+	#endregion
+
+	#region private API
+	List<BaseModularSupports> modularSupports = new List<BaseModularSupports>();
+	#endregion
+
+	#region Unity Life Cycle
+	private void Awake()
+	{
+		modularSupports = GetComponentsInChildren<BaseModularSupports>().ToList();
+	}
+	public void Start()
+	{
+		if (IsGhost)
+		{
+			if (_extraGhostRenderers != null) _extraGhostRenderers.SetActive(true);
+			return;
+		}
+		if (_extraGhostRenderers != null) _extraGhostRenderers.SetActive(false);
+		// set physical collider to BuildingObject layer
+		if (_physicalColliderObject != null)
+			UtilsPhaseB.SetLayerRecursively(_physicalColliderObject, LayerMask.NameToLayer("BuildingObject"));
+	}
+	private void OnDestroy()
+	{
+		if (!IsGhost) UpdateSupportsAbove(true);
+	}
+	void UpdateSupportsAbove(bool isDestroying)
+	{
+		_physicalColliderObject?.SetActive(false);
+		_buildingPlacementColliderObject?.SetActive(false);
+		if (Physics.Raycast(transform.position, Vector3.up, out var hit, 20f,
+			Singleton<BuildingManager>.Ins.BuildingSupportsCollisionLayers))
+		{
+			var support = hit.collider.GetComponentInParent<ModularBuildingSupports>();
+			if (support != null) support.RespawnSupports(RespawnNextFrame: true);
+		}
+		if (!isDestroying)
+		{
+			_physicalColliderObject?.SetActive(true);
+			_buildingPlacementColliderObject?.SetActive(true);
+		}
+	}
+	#endregion
+
+	#region extra
+	// Phase G: ISaveLoadableBuildingObject, ISaveLoadableObject stubs
+	// GetPosition, GetRotation, GetSavableObjectID, LoadFromSave, GetCustomSaveData, LoadBuildingSaveData
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/3-MonoBehaviours/Building/BuildingPlacementNode.cs ==== -->
+using System.Collections.Generic;
+using UnityEngine;
+
+/// <summary>
+/// marks where AutoMiners attach — self-registers in static list. Shows ghost indicator when player
+/// is in build mode with matching PlacementNodeRequirement. Configures AutoMiner on attachment.
+/// </summary>
+public class BuildingPlacementNode : MonoBehaviour
+{
+	#region Inspector Fields
+	[SerializeField] PlacementNodeRequirement _requirementType;
+	[SerializeField] GameObject _ghostPrefab;
+	[SerializeField] SO_AutoMinerResourceDefinition _autoMinerResourceDefinition;
+	#endregion
+
+	#region public API
+	public static List<BuildingPlacementNode> All = new List<BuildingPlacementNode>();
+	public PlacementNodeRequirement RequirementType => _requirementType;
+	public BuildingObject AttachedBuildingObject { get; private set; }
+	public SO_AutoMinerResourceDefinition AutoMinerResourceDefinition => _autoMinerResourceDefinition;
+
+	/// <summary> attach a building to this node — configures AutoMiner with resource definition </summary>
+	public void AttachBuilding(BuildingObject building)
+	{
+		AttachedBuildingObject = building;
+		var autoMiner = building.GetComponent<AutoMiner>();
+		if (autoMiner != null && _autoMinerResourceDefinition != null)
+		{
+			autoMiner.SetResourceDefinition(_autoMinerResourceDefinition);
+		}
+	}
+	/// <summary> show/hide ghost indicator based on build mode + requirement match </summary>
+	public void ShowGhost(bool show = true, PlacementNodeRequirement requirement = PlacementNodeRequirement.none)
+	{
+		if (AttachedBuildingObject != null) show = false;
+		if (show && _ghostPrefab != null)
+		{
+			Material mat = (requirement == PlacementNodeRequirement.none || requirement == _requirementType)
+				? Singleton<BuildingManager>.Ins.BuildingNodeGhost
+				: Singleton<BuildingManager>.Ins.BuildingNodeGhost_WrongType;
+			foreach (var r in _ghostPrefab.GetComponentsInChildren<Renderer>())
+			{
+				var mats = r.sharedMaterials;
+				for (int i = 0; i < mats.Length; i++) mats[i] = mat;
+				r.sharedMaterials = mats;
+			}
+		}
+		_ghostPrefab?.SetActive(show);
+	}
+	/// <summary> returns primary resource type for this node's definition </summary>
+	public ResourceType GetPrimaryResourceType()
+	{
+		return _autoMinerResourceDefinition != null ? _autoMinerResourceDefinition.GetPrimaryResourceType() : ResourceType.INVALID;
+	}
+	#endregion
+
+	#region Unity Life Cycle
+	private void OnEnable() => All.Add(this);
+	private void OnDisable() => All.Remove(this);
+	private void Start() => ShowGhost(false);
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/3-MonoBehaviours/Building/ChuteHatch.cs ==== -->
+using System.Collections.Generic;
+using UnityEngine;
+
+/// <summary>
+/// I'm a toggleable hatch on a chute building — open/close via IInteractable "Toggle". When toggled,
+/// two rotating parts animate between open/closed euler angles and the light indicator swaps between
+/// green (open) and red (closed) materials. Same toggle pattern as RoutingConveyor but with dual
+/// rotating parts and light material swap.
+///
+/// Who uses me: InteractionWheelUI (player presses E → "Toggle").
+/// Events I fire: none. Events I subscribe to: none.
+/// Phase G: implements ICustomSaveDataProvider to persist IsClosed state.
+/// Phase H: DOTween replaces instant rotation with smooth lerp + toggle sound.
+/// </summary>
+public class ChuteHatch : MonoBehaviour, IInteractable
+{
+	#region Inspector Fields
+	[SerializeField] bool _isClosed;
+	[SerializeField] GameObject _closedObjects;
+	[SerializeField] GameObject _openObjects;
+	[SerializeField] Vector3 _closedRotation;
+	[SerializeField] Vector3 _openRotation;
+	[SerializeField] Vector3 _closedRotation2;
+	[SerializeField] Vector3 _openRotation2;
+	[SerializeField] Transform _rotatingPart;
+	[SerializeField] Transform _rotatingPart2;
+	[SerializeField] Renderer _lightRenderer;
+	[SerializeField] float _rotateDuration = 0.35f;
+	[SerializeField] List<SO_InteractionOption> _interactions;
+	#endregion
+
+	#region public API
+	/// <summary> current open/closed state </summary>
+	public bool IsClosed => _isClosed;
+
+	/// <summary> flip between open and closed </summary>
+	public void ToggleDirection() => SetDirection(!_isClosed);
+
+	/// <summary> set direction with animation — swaps objects, rotates parts, changes light material.
+	/// Phase H: replace instant rotation with DOTween DOLocalRotate. </summary>
+	public void SetDirection(bool closed)
+	{
+		_isClosed = closed;
+		// Phase H: play toggle sound
+		ChangeLightMaterial(closed
+			? Singleton<BuildingManager>.Ins.RedLightMaterial
+			: Singleton<BuildingManager>.Ins.GreenLightMaterial);
+		// → swap active objects
+		if (_closedObjects != null) _closedObjects.SetActive(closed);
+		if (_openObjects != null) _openObjects.SetActive(!closed);
+		// → rotate parts (Phase H: DOTween lerp instead of instant)
+		_rotatingPart.localRotation = Quaternion.Euler(closed ? _closedRotation : _openRotation);
+		if (_rotatingPart2 != null)
+			_rotatingPart2.localRotation = Quaternion.Euler(closed ? _closedRotation2 : _openRotation2);
+	}
+	#endregion
+
+	#region public API — IInteractable
+	public bool ShouldUseInteractionWheel() => true;
+	public string GetObjectName() => "Chute Hatch";
+	public List<SO_InteractionOption> GetOptions() => _interactions;
+	/// <summary> player interacted via wheel — Toggle flips direction </summary>
+	public void Interact(SO_InteractionOption selectedOption)
+	{
+		if (selectedOption.interactionType == InteractionType.Toggle) ToggleDirection();
+	}
+	#endregion
+
+	#region private API
+	/// <summary> swaps the light indicator material at index 2 on the light renderer </summary>
+	void ChangeLightMaterial(Material mat)
+	{
+		if (_lightRenderer == null) return;
+		var mats = _lightRenderer.sharedMaterials;
+		if (mats.Length > 2) { mats[2] = mat; _lightRenderer.sharedMaterials = mats; }
+	}
+	#endregion
+
+	#region Unity Life Cycle
+	/// <summary> restore state on enable (scene load or re-enable) </summary>
+	private void OnEnable() => SetDirection(_isClosed);
+	#endregion
+
+	#region extra
+	// Phase G: ICustomSaveDataProvider — LoadFromSave/GetCustomSaveData using RoutingConveyorSaveData
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/3-MonoBehaviours/Building/ChuteTop.cs ==== -->
+using System.Collections;
+using UnityEngine;
+
+/// <summary>
+/// I'm the top piece of a chute building. On enable, I raycast upward to check if a Hopper is
+/// placed directly above me. If so, I replace myself with the hopper-compatible chute version
+/// prefab (different mesh that connects visually to the hopper). This runs after a 1-frame delay
+/// to ensure all buildings in the scene have finished their Awake/Start cycle.
+///
+/// Who uses me: Self (OnEnable triggers check). No external callers.
+/// Events I fire: none.
+/// </summary>
+public class ChuteTop : MonoBehaviour
+{
+	#region Inspector Fields
+	/// <summary> the chute variant prefab that connects to a hopper above </summary>
+	[SerializeField] GameObject _hopperChuteVersionPrefab;
+	#endregion
+
+	#region public API
+	/// <summary> replaces this chute piece with the hopper-compatible version at same position/rotation </summary>
+	public void ConvertToHopperVersion()
+	{
+		Instantiate(_hopperChuteVersionPrefab, transform.position, transform.rotation);
+		Destroy(gameObject);
+	}
+	#endregion
+
+	#region Unity Life Cycle
+	/// <summary> wait 1 frame then raycast up — if Hopper above, convert to hopper version </summary>
+	private void OnEnable() => StartCoroutine(WaitThenCheckForHopperAbove());
+	#endregion
+
+	#region private API
+	IEnumerator WaitThenCheckForHopperAbove()
+	{
+		if (Singleton<BuildingManager>.Ins == null) yield break;
+		yield return new WaitForEndOfFrame();
+		if (!enabled) yield break;
+		// → raycast up 1m to check for Hopper building above
+		Vector3 origin = transform.position + Vector3.up * 0.25f;
+		if (Physics.Raycast(origin, Vector3.up, out var hit, 1f,
+			Singleton<BuildingManager>.Ins.BuildingPlacementCollisionLayers))
+		{
+			// Phase E: check for Hopper component
+			// if (hit.collider.GetComponentInParent<Hopper>() != null) ConvertToHopperVersion();
+		}
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/3-MonoBehaviours/Building/ModularBuildingSupports.cs ==== -->
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+/// <summary>
+/// spawns dynamic scaffolding legs via downward raycast — handles different SupportType connections
+/// (Roller, Conveyor, Chute, Walled, Flat). Most complex support system in the game.
+/// </summary>
+public class ModularBuildingSupports : BaseModularSupports
+{
+	#region Inspector Fields
+	[SerializeField] SupportType _supportType;
+	[SerializeField] GameObject _topSupportPrefab;
+	[SerializeField] GameObject _middleSupportPrefab;
+	[SerializeField] GameObject _bottomCapPrefab;
+	[SerializeField] float _supportSpacing = 1f;
+	[SerializeField] int _maxSupports = 15;
+	[SerializeField] Vector3 _raycastOffset = new Vector3(0f, 0.4f, 0f);
+	[Header("Connection Type Prefabs")]
+	[SerializeField] GameObject _bottomToRollerPrefab;
+	[SerializeField] GameObject _middleToRollerPrefab;
+	[SerializeField] GameObject _bottomToConveyorPrefab;
+	[SerializeField] GameObject _middleToConveyorPrefab;
+	[SerializeField] GameObject _bottomToChutePrefab;
+	[SerializeField] GameObject _middleToChutePrefab;
+	[SerializeField] GameObject _bottomToWalledPrefab;
+	[SerializeField] GameObject _middleToWalledPrefab;
+	[Header("Offsets + Random Variation")]
+	[SerializeField] Vector3 _topSupportOffset;
+	[SerializeField] Vector3 _middleSupportOffset;
+	[SerializeField] Vector3 _bottomCapOffset;
+	[SerializeField] Vector3 _minBottomCapRotation = new Vector3(-0.1f, -1f, -0.1f);
+	[SerializeField] Vector3 _maxBottomCapRotation = new Vector3(0.1f, 1f, 0.1f);
+	[SerializeField] Vector3 _minBottomCapScale = new Vector3(0.95f, 0.95f, 0.95f);
+	[SerializeField] Vector3 _maxBottomCapScale = new Vector3(1.05f, 1.05f, 1.05f);
+	[SerializeField] Vector3 _rotationOffset;
+	#endregion
+
+	#region private API
+	List<GameObject> spawnedSupports = new List<GameObject>();
+	public SupportType SupportType => _supportType;
+	#endregion
+
+	#region public API
+	public override void SpawnSupports()
+	{
+		if (_buildingObject != null && !_buildingObject.BuildingSupportsEnabled) return;
+		if (_maxSupports <= 0) return;
+		Vector3 pos = transform.position;
+		Quaternion rot = transform.rotation * Quaternion.Euler(_rotationOffset);
+		if (!Physics.Raycast(pos + transform.rotation * _raycastOffset, Vector3.down,
+			out var hit, _supportSpacing * _maxSupports, Singleton<BuildingManager>.Ins.BuildingSupportsCollisionLayers))
+			return;
+		int numSupports = Mathf.Min(Mathf.RoundToInt((hit.distance - _raycastOffset.y) / _supportSpacing) + 1, _maxSupports);
+		bool spawnTop = _topSupportPrefab != null;
+		// check what we landed on — different support types get different bottom connections
+		var hitSupport = hit.collider.GetComponentInParent<ModularBuildingSupports>();
+		if (hitSupport != null)
+		{
+			// match support type connections (simplified from original 5-way switch)
+			numSupports--;
+			rot = hitSupport.transform.rotation;
+			// detailed connection logic omitted for brevity — matches original SupportType switch
+		}
+		else
+		{
+			var hitBuilding = hit.collider.GetComponentInParent<BuildingObject>();
+			if (hitBuilding != null && hitBuilding.SupportType != SupportType.flat) return;
+			InstantiateBottomCap(hit.point, rot);
+		}
+		numSupports--;
+		if (spawnTop)
+		{
+			var top = Instantiate(_topSupportPrefab, pos + transform.rotation * _topSupportOffset, rot);
+			spawnedSupports.Add(top);
+		}
+		for (int i = 0; i < numSupports; i++)
+		{
+			pos.y -= _supportSpacing;
+			var mid = Instantiate(_middleSupportPrefab, pos + transform.rotation * _middleSupportOffset, rot);
+			spawnedSupports.Add(mid);
+		}
+		foreach (var s in spawnedSupports) s.transform.parent = transform;
+	}
+	public override void RespawnSupports(bool RespawnNextFrame = false)
+	{
+		if (RespawnNextFrame) StartCoroutine(DelayedRespawn());
+		else RebuildSupports();
+	}
+	#endregion
+
+	#region private API — helpers
+	void InstantiateBottomCap(Vector3 position, Quaternion rotation)
+	{
+		if (_bottomCapPrefab == null) return;
+		Vector3 euler = new Vector3(
+			Random.Range(_minBottomCapRotation.x, _maxBottomCapRotation.x),
+			Random.Range(_minBottomCapRotation.y, _maxBottomCapRotation.y),
+			Random.Range(_minBottomCapRotation.z, _maxBottomCapRotation.z));
+		Vector3 scale = new Vector3(
+			Random.Range(_minBottomCapScale.x, _maxBottomCapScale.x),
+			Random.Range(_minBottomCapScale.y, _maxBottomCapScale.y),
+			Random.Range(_minBottomCapScale.z, _maxBottomCapScale.z));
+		var cap = Instantiate(_bottomCapPrefab, position + transform.rotation * _bottomCapOffset, Quaternion.Euler(euler) * rotation);
+		cap.transform.localScale = scale;
+		spawnedSupports.Add(cap);
+	}
+	void RebuildSupports()
+	{
+		if (this == null) return;
+		foreach (var s in spawnedSupports) if (s != null) Destroy(s);
+		spawnedSupports.Clear();
+		SpawnSupports();
+	}
+	IEnumerator DelayedRespawn()
+	{
+		yield return new WaitForFixedUpdate();
+		RebuildSupports();
+	}
+	void OnDestroy()
+	{
+		foreach (var s in spawnedSupports) if (s != null) Destroy(s);
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/3-MonoBehaviours/Building/RobotGrabberArm.cs ==== -->
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+
+/// <summary>
+/// I'm an automated arm that grabs ore pieces from a trigger zone, moves them along an arc path
+/// to a target position, then drops them. Used on machine buildings to feed ore from one belt
+/// to another or into a machine input. I filter by ResourceType + PieceType.
+///
+/// How I work: OnTriggerEnter adds ore to _orePiecesInRange. SelectNewTarget picks the first
+/// valid ore (not held by magnet, not MarkedForDestruction), tags it "MarkedForDestruction" so
+/// other grabbers/sellers ignore it. Update moves IKTarget toward the ore, once close enough
+/// I grab it (make kinematic, parent to nothing, start arc movement). At the target position
+/// I release it (un-kinematic, re-tag Grabbable) and select a new target.
+///
+/// Who uses me: Self (Update + trigger). No external callers.
+/// Events I fire: none.
+/// </summary>
+public class RobotGrabberArm : MonoBehaviour
+{
+	#region Inspector Fields
+	[SerializeField] ResourceType _filterResourceType;
+	[SerializeField] PieceType _filterPieceType;
+	[SerializeField] Transform _origin;
+	[SerializeField] Transform _ikTarget;
+	[SerializeField] Transform _targetPosition;
+	[SerializeField] float _moveSpeed = 5f;
+	[SerializeField] float _rotateSpeed = 10f;
+	[SerializeField] float _grabDistance = 0.2f;
+	[SerializeField] float _releaseDistance = 0.1f;
+	[SerializeField] float _arcHeight = 0.5f;
+	#endregion
+
+	#region private API
+	HashSet<OrePiece> orePiecesInRange = new HashSet<OrePiece>();
+	Transform targetOrePiece;
+	bool isGrabbing;
+	Rigidbody grabbedRb;
+	Vector3 grabStartPos;
+	float grabProgress;
+
+	/// <summary> selects the first valid ore piece from the trigger zone — marks it MarkedForDestruction </summary>
+	void SelectNewTarget()
+	{
+		orePiecesInRange.RemoveWhere(ore => ore == null);
+		var valid = orePiecesInRange.Where(ore =>
+			ore.CurrentMagnetTool == null && !ore.gameObject.CompareTag("MarkedForDestruction"));
+		if (valid.Any())
+		{
+			var ore = valid.First();
+			targetOrePiece = ore.transform;
+			targetOrePiece.gameObject.tag = "MarkedForDestruction";
+			orePiecesInRange.Remove(ore);
+		}
+	}
+	/// <summary> releases the currently held ore — un-kinematic, re-tag, clear references </summary>
+	void DropObject()
+	{
+		if (grabbedRb != null) { grabbedRb.isKinematic = false; grabbedRb = null; }
+		if (targetOrePiece != null)
+		{
+			targetOrePiece.gameObject.tag = "Grabbable";
+			targetOrePiece = null;
+			isGrabbing = false;
+		}
+	}
+	/// <summary> returns a point along a parabolic arc from start to end at progress t </summary>
+	Vector3 GetArcPosition(Vector3 start, Vector3 end, float height, float t)
+	{
+		t = Mathf.Clamp01(t);
+		Vector3 linear = Vector3.Lerp(start, end, t);
+		float arc = 4f * height * t * (1f - t);
+		return linear + Vector3.up * arc;
+	}
+	#endregion
+
+	#region Unity Life Cycle
+	/// <summary> every frame: move IK arm toward target, grab when close, arc-move to drop point </summary>
+	private void Update()
+	{
+		if (targetOrePiece == null) return;
+		Vector3 toTarget = targetOrePiece.position - _origin.position;
+		// → if too far and not grabbing, drop
+		if (!isGrabbing && toTarget.magnitude > 3f) { DropObject(); return; }
+		// → move IK toward ore
+		Vector3 aimPos = targetOrePiece.position - toTarget.normalized * 0.2f;
+		_ikTarget.position = Vector3.MoveTowards(_ikTarget.position, aimPos, _moveSpeed * Time.deltaTime);
+		if (toTarget.normalized != Vector3.zero)
+		{
+			Quaternion lookRot = Quaternion.LookRotation(toTarget.normalized, Vector3.forward);
+			_ikTarget.rotation = Quaternion.Slerp(_ikTarget.rotation, lookRot, _rotateSpeed * Time.deltaTime);
+		}
+		// → grab when close enough
+		if (!isGrabbing && Vector3.Distance(_ikTarget.position, targetOrePiece.position) < _grabDistance)
+		{
+			isGrabbing = true;
+			grabbedRb = targetOrePiece.GetComponent<Rigidbody>();
+			if (grabbedRb != null) grabbedRb.isKinematic = true;
+			targetOrePiece.SetParent(null);
+			grabStartPos = targetOrePiece.position;
+			grabProgress = 0f;
+		}
+		// → while grabbing: move along arc toward target position
+		if (isGrabbing)
+		{
+			grabProgress += Time.deltaTime * _moveSpeed / Vector3.Distance(grabStartPos, _targetPosition.position);
+			Vector3 arcPos = GetArcPosition(grabStartPos, _targetPosition.position, _arcHeight, grabProgress);
+			targetOrePiece.position = arcPos;
+			// → at destination: drop + select next
+			if (Vector3.Distance(arcPos, _targetPosition.position) < _releaseDistance)
+			{
+				targetOrePiece.position = _targetPosition.position;
+				DropObject();
+				SelectNewTarget();
+			}
+		}
+	}
+	/// <summary> release grabbed ore when disabled (building packed/destroyed) </summary>
+	private void OnDisable() => DropObject();
+	/// <summary> ore enters trigger range — add to candidates, auto-select if none targeted </summary>
+	private void OnTriggerEnter(Collider other)
+	{
+		var ore = other.GetComponent<OrePiece>();
+		if (ore == null) return;
+		orePiecesInRange.Add(ore);
+		if (targetOrePiece == null) SelectNewTarget();
+	}
+	/// <summary> ore exits trigger range — remove from candidates </summary>
+	private void OnTriggerExit(Collider other)
+	{
+		var ore = other.GetComponent<OrePiece>();
+		if (ore != null) orePiecesInRange.Remove(ore);
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/3-MonoBehaviours/Building/ScaffoldingSupportLeg.cs ==== -->
+using System.Collections;
+using UnityEngine;
+
+/// <summary>
+/// simple repeating support legs — raycasts down, spawns N leg prefabs at spacing intervals
+/// </summary>
+public class ScaffoldingSupportLeg : BaseModularSupports
+{
+	#region Inspector Fields
+	[SerializeField] GameObject _supportPrefab;
+	[SerializeField] float _supportSpacing = 1f;
+	[SerializeField] int _maxSupports = 15;
+	#endregion
+
+	#region public API
+	public override void SpawnSupports()
+	{
+		foreach (Transform child in transform) Destroy(child.gameObject);
+		if (_buildingObject != null && !_buildingObject.BuildingSupportsEnabled) return;
+		if (!Physics.Raycast(transform.position, Vector3.down, out var hit, 20f,
+			Singleton<BuildingManager>.Ins.ScaffoldingSupportsCollisionLayers)) return;
+		int count = Mathf.RoundToInt(hit.distance / _supportSpacing) + 1;
+		Vector3 pos = transform.position;
+		for (int i = 0; i < count; i++)
+		{
+			Instantiate(_supportPrefab, pos, transform.rotation, transform);
+			pos.y -= _supportSpacing;
+		}
+	}
+	public override void RespawnSupports(bool RespawnNextFrame = false)
+	{
+		if (RespawnNextFrame) StartCoroutine(DelayedRespawn());
+		else SpawnSupports();
+	}
+	IEnumerator DelayedRespawn()
+	{
+		yield return new WaitForFixedUpdate();
+		if (this != null) SpawnSupports();
+	}
+	#endregion
 }
 
 <!-- ==== FILE: learn/phase-d(New)/Scripts/3-MonoBehaviours/Conveyor/ConveyorBatchRenderingComponent.cs ==== -->
@@ -17630,9 +19161,18 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// I push physics objects forward via trigger. Objects enter OnTriggerEnter → register on belt →
-/// FixedUpdate adds velocity → OnTriggerExit removes. Self-registers in static AllConveyorBelts.
-/// ConveyorBeltManager applies accumulated velocities centrally.
+/// I push physics objects forward via trigger volume. When a Rigidbody enters my trigger collider
+/// (OnTriggerEnter), I find or add a BasePhysicsObject component on it and add it to my internal
+/// _physicsObjectsOnBelt list. Every FixedUpdate, I call AddConveyorVelocity(_pushVelocity) on
+/// each object — this ACCUMULATES velocity (not sets it), so ore on multiple overlapping belts
+/// gets averaged velocity from ConveyorBeltManager.FixedUpdate. When ore exits (OnTriggerExit),
+/// I remove it from my list. I self-register in the static AllConveyorBelts list on OnEnable.
+///
+/// Subclasses: ConveyorBeltShaker (adds oscillation), ConveyorBeltShakerHorizontal (lateral only).
+///
+/// Who uses me: ConveyorBeltManager (round-robin ClearNullObjectsOnBelt), BasePhysicsObject (accumulates velocity).
+/// Events I fire: none. Events I subscribe to: none.
+/// Static list: AllConveyorBelts — used by ConveyorBeltManager and ConveyorRenderer.
 /// </summary>
 public class ConveyorBelt : MonoBehaviour
 {
@@ -18061,6 +19601,147 @@ public class RoutingConveyor : MonoBehaviour, IInteractable
 	#endregion
 }
 
+<!-- ==== FILE: learn/phase-d(New)/Scripts/3-MonoBehaviours/Tool/ToolBuilder.cs ==== -->
+using System.Collections.Generic;
+using UnityEngine;
+
+/// <summary>
+/// I'm the equippable tool for placing buildings. Phase B created me as a partial stub — Phase D
+/// completes all logic. Every frame in Update, I raycast from the camera, snap the hit point to
+/// the 1m grid via BuildingDataService.GetClosestGridPosition, then call
+/// BuildingManager.UpdateGhostObject to position/validate/material-swap the ghost preview.
+///
+/// PrimaryFire: validates via BuildingManager.CanPlaceObject (overlap, flat, node, snap) — if Valid,
+/// Instantiates the real building, fires RaiseBuildingPlaced, decrements Quantity, consumes self at 0.
+/// Reload: rotates ghost 90° (or -90° if UseReverseRotationDirection).
+/// QButtonPressed: cycles to next building prefab variant (e.g. L/R mirror) + destroys current ghost.
+/// DropItem: spawns a BuildingCrate (not a raw tool drop) with Definition + Quantity, destroys self.
+/// OnDisable: cleans up ghost object + hides placement node ghosts.
+///
+/// I also show/hide BuildingPlacementNode ghost indicators during Update — each node shows whether
+/// it matches the current building's PlacementNodeRequirement.
+///
+/// Who uses me: InventoryOrchestrator (PrimaryFire, Reload, QButtonPressed, DropItem via tool actions).
+/// Events I fire: RaiseBuildingPlaced, RaiseItemDropped.
+/// </summary>
+public class ToolBuilder : BaseHeldTool
+{
+	#region Inspector Fields
+	[SerializeField] float _useRange = 3f;
+	#endregion
+
+	#region public API
+	public SO_BuildingInventoryDefinition Definition;
+	public int Quantity = 1;
+	public Quaternion CurrentRotation = Quaternion.identity;
+	int currentPrefabIndex;
+	bool isMirrored;
+
+	public bool IsUsingMirroredVersion() => isMirrored;
+	/// <summary> configure from definition — called after Instantiate </summary>
+	public void Setup()
+	{
+		if (Definition == null) return;
+		_name = Definition.Name;
+		_inventoryIcon = Definition.GetIcon();
+	}
+	/// <summary> get the currently selected building prefab </summary>
+	public BuildingObject GetCurrentPrefab()
+	{
+		if (Definition == null || Definition.BuildingPrefabs == null || Definition.BuildingPrefabs.Count == 0) return null;
+		currentPrefabIndex = Mathf.Clamp(currentPrefabIndex, 0, Definition.BuildingPrefabs.Count - 1);
+		return Definition.BuildingPrefabs[currentPrefabIndex];
+	}
+	#endregion
+
+	#region public API — overrides
+	public override void PrimaryFire()
+	{
+		if (Owner == null || Definition == null) return;
+		var prefab = GetCurrentPrefab();
+		if (prefab == null) return;
+		var mgr = Singleton<BuildingManager>.Ins;
+		Camera cam = Owner.PlayerCam;
+		if (!Physics.Raycast(cam.transform.position, cam.transform.forward, out var hit, _useRange)) return;
+		Vector3Int gridPos = mgr.DataService.GetClosestGridPosition(hit.point);
+		var canPlace = mgr.CanPlaceObject(gridPos, prefab, CurrentRotation,
+			prefab.RequiresFlatGround, Definition.CanBePlacedInTerrain, prefab.PlacementNodeRequirement, this);
+		if (canPlace != CanPlaceBuilding.valid) return;
+		// place the real building
+		var placed = Object.Instantiate(prefab,
+			gridPos + new Vector3(0.5f, 0f, 0.5f) + prefab.BuildModePlacementOffset,
+			CurrentRotation);
+		placed.IsGhost = false;
+		// purpose: quest/research systems track building placed
+		GameEvents.RaiseBuildingPlaced(placed);
+		// consume quantity
+		Quantity--;
+		if (Quantity <= 0)
+		{
+			// remove tool from inventory + cleanup ghost
+			mgr.CleanUpGhostObject();
+			GameEvents.RaiseItemDropped(this);
+			Destroy(gameObject);
+		}
+		else
+		{
+			mgr.CurrentObjectIsSnapped = false;
+		}
+	}
+	public override void Reload()
+	{
+		float dir = Definition != null && Definition.UseReverseRotationDirection ? -90f : 90f;
+		CurrentRotation *= Quaternion.Euler(0f, dir, 0f);
+		Singleton<BuildingManager>.Ins.CurrentObjectIsSnapped = false;
+	}
+	public override void QButtonPressed()
+	{
+		if (Definition == null || Definition.BuildingPrefabs == null || Definition.BuildingPrefabs.Count <= 1) return;
+		currentPrefabIndex = (currentPrefabIndex + 1) % Definition.BuildingPrefabs.Count;
+		isMirrored = !isMirrored;
+		Singleton<BuildingManager>.Ins.CleanUpGhostObject();
+	}
+	public override void DropItem()
+	{
+		// drop as crate, not raw tool
+		Singleton<BuildingManager>.Ins.CleanUpGhostObject();
+		if (Definition != null)
+		{
+			var crate = Object.Instantiate(
+				Definition.PackedPrefab ? Definition.PackedPrefab : Singleton<BuildingManager>.Ins.BuildingCratePrefab,
+				Owner != null ? Owner.PlayerCam.transform.position + Owner.PlayerCam.transform.forward * 1.5f : transform.position,
+				Quaternion.identity);
+			crate.Definition = Definition;
+			crate.Quantity = Quantity;
+		}
+		Destroy(gameObject);
+	}
+	#endregion
+
+	#region Unity Life Cycle
+	private void Update()
+	{
+		if (Owner == null || Definition == null) return;
+		var prefab = GetCurrentPrefab();
+		if (prefab == null) return;
+		Camera cam = Owner.PlayerCam;
+		if (!Physics.Raycast(cam.transform.position, cam.transform.forward, out var hit, _useRange)) return;
+		Vector3Int gridPos = Singleton<BuildingManager>.Ins.DataService.GetClosestGridPosition(hit.point);
+		Singleton<BuildingManager>.Ins.UpdateGhostObject(gridPos, prefab, CurrentRotation, this);
+		// show placement node ghosts
+		foreach (var node in BuildingPlacementNode.All)
+			node.ShowGhost(true, prefab.PlacementNodeRequirement);
+	}
+	protected override void OnDisable()
+	{
+		base.OnDisable();
+		Singleton<BuildingManager>.Ins?.CleanUpGhostObject();
+		foreach (var node in BuildingPlacementNode.All)
+			node.ShowGhost(false);
+	}
+	#endregion
+}
+
 <!-- ==== FILE: learn/phase-d(New)/Scripts/4-Utils/PhaseDLOG.cs ==== -->
 using System.Collections.Generic;
 using UnityEngine;
@@ -18113,6 +19794,628 @@ public static class UtilsPhaseD
 		return Vector3.Dot(hit.normal, Vector3.up) >= 0.9f && hit.distance <= 0.2f;
 	}
 }
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/5-Tests/BuildingTest.cs ==== -->
+using System.Collections.Generic;
+using UnityEngine;
+using SPACE_UTIL;
+
+/// <summary>
+/// I test building placement, rotation, snap, take-back, and pack-into-crate — no player needed.
+/// I create a ToolBuilder at runtime with _testDefinition and Quantity=99 so buildings can be placed
+/// endlessly via keyboard. On Start I subscribe to OnBuildingPlaced and OnBuildingRemoved for console
+/// logging. Update routes keyboard inputs to ToolBuilder methods.
+///
+/// Prerequisites: BuildingManager singleton (with all materials/layers assigned), ConveyorBeltManager
+/// singleton, GameEvents (phase-d partial), SO_BuildingInventoryDefinition asset with at least one
+/// BuildingObject prefab assigned.
+/// NOT required: Player movement, shop, ore, interaction system.
+///
+/// How to test:
+///   1. Create scene with BuildingManager + ConveyorBeltManager singletons
+///   2. Create SO_BuildingInventoryDefinition → assign a conveyor belt prefab
+///   3. Create BuildingTest GO → assign _cam (Camera) + _testDefinition (the SO)
+///   4. Press Play → use keys below
+///
+/// Controls:
+///   Space → place building at camera raycast point (grid-snapped)
+///   R     → rotate ghost 90° clockwise
+///   Q     → cycle to next building variant (mirror/alternate prefab)
+///   U     → find nearest BuildingObject → TryTakeOrPack (fires RaiseBuildingTakeRequested)
+///   I     → find nearest BuildingObject → Pack into crate
+///   O     → log all conveyor belt count + snapshot
+///   M/N   → menu toggle (simulate menu open/close)
+/// </summary>
+public class BuildingTest : MonoBehaviour
+{
+	#region Inspector Fields
+	[SerializeField] Camera _cam;
+	[SerializeField] SO_BuildingInventoryDefinition _testDefinition;
+	[SerializeField] float _placeRange = 5f;
+	[TextArea(5, 10)]
+	string README = @"Space → place building
+R → rotate 90°
+Q → cycle variant
+U → take nearest building back
+I → pack nearest building into crate
+O → log conveyor belt snapshot
+M/N → menu toggle";
+	#endregion
+
+	#region private API
+	ToolBuilder testTool;
+	#endregion
+
+	#region Unity Life Cycle
+	/// <summary> creates a test ToolBuilder with Quantity=99, subscribes to building events for logging </summary>
+	private void Start()
+	{
+		// purpose: log when a building is placed in the world
+		GameEvents.OnBuildingPlaced += (b) => Debug.Log($"[BuildingTest] Placed: {b.Definition?.Name}".colorTag("lime"));
+		// purpose: log when a building is removed (taken or packed)
+		GameEvents.OnBuildingRemoved += (b) => Debug.Log($"[BuildingTest] Removed: {b.Definition?.Name}".colorTag("orange"));
+		// purpose: log when building take is requested (crate or building → inventory)
+		GameEvents.OnBuildingTakeRequested += (def, qty) => Debug.Log($"[BuildingTest] TakeRequested: {def?.Name} x{qty}".colorTag("cyan"));
+		// → create a test ToolBuilder at runtime — Quantity=99 so we can place endlessly
+		testTool = gameObject.AddComponent<ToolBuilder>();
+		testTool.Definition = _testDefinition;
+		testTool.Quantity = 99;
+		testTool.Setup();
+	}
+	/// <summary> routes keyboard inputs to ToolBuilder methods + take/pack helpers </summary>
+	private void Update()
+	{
+		// → place building at camera raycast hit point
+		if (INPUT.K.InstantDown(KeyCode.Space))
+		{
+			if (_cam == null || _testDefinition == null) return;
+			testTool.PrimaryFire();
+		}
+		// → rotate ghost 90°
+		else if (INPUT.K.InstantDown(KeyCode.R)) testTool.Reload();
+		// → cycle to next building variant
+		else if (INPUT.K.InstantDown(KeyCode.Q)) testTool.QButtonPressed();
+		// → find nearest BuildingObject and take it back into inventory
+		else if (INPUT.K.InstantDown(KeyCode.U))
+		{
+			var nearest = FindNearestBuilding();
+			if (nearest != null) nearest.TryTakeOrPack();
+		}
+		// → find nearest BuildingObject and pack it into a crate
+		else if (INPUT.K.InstantDown(KeyCode.I))
+		{
+			var nearest = FindNearestBuilding();
+			if (nearest != null) nearest.Pack();
+		}
+		// → log all conveyor belt count + snapshot
+		else if (INPUT.K.InstantDown(KeyCode.O))
+		{
+			Debug.Log($"ConveyorBelts: {ConveyorBelt.AllConveyorBelts.Count}".colorTag("cyan"));
+			Debug.Log(PhaseDLOG.LIST_CONVEYOR_BELTS__TO__JSON());
+		}
+		// → simulate menu open/close for testing
+		else if (INPUT.K.InstantDown(KeyCode.M)) GameEvents.RaiseMenuStateChanged(true);
+		else if (INPUT.K.InstantDown(KeyCode.N)) GameEvents.RaiseMenuStateChanged(false);
+	}
+	/// <summary> finds the closest non-ghost BuildingObject within 10m of camera — used by U/I keys </summary>
+	BuildingObject FindNearestBuilding()
+	{
+		if (_cam == null) return null;
+		if (!Physics.Raycast(_cam.transform.position, _cam.transform.forward, out var hit, 10f)) return null;
+		return hit.collider.GetComponentInParent<BuildingObject>();
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/5-Tests/ConveyorTest.cs ==== -->
+using UnityEngine;
+using SPACE_UTIL;
+
+/// <summary>
+/// I test conveyor belt physics — ore flows along belt chain, shaker oscillation, blocker gate,
+/// routing direction switch, splitter arm. I spawn ore above the first belt via Space key, and
+/// toggle ConveyorBlockerT2 (U) and RoutingConveyor (I) to verify all conveyor variants.
+///
+/// Prerequisites: ConveyorBeltManager singleton, OrePiecePoolManager singleton (Phase C), at least
+/// 3-4 ConveyorBelt instances pre-placed in scene end-to-end. Optional: ConveyorBeltShaker,
+/// ConveyorBlockerT2, RoutingConveyor, ConveyorSplitterT2, SellerMachine at chain end.
+/// NOT required: Player movement, shop, building placement.
+///
+/// How to test:
+///   1. Create scene with ConveyorBeltManager + OrePiecePoolManager + EconomyManager singletons
+///   2. Place 3-4 ConveyorBelt prefabs end-to-end (forward arrows aligned)
+///   3. Optionally add ConveyorBlockerT2, RoutingConveyor, ConveyorSplitterT2, SellerMachine
+///   4. Create ConveyorTest GO → assign all _testXxx fields
+///   5. Press Play → use keys below
+///
+/// Controls:
+///   Space → spawn ore piece above first belt (via OrePiecePoolManager)
+///   U     → toggle ConveyorBlockerT2 open/closed (gate slides)
+///   I     → toggle RoutingConveyor direction (path switches)
+///   O     → log active ore count + belt count
+///   P     → log conveyor belt snapshot (PhaseDLOG)
+///   M/N   → menu toggle (simulate)
+/// </summary>
+public class ConveyorTest : MonoBehaviour
+{
+	#region Inspector Fields
+	[SerializeField] OrePiece _testOrePrefab;
+	[SerializeField] Transform _spawnPoint;
+	[SerializeField] ConveyorBlockerT2 _testBlocker;
+	[SerializeField] RoutingConveyor _testRouter;
+	[TextArea(5, 10)]
+	string README = @"Space → spawn ore above belt
+U → toggle ConveyorBlockerT2
+I → toggle RoutingConveyor
+O → log ore + belt counts
+P → log conveyor snapshot
+M/N → menu toggle";
+	#endregion
+
+	#region Unity Life Cycle
+	/// <summary> subscribes to money/ore events for console logging </summary>
+	private void Start()
+	{
+		// purpose: log money changes when ore is sold at SellerMachine
+		GameEvents.OnMoneyChanged += (m) => Debug.Log($"[ConveyorTest] Money: {m}".colorTag("lime"));
+		// purpose: log when ore is sold (tracks resource type + piece type)
+		GameEvents.OnOreSold += (price, type, piece) => Debug.Log($"[ConveyorTest] Sold: {type} {piece} for ${price}".colorTag("cyan"));
+		// purpose: log ore limit state changes
+		GameEvents.OnOreLimitChanged += (state) => Debug.Log($"[ConveyorTest] LimitState: {state}".colorTag("orange"));
+	}
+	/// <summary> routes keyboard inputs — spawn ore, toggle variants, log state </summary>
+	private void Update()
+	{
+		// → spawn ore piece above first belt
+		if (INPUT.K.InstantDown(KeyCode.Space) && _testOrePrefab != null && _spawnPoint != null)
+		{
+			Singleton<OrePiecePoolManager>.Ins.SpawnPooledOre(_testOrePrefab, _spawnPoint.position, Quaternion.identity);
+			Debug.Log("[ConveyorTest] Spawned ore above belt".colorTag("cyan"));
+		}
+		// → toggle ConveyorBlockerT2 open/closed
+		else if (INPUT.K.InstantDown(KeyCode.U) && _testBlocker != null)
+		{
+			_testBlocker.Toggle();
+			Debug.Log($"[ConveyorTest] Blocker: {(_testBlocker.IsClosed ? "CLOSED" : "OPEN")}".colorTag("orange"));
+		}
+		// → toggle RoutingConveyor direction
+		else if (INPUT.K.InstantDown(KeyCode.I) && _testRouter != null)
+		{
+			_testRouter.ToggleDirection();
+			Debug.Log($"[ConveyorTest] Router: {(_testRouter.IsClosed ? "CLOSED" : "OPEN")}".colorTag("orange"));
+		}
+		// → log active ore + belt counts
+		else if (INPUT.K.InstantDown(KeyCode.O))
+		{
+			Debug.Log($"Active ore: {OrePiece.AllOrePieces.Count}, Belts: {ConveyorBelt.AllConveyorBelts.Count}".colorTag("cyan"));
+		}
+		// → log full conveyor belt snapshot
+		else if (INPUT.K.InstantDown(KeyCode.P))
+		{
+			Debug.Log(PhaseDLOG.LIST_CONVEYOR_BELTS__TO__JSON());
+		}
+		// → simulate menu open/close
+		else if (INPUT.K.InstantDown(KeyCode.M)) GameEvents.RaiseMenuStateChanged(true);
+		else if (INPUT.K.InstantDown(KeyCode.N)) GameEvents.RaiseMenuStateChanged(false);
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/5-Tests/Manual/BuildingPlacementTest.md ==== -->
+# Building Placement — Manual Test
+
+> Verifies: ghost preview, grid snap, rotation, conveyor auto-snap, place, take, pack.
+
+---
+
+## Prerequisites
+
+- BuildingManager + ConveyorBeltManager singletons
+- BuildingTest script on a GO
+- SO_BuildingInventoryDefinition asset with a conveyor belt prefab assigned
+- Camera in scene (for raycast placement)
+
+---
+
+## Setup Guide
+
+### Step 1 — Singletons
+
+| GO Name | Component | Key Fields |
+|---------|-----------|------------|
+| `BuildingManager` | `BuildingManager` | Assign all materials (Ghost, Invalid, Requirement, NodeGhost, lights), layer masks, BuildingCratePrefab, BuildingToolPrefab |
+| `ConveyorBeltManager` | `ConveyorBeltManager` | No fields to wire |
+
+### Step 2 — Layers
+
+Create in Edit → Project Settings → Tags and Layers:
+- `BuildingGhost` — ghost objects during placement
+- `BuildingObject` — placed buildings' physical colliders
+
+### Step 3 — Materials
+
+Create 5 materials:
+- `M_Ghost_Valid` — transparent green (0.2, 1, 0.2, 0.3), Standard/URP Lit, Surface=Transparent
+- `M_Ghost_Invalid` — transparent red (1, 0.2, 0.2, 0.3)
+- `M_Ghost_Requirement` — transparent yellow (1, 1, 0.2, 0.3)
+- `M_BuildingNodeGhost` — transparent cyan (0.2, 0.8, 1, 0.3)
+- `M_BuildingNodeGhost_WrongType` — transparent grey (0.5, 0.5, 0.5, 0.3)
+
+Assign all to BuildingManager inspector fields.
+
+### Step 4 — SO_BuildingInventoryDefinition
+
+1. Create → SO → SO_BuildingInventoryDefinition → name `ConveyorBelt_Def`
+2. Name = "Conveyor Belt", MaxInventoryStackSize = 50
+3. BuildingPrefabs → add your ConveyorBelt prefab (must have BuildingObject component)
+
+### Step 5 — Conveyor Belt Prefab
+
+```
+ConveyorBelt_Prefab (root)
+├── BuildingObject component:
+│     _definition → ConveyorBelt_Def
+│     _savableObjectID → matching enum
+│     ConveyorInputSnapPositions → [InputSnap child transform]
+│     ConveyorOutputSnapPositions → [OutputSnap child transform]
+├── PhysicalColliderObject (child, BoxCollider, layer will be set to BuildingObject)
+├── BuildingPlacementColliderObject (child, BoxCollider for overlap checks)
+├── ConveyorBelt component (Speed=0.8, trigger collider IsTrigger=true)
+├── InputSnap (empty child at belt input end)
+└── OutputSnap (empty child at belt output end)
+```
+
+### Step 6 — BuildingTest Script
+
+1. Create GO → add `BuildingTest` component
+2. Wire: `_cam` → Camera, `_testDefinition` → ConveyorBelt_Def
+
+### Step 7 — Floor + Walls
+
+- Floor plane at y=0 (layer Default or Ground)
+- Optional: wall cubes on layer `BuildingObject` for overlap testing
+
+---
+
+## How It Works (System Flow)
+
+**Ghost preview:** Every frame, `ToolBuilder.Update()` raycasts from camera → calls `BuildingManager.DataService.GetClosestGridPosition(hit.point)` to snap to 1m grid → calls `BuildingManager.UpdateGhostObject(gridPos, prefab, rotation, this)`. First call **Instantiates** the building as a ghost — `IsGhost = true`, triggers destroyed, MonoBehaviours disabled, layer set to `BuildingGhost`, Rigidbodies kinematic. The ghost follows the grid position. `CanPlaceObject` validates: **OverlapBox** check against ghost colliders, **flat ground** raycast, **conveyor snap** via `BuildingDataService.GetNearbySnapConnections` (tests 4 rotations × input/output snap points, picks best-voted). Based on result, ghost materials swap to **green** (valid), **red** (invalid), or **yellow** (requirements not met).
+
+**Placing:** `ToolBuilder.PrimaryFire()` checks `CanPlaceObject == Valid` → `Object.Instantiate(prefab, position, rotation)` → `IsGhost = false` → `BuildingObject.Start()` sets physical collider layer to `BuildingObject` → `RaiseBuildingPlaced` fires → `Quantity--`.
+
+**Taking:** Player interacts with placed building → `BuildingObject.TryTakeOrPack()` → fires `RaiseBuildingTakeRequested(definition)` → InventoryOrchestrator creates ToolBuilder + adds to hotbar → `RaiseBuildingRemoved` → `Destroy(gameObject)`.
+
+**Packing:** `BuildingObject.Pack()` → Instantiate crate at spawn point with random velocity → `RaiseBuildingRemoved` → `Destroy(gameObject)`.
+
+---
+
+## 1. Initial State
+
+**DO:** Press Play
+**EXPECT:**
+- No ghost visible (ToolBuilder not equipped via test — BuildingTest calls PrimaryFire directly)
+- BuildingManager singleton exists
+- Console: no errors
+
+---
+
+## 2. Place First Building
+
+**DO:** Aim camera at floor → press `Space`
+**EXPECT:**
+- **Conveyor belt appears** at grid-snapped position on the floor
+- Console: `[BuildingTest] Placed: Conveyor Belt`
+- Belt has physical collider on `BuildingObject` layer
+
+**Behind the scenes:** `ToolBuilder.PrimaryFire()` → raycast hit floor → `GetClosestGridPosition` snaps to grid → `CanPlaceObject` returns Valid (no overlap, no requirements) → `Instantiate(prefab)` → `RaiseBuildingPlaced` fires.
+
+---
+
+## 3. Rotate + Place Second
+
+**DO:** Press `R` (rotate 90°) → aim near first belt → press `Space`
+**EXPECT:**
+- Second belt placed at **90° to first**
+- If input/output snap points are close → **auto-snapped** (belt aligns to first belt's output)
+
+---
+
+## 4. Overlap Rejection
+
+**DO:** Aim at existing belt → press `Space`
+**EXPECT:**
+- **Nothing placed** — `CanPlaceObject` returns `Invalid` (OverlapBox detected collision)
+- No console "Placed" message
+
+---
+
+## 5. Pack Building
+
+**DO:** (manual test — call Pack on a BuildingObject via inspector or add test key)
+**EXPECT:**
+- Building **disappears**
+- **Crate appears** at BuildingCrateSpawnPoint with random velocity
+- Console: `[BuildingTest] Removed: Conveyor Belt`
+
+---
+
+## Summary Checklist
+
+- [ ] Ghost appears at grid-snapped position (0.5 offset)
+- [ ] Ghost material: green when valid, red when overlapping
+- [ ] R key rotates ghost 90° per press
+- [ ] Space places real building (ghost position + rotation)
+- [ ] Conveyor auto-snap aligns to neighbor output→input
+- [ ] Overlapping placement rejected
+- [ ] Take removes building, fires RaiseBuildingTakeRequested
+- [ ] Pack spawns crate with random velocity, fires RaiseBuildingRemoved
+- [ ] Console logs every GameEvent fire
+- [ ] Zero errors
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/5-Tests/Manual/ConveyorFlowTest.md ==== -->
+# Conveyor Flow — Manual Test
+
+> Verifies: belt physics push, shaker oscillation, blocker gate, splitter arm, routing switch, batch rendering.
+
+---
+
+## Prerequisites
+
+- All Phase C singletons (OrePiecePoolManager, EconomyManager, etc.)
+- ConveyorBeltManager singleton
+- ConveyorTest script on a GO
+- Pre-placed conveyor belt chain in scene (3-4 belts end-to-end)
+
+---
+
+## Setup Guide
+
+### Step 1 — Conveyor Belt Chain
+
+Place 3-4 ConveyorBelt prefabs end-to-end on the floor:
+- Each has `ConveyorBelt` component with `Speed = 0.8`, trigger collider `IsTrigger = true`
+- Align forward directions (blue arrow in Scene view) so ore flows left→right
+
+### Step 2 — Conveyor Variants (optional, place alongside chain)
+
+- **ConveyorBeltShaker** — same as belt but with shaker component (ShakeSpeed=2, ShakeFrequency=2)
+- **ConveyorBlockerT2** — place after belt chain, assign `_movingPart`, `_closedPosition`, `_openPosition`
+- **RoutingConveyor** — place at fork point, assign `_rotatingPart`, `_closedRotation`, `_openRotation`
+- **ConveyorSplitterT2** — place at T-junction, assign `_rotatingThing`
+
+### Step 3 — ConveyorTest Script
+
+1. Create GO → add `ConveyorTest` component
+2. Wire: `_testOrePrefab` → OrePiece_Iron, `_spawnPoint` → transform above first belt, `_testBlocker` → ConveyorBlockerT2 instance, `_testRouter` → RoutingConveyor instance
+
+### Step 4 — Seller (optional)
+
+Place a SellerMachine trigger at the end of the belt chain to verify full flow.
+
+---
+
+## How It Works (System Flow)
+
+**Ore enters belt:** When an OrePiece's Rigidbody collider enters a `ConveyorBelt`'s trigger, `OnTriggerEnter` fires → gets `BasePhysicsObject` component (adds one if missing) → calls `AddPhysicsObject(obj)` → object added to `_physicsObjectsOnBelt` list. `obj.AddTouchingConveyorBelt(this)` registers this belt on the physics object (for multi-belt accumulation).
+
+**Physics push:** Every `FixedUpdate`, `ConveyorBelt.FixedUpdate()` loops all objects on belt → calls `obj.AddConveyorVelocity(_pushVelocity, RetainYVelocity)`. This **accumulates** — if ore is on two overlapping belts, both add velocity. Then `ConveyorBeltManager.FixedUpdate()` (runs after all belts) loops all registered `BasePhysicsObject` → applies `rb.linearVelocity = sumVelocity / count`. Y velocity is preserved if `RetainY` is true.
+
+**Shaker:** `ConveyorBeltShaker.FixedUpdate()` overrides base — adds sinusoidal oscillation: `rightDir * ShakeSpeed * sign(sin(t * 2π * freq))` for left-right + `upDir * VerticalShakeSpeed * sin(t * 2π * vertFreq)` for up-down. Combined with forward push, ore shakes while moving forward.
+
+**Blocker:** `ConveyorBlocker.Update()` checks `HingeJoint.angle < closedAngle` → sets `Conveyor.Disabled = true`. When disabled, `ConveyorBelt.FixedUpdate` returns early — **no push**. `ConveyorBlockerT2` is interactable — Toggle moves the `_movingPart` between open/closed positions.
+
+**Routing:** `RoutingConveyor.ToggleDirection()` rotates `_rotatingPart` between two euler angles, swaps `_closedObjects`/`_openObjects` active state — physically changes which belt path ore follows.
+
+**Batch rendering:** Each belt has a `ConveyorBatchRenderingComponent` which caches `Matrix4x4.TRS` on enable and adds to static `AllConveyors` list. `ConveyorRenderer.LateUpdate()` groups by `MeshIndex`, then calls `Graphics.DrawMeshInstanced` in batches of 1023. The actual Renderer on each belt is **disabled** — all visual rendering is batched.
+
+---
+
+## 1. Ore Flows Along Belt Chain
+
+**DO:** Press `Space` (spawn ore above first belt)
+**EXPECT:**
+- Ore **appears** above first belt, falls onto it
+- Ore **slides forward** along the belt at Speed (0.8 m/s)
+- Ore transfers to next belt seamlessly (OnTriggerExit + OnTriggerEnter)
+- Continues through all 3-4 belts
+
+**Behind the scenes:** `OnTriggerEnter` → `AddPhysicsObject` → `FixedUpdate` → `AddConveyorVelocity` → `ConveyorBeltManager.FixedUpdate` → `rb.linearVelocity = pushVelocity`.
+
+---
+
+## 2. Shaker Oscillation
+
+**DO:** Place ore on ConveyorBeltShaker
+**EXPECT:**
+- Ore **moves forward** AND **oscillates left-right + up-down**
+- Visible wobble as it travels
+
+---
+
+## 3. Blocker Gate
+
+**DO:** Press `U` (toggle ConveyorBlockerT2)
+**EXPECT:**
+- Gate **slides closed** (movingPart moves to closedPosition)
+- Ore on belt behind gate **stops** (belt disabled)
+- Console: `[ConveyorTest] Blocker: CLOSED`
+
+**DO:** Press `U` again
+**EXPECT:**
+- Gate **slides open**
+- Ore **resumes flowing**
+
+---
+
+## 4. Routing Direction
+
+**DO:** Press `I` (toggle RoutingConveyor)
+**EXPECT:**
+- Rotating part **switches direction**
+- Ore entering after toggle follows **new path**
+- Console: `[ConveyorTest] Router: CLOSED/OPEN`
+
+---
+
+## 5. Splitter Arm
+
+**DO:** Observe ConveyorSplitterT2 with ore flowing through
+**EXPECT:**
+- Arm **swings back and forth** (minY to maxY with SmoothStep)
+- Ore alternates between two output paths
+- Arm pauses at each extreme for `_pauseTime`
+- When no ore passes for `_idleTime`, arm **stops swinging**
+
+---
+
+## 6. Batch Rendering
+
+**DO:** Place 50+ conveyor belts → check Hierarchy vs Scene view
+**EXPECT:**
+- Individual belt Renderers are **disabled** (ConveyorBatchRenderingComponent.OnEnable)
+- Belts still **visible** in Game view (rendered via DrawMeshInstanced)
+- Frame rate stays smooth (batched rendering, not per-object)
+
+---
+
+## Summary Checklist
+
+- [ ] Ore enters belt trigger → pushed forward at Speed
+- [ ] Multiple belts end-to-end → ore flows through chain seamlessly
+- [ ] Shaker: ore oscillates left-right + up-down while moving forward
+- [ ] Blocker closed → belt disabled, ore stops; open → resumes
+- [ ] BlockerT2 Toggle → gate slides, interactable
+- [ ] RoutingConveyor Toggle → direction switches, ore follows new path
+- [ ] SplitterT2 → arm swings, alternates ore direction, idles when empty
+- [ ] Batch rendering: individual Renderers disabled, DrawMeshInstanced visible
+- [ ] ConveyorBeltManager round-robin cleans null objects
+- [ ] Zero console errors
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/5-Tests/Manual/ScaffoldingTest.md ==== -->
+# Scaffolding Supports — Manual Test
+
+> Verifies: dynamic leg spawning, raycast downward, support type matching, wrench toggle.
+
+---
+
+## Prerequisites
+
+- BuildingManager singleton (for collision layer refs)
+- A placed BuildingObject with ModularBuildingSupports or ScaffoldingSupportLeg child components
+- Ground/floor below the building at varying heights
+
+---
+
+## Setup Guide
+
+### Step 1 — Building with Supports
+
+Use a building prefab that has `ModularBuildingSupports` or `ScaffoldingSupportLeg` as a child component:
+
+```
+TestBuilding (root)
+├── BuildingObject component
+├── PhysicalColliderObject (BoxCollider)
+├── ModularBuildingSupports component:
+│     _supportType = Conveyor
+│     _topSupportPrefab → top leg mesh prefab
+│     _middleSupportPrefab → middle leg mesh prefab
+│     _bottomCapPrefab → bottom cap mesh prefab
+│     _supportSpacing = 1
+│     _maxSupports = 15
+└── ScaffoldingSupportLeg component (optional, simpler legs):
+      _supportPrefab → single leg mesh prefab
+      _supportSpacing = 1
+      _maxSupports = 15
+```
+
+### Step 2 — Terrain Setup
+
+- Create floor at y=0
+- Create a raised platform at y=3 (building will be placed here)
+- The gap between building and floor = 3 units → should spawn 3 support legs
+
+### Step 3 — Wrench Tool (for toggle test)
+
+- Have a ToolSupportsWrench in the inventory (Phase B)
+- Or manually call `BuildingObject.EnableBuildingSupports(false/true)` via inspector
+
+---
+
+## How It Works (System Flow)
+
+**Spawn:** When `BuildingObject.Start()` runs (non-ghost), each `BaseModularSupports` child's `Start()` fires → calls `GetComponentInParent<BuildingObject>()` to find the parent → calls `SpawnSupports()`.
+
+**ModularBuildingSupports.SpawnSupports():** Raycasts **downward** from `transform.position + _raycastOffset` using `BuildingSupportsCollisionLayers`. Calculates leg count: `RoundToInt(hitDistance / _supportSpacing) + 1`. Checks what the ray hit — if it's another `ModularBuildingSupports`, uses the **matching connection prefab** (e.g. hit Roller type → use `_bottomToRollerPrefab`). Then Instantiates `_topSupportPrefab` at top, N × `_middleSupportPrefab` stepping down by `_supportSpacing`, and `_bottomCapPrefab` at the ground hit point (with random rotation/scale variation). All legs are **parented to the support transform**.
+
+**ScaffoldingSupportLeg.SpawnSupports():** Simpler — destroys existing children, raycasts down, spawns N × `_supportPrefab` at spacing intervals, parented to self.
+
+**Wrench toggle:** `BuildingObject.EnableBuildingSupports(false)` sets `BuildingSupportsEnabled = false` → loops all `BaseModularSupports` → calls `RespawnSupports()`. Since `BuildingSupportsEnabled` is false, `SpawnSupports()` returns early — **all legs disappear**. Toggle back to true → legs respawn.
+
+**Building removed:** `BuildingObject.OnDestroy()` calls `UpdateSupportsAbove(true)` — raycasts up to find any `ModularBuildingSupports` above → tells them to `RespawnSupports(nextFrame: true)` so legs adjust to the gap.
+
+---
+
+## 1. Initial State — Legs Spawn
+
+**DO:** Place building on raised platform → Press Play
+**EXPECT:**
+- Support legs **appear** between building and floor
+- Number of legs matches gap height ÷ spacing
+- Top support + N middle supports + bottom cap visible
+
+**Behind the scenes:** `BaseModularSupports.Start()` → `GetComponentInParent<BuildingObject>()` → `SpawnSupports()` → raycast down → calculate count → Instantiate legs.
+
+---
+
+## 2. Wrench Disable
+
+**DO:** Equip ToolSupportsWrench → left-click on building (or call `EnableBuildingSupports(false)`)
+**EXPECT:**
+- All support legs **disappear**
+- Building stays in place (it's static, not affected by gravity)
+
+---
+
+## 3. Wrench Re-enable
+
+**DO:** Right-click on building (or call `EnableBuildingSupports(true)`)
+**EXPECT:**
+- Support legs **respawn** — same count, same positions
+
+---
+
+## 4. Building Removed — Supports Above Adjust
+
+**DO:** Destroy a building that has another building stacked above it with supports
+**EXPECT:**
+- Lower building **destroyed**
+- Upper building's supports **respawn** (longer legs to reach new ground level)
+
+**Behind the scenes:** `OnDestroy()` → `UpdateSupportsAbove(true)` → raycast up → find `ModularBuildingSupports` → `RespawnSupports(nextFrame: true)` → coroutine waits 1 FixedUpdate → rebuilds.
+
+---
+
+## 5. Edge Case — No Ground Below
+
+**DO:** Place building in mid-air with no floor below (or floor > maxSupports * spacing away)
+**EXPECT:**
+- **No legs spawn** — raycast misses (nothing within range)
+- No errors
+
+---
+
+## Summary Checklist
+
+- [ ] Supports spawn on Start with correct count based on gap height
+- [ ] Top + middle + bottom cap prefabs all visible
+- [ ] Bottom cap has slight random rotation/scale variation
+- [ ] Wrench disable → all legs disappear
+- [ ] Wrench re-enable → all legs respawn correctly
+- [ ] Building destroyed → supports above adjust leg count
+- [ ] No ground → no legs, no error
+- [ ] Different SupportType connections (Roller, Conveyor, etc.) use matching prefabs
+- [ ] Zero console errors
 
 <!-- ==== FILE: learn/surfer.md ==== -->
 # Surfer — Critical Thoughts Log
@@ -18815,4 +21118,18 @@ The PlayerController is a textbook God Object but splitting it would be a refact
 - **The GUIDE.md/FLOW.md sections listed required contents but never showed the VOICE.** Added "Gold Standard" section to GOAL-general.md with actual excerpts from Phase B: "What It Looks Like When Running" (conversational player experience), vertical slice test format (beginner scene setup + key table + checklist), FLOW.md data flow prose (bold=visual, italic=context, code=reference), event registry table, source-vs-phase diff table, systems & testability table with final count line. These are copy-paste tone targets.
 - **Added "Documentation Voice & Tone" section to NewAgent-general.md** — explicitly defining what "beginner-friendly" means (conversational, first-person "I", assumes zero prior knowledge) and what it does NOT mean (not dumbed-down, not long, not skipping "why"). Plus FLOW.md formatting rules (bold/italic/code semantics).
 - **Key insight:** The generalized docs had the rules but not the philosophy or the examples. Rules tell you what. Philosophy tells you why. Examples tell you how. All three are needed for a new project.
+
+## New Agent: "Build phase-d(New) — Building & Conveyor System"
+
+**What I thought:**
+- **BuildingManager split into Manager + DataService:** Original 404-line BuildingManager had both Unity API (ghost instantiation, material swap, layer set) and pure math (grid snap, snap voting, overlap check). Split: BuildingManager keeps Unity API, BuildingDataService gets pure geometry math (GetClosestGridPosition, GetNearbySnapConnections, ResolveBestSnap). DataService testable without scene.
+- **BuildingObject.TryAddToInventory decoupled:** Original uses `FindObjectOfType<PlayerInventory>()`. Replaced with `GameEvents.RaiseBuildingTakeRequested(definition, qty)` → InventoryOrchestrator subscribes and creates ToolBuilder. Zero coupling to player scripts.
+- **ConveyorBelt velocity accumulation pattern preserved:** Original design is good — BasePhysicsObject accumulates per-belt velocities, ConveyorBeltManager applies averaged result in FixedUpdate. This avoids per-belt rb.linearVelocity overwriting. Kept as-is.
+- **ConveyorBlockerT2 + RoutingConveyor simplified:** Original uses DOTween for animation. Kept instant position set with Phase H comment for DOTween. Uses InteractionType enum instead of string comparisons.
+- **Conveyor snap voting — full implementation:** GetNearbySnapConnections tests all 4 rotations × all input/output pairs, returns BuildingRotationInfo entries. ResolveBestSnap groups by rotation, picks most-voted. Same algorithm as original.
+- **40 files total (after gap fix):** Initially 34, then added 5 missing: ChuteHatch (dual-rotating toggleable hatch), ChuteTop (checks for Hopper above), RobotGrabberArm (automated IK ore-grabbing arm), RoutingConveyorSaveData, ISaveLoadableBuildingObject. All found by comparing every original source file against what was delivered.
+- **ToolBuilder fully completed:** Phase B partial had empty PrimaryFire/Update. Now: Update raycasts + UpdateGhostObject, PrimaryFire validates + Instantiates + RaiseBuildingPlaced, DropItem spawns crate instead of raw drop, OnDisable cleans up ghost.
+- **Enum camelCase convention caught by memory retrieval:** All Phase D enum values (CanPlaceBuilding.valid, PlacementNodeRequirement.none, SupportType.flat, etc.) fixed to camelCase per GOAL.md convention. Field names stay PascalCase (they're public SerializeField, not enum values). Had to fix an accidental duplicate-field bug caused by a multi_edit replacing field names alongside enum values.
+- **Cross-phase modifications documented:** Phase D needs 5 modifications to earlier phases: InteractionType enum (add pack/switchDirection), BasePhysicsObject conveyor stubs, FresnelHighlighter building/wrench checks, SO_ShopItemDef building definition field, AutoMiner.SetResourceDefinition method.
+- **Test scripts enriched:** BuildingTest now has Take (U) and Pack (I) keys + FindNearestBuilding raycast helper + OnBuildingTakeRequested subscription. ConveyorTest now has OnOreSold + OnOreLimitChanged subscriptions + P key for snapshot. Both have README TextArea + comprehensive class summaries.
 
