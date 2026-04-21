@@ -2060,18 +2060,6 @@ When a system requires visual/hands-on verification (UI flows, 3D animations, ph
 - **How It Works (System Flow)** — before the DO/EXPECT test steps, explain the system's data flow(end to end for this system) in plain English:
   - What happens internally when the player performs each action (which script calls which, what GameEvents fire, which GOs activate/deactivate, which components change state)
   - Example for inventory drag: *"When you begin dragging slot 0, `UIEventRelay[0].OnBeginDrag` fires → `InventoryOrchestrator.HandleBeginDrag` stores `dragFromIndex = 0`, hides the slot content via `Field_InventorySlot.SetDragVisible(false)` (the `HideWhenDragged` child GO is `SetActive(false)`), and activates the `DragGhostIcon` GO with the dragged item's sprite."*
-  - one more example in brief with continuation you do as you sem right for ....: 
-```
-Before testing, understand how the inventory data flows:
-
-**Scene loads:** `InventoryUI` GO starts active → `OnEnable` fires with `isFirstEnable = true` → it calls `_orchestrator.Init(dataService)`. ....
-
-**Tool pickup:** Player interacts with a tool → `BaseHeldTool.Interact(InteractionType.Take)` fires `GameEvents.RaiseToolPickupRequested(this)` → ....
-
-**Drag-drop:** When you click-and-drag a slot, ....
-
-**Open/close inventory:** `UIManager.Update()` detects Tab key → fires `GameEvents.RaiseOpenInventoryView()` → `InventoryUI` receives → `SetActive(true)` → `OnEnable` fires (not first time) → `GameEvents.RaiseMenuStateChanged(true)` → ....
-```
   - This teaches the reader WHY things happen, not just WHAT they see
   - Keep it conversation-style: **bold** for GO state changes, `code` for method/field names, *italics* for important context
 - **Manual Test Flow** — numbered DO/EXPECT steps:
@@ -17731,5 +17719,4 @@ The PlayerController is a textbook God Object but splitting it would be a refact
 - **The GUIDE.md/FLOW.md sections listed required contents but never showed the VOICE.** Added "Gold Standard" section to GOAL-general.md with actual excerpts from Phase B: "What It Looks Like When Running" (conversational player experience), vertical slice test format (beginner scene setup + key table + checklist), FLOW.md data flow prose (bold=visual, italic=context, code=reference), event registry table, source-vs-phase diff table, systems & testability table with final count line. These are copy-paste tone targets.
 - **Added "Documentation Voice & Tone" section to NewAgent-general.md** — explicitly defining what "beginner-friendly" means (conversational, first-person "I", assumes zero prior knowledge) and what it does NOT mean (not dumbed-down, not long, not skipping "why"). Plus FLOW.md formatting rules (bold/italic/code semantics).
 - **Key insight:** The generalized docs had the rules but not the philosophy or the examples. Rules tell you what. Philosophy tells you why. Examples tell you how. All three are needed for a new project.
-
 
