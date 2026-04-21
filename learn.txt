@@ -2235,6 +2235,20 @@ Conventions:
   [SerializeField] Material _ghostMaterial;
   public Material GetGhostMaterial() => _ghostMaterial;
   ```
+- **No C# property accessors** (`{ get; set; }`, `{ get => ...; set => ...; }`). Always use explicit `Get...()` / `Set...()` methods. Properties look like fields but hide logic — `Get/Set` methods make the access cost visible.
+  ```csharp
+  // ❌ WRONG — property accessor
+  public float Speed { get => _speed; set { _speed = value; Recalculate(); } }
+  
+  // ✅ RIGHT — explicit Get/Set methods
+  public float GetSpeed() => _speed;
+  public void SetSpeed(float val) { _speed = val; Recalculate(); }
+  ```
+- **Exceptions to Get/Set rule:**
+  - `[Serializable]` entities/structs (data containers) — public fields are standard (`OrePieceKey.ResourceType`, `BuildingRotationInfo.Rotation`)
+  - `SO_` ScriptableObjects — pure data, public fields by convention
+  - Interface property contracts (`ISaveLoadableObject.HasBeenSaved { get; set; }`) — C# interfaces require property syntax
+  - Static self-registration lists (`AllConveyorBelts`, `AllOrePieces`) — `{ get; private set; }` is standard for static collections
 - The user types every script by hand — keep files concise.
 
 SPACE_UTIL extensions the user has (use these, don't reinvent):
@@ -2552,6 +2566,7 @@ For each phase, the agent must produce:
 - **No defensive null checks.** Let it crash — the crash is traceable.
 - **Least possible public API.** Default private. Promote only when another script calls it. **After writing every script, audit:** can any public method be made private/protected? If nobody outside the class calls it → make it private. If only subclasses → protected. The user checks this on every review.
 - **`[SerializeField]` is ALWAYS private** — never `[SerializeField] public`. External access via `Get...()` / `Set...()` methods only for fields that external scripts actually need. Audit who reads what before exposing. Example: `[SerializeField] Material _ghost; public Material GetGhostMaterial() => _ghost;`
+- **No C# property accessors** — never use `{ get; set; }` or `{ get => ...; set => ... }`. Always explicit `Get...()` / `Set...()` methods. Exceptions: `[Serializable]` entities (public fields OK), `SO_` (pure data), interface contracts (`{ get; set; }` required by C#), static collections (`{ get; private set; }`).
 - **`// purpose:`** on every Raise call and every += subscription.
 - **Vertical slice = standalone scene.** If a test needs another system, fix the architecture.
 
@@ -12039,7 +12054,7 @@ public class PlayerGrab : MonoBehaviour
 		// purpose: block grab when menu is open
 		GameEvents.OnMenuStateChanged += (open) => isAnyMenuOpen = open;
 		// purpose: set tool.Owner when equipped — decouples InventoryOrchestrator from PlayerMovement
-		GameEvents.OnToolEquipped += (tool) => tool.Owner = _movement;
+		GameEvents.OnToolEquipped += (tool) => tool.SetOwner(_movement);
 		_rope.enabled = false;
 	}
 	/// <summary> Every frame: right-click triggers grab/release, updates rope line positions
@@ -12219,7 +12234,9 @@ public class PlayerMovement : Singleton<PlayerMovement>
 	public float DuckSpeed => _duckSpeed;
 	public Vector2 MoveInput => moveInput;
 	public bool IsGrounded => isGrounded;
-	public bool IsInWater { get; set; }
+	bool isInWater;
+	public bool GetIsInWater() => isInWater;
+	public void SetIsInWater(bool val) => isInWater = val;
 	#endregion
 
 	#region extra
@@ -12479,13 +12496,16 @@ public class BaseHeldTool : BaseSellableItem, IInteractable, ISaveLoadableObject
 	#endregion
 
 	#region private API
-	[HideInInspector] public PlayerMovement Owner;
+	protected PlayerMovement owner;
+	public PlayerMovement GetOwner() => owner;
+	public void SetOwner(PlayerMovement val) => owner = val;
 	#endregion
 
 	#region public API — tool identity
 	public string Name => _name;
 	public string Description => _description;
-	public int Quantity { get => _quantity; set => _quantity = value; }
+	public int GetQuantity() => _quantity;
+	public void SetQuantity(int val) => _quantity = val;
 	public int MaxAmount => _maxAmount;
 	public bool EquipWhenPickedUp => _equipWhenPickedUp;
 	#endregion
@@ -12516,16 +12536,16 @@ public class BaseHeldTool : BaseSellableItem, IInteractable, ISaveLoadableObject
 		HideWorldModel(hide: false);
 		HideViewModel();
 		Rigidbody rb = GetComponentInChildren<Rigidbody>();
-		if (rb != null && Owner != null)
+		if (rb != null && owner != null)
 		{
-			Camera cam = Owner.PlayerCam;
+			Camera cam = owner.PlayerCam;
 			transform.parent = null;
 			rb.isKinematic = false;
 			rb.transform.position = cam.transform.position + cam.transform.forward * 0.5f;
 			rb.linearVelocity = cam.transform.forward * 5f;
 			rb.rotation = cam.transform.rotation;
 		}
-		Owner = null;
+		owner = null;
 	}
 	/// <summary> show/hide view model </summary>
 	protected virtual void HideViewModel(bool hide = true) => _viewModel?.SetActive(!hide);
@@ -12578,7 +12598,7 @@ public class BaseHeldTool : BaseSellableItem, IInteractable, ISaveLoadableObject
 	protected override void OnEnable()
 	{
 		base.OnEnable();
-		if (Owner == null)
+		if (owner == null)
 		{
 			HideViewModel();
 			HideWorldModel(hide: false);
@@ -12586,11 +12606,11 @@ public class BaseHeldTool : BaseSellableItem, IInteractable, ISaveLoadableObject
 		}
 		HideWorldModel();
 		HideViewModel(hide: false);
-		if (transform.parent == null || transform.parent != Owner.ViewModelContainer)
+		if (transform.parent == null || transform.parent != owner.ViewModelContainer)
 		{
-			transform.position = Owner.ViewModelContainer.position;
-			transform.rotation = Owner.ViewModelContainer.rotation;
-			transform.parent = Owner.ViewModelContainer;
+			transform.position = owner.ViewModelContainer.position;
+			transform.rotation = owner.ViewModelContainer.rotation;
+			transform.parent = owner.ViewModelContainer;
 		}
 	}
 	#endregion
@@ -12669,8 +12689,8 @@ public class ToolHammer : BaseHeldTool
 	#region public API — overrides
 	public override void PrimaryFire()
 	{
-		if (Owner == null) return;
-		Camera cam = Owner.PlayerCam;
+		if (_owner == null) return;
+		Camera cam = _owner.PlayerCam;
 		if (cam == null) return;
 		if (!Physics.Raycast(cam.transform.position, cam.transform.forward, out RaycastHit hit, _useRange)) return;
 		// Phase D: BuildingObject / BuildingCrate interaction
@@ -12681,8 +12701,8 @@ public class ToolHammer : BaseHeldTool
 	}
 	public override void SecondaryFire()
 	{
-		if (Owner == null) return;
-		Camera cam = Owner.PlayerCam;
+		if (_owner == null) return;
+		Camera cam = _owner.PlayerCam;
 		if (cam == null) return;
 		if (!Physics.Raycast(cam.transform.position, cam.transform.forward, out RaycastHit hit, _useRange)) return;
 		// Phase D: BuildingObject.Pack()
@@ -12778,7 +12798,7 @@ public class ToolMagnet : BaseHeldTool
 			sj.breakForce = 120f; sj.breakTorque = 20f;
 			rb.linearDamping = 3f; rb.angularDamping = 1.5f;
 			rb.interpolation = RigidbodyInterpolation.Interpolate;
-			if (Owner != null) UtilsPhaseB.IgnoreAllCollisions(rb.gameObject, Owner.gameObject, true);
+			if (owner != null) UtilsPhaseB.IgnoreAllCollisions(rb.gameObject, owner.gameObject, true);
 			heldBodies.Add(rb);
 			joints.Add(sj);
 			anchors.Add(anchor);
@@ -12794,10 +12814,10 @@ public class ToolMagnet : BaseHeldTool
 		foreach (var rb in heldBodies)
 		{
 			if (rb == null) continue;
-			if (Owner != null) rb.AddForce(Owner.PlayerCam.transform.forward * force, ForceMode.Impulse);
+			if (owner != null) rb.AddForce(owner.PlayerCam.transform.forward * force, ForceMode.Impulse);
 			rb.linearDamping = BasePhysicsObject.STANDARD_LINEAR_DAMPING;
 			rb.angularDamping = BasePhysicsObject.STANDARD_ANGULAR_DAMPING;
-			if (Owner != null) UtilsPhaseB.IgnoreAllCollisions(rb.gameObject, Owner.gameObject, false);
+			if (owner != null) UtilsPhaseB.IgnoreAllCollisions(rb.gameObject, owner.gameObject, false);
 			droppedBodies.Add(new DroppedBodyInfo { Rb = rb, Timer = 3f });
 		}
 		heldBodies.Clear();
@@ -12836,7 +12856,7 @@ public class ToolMagnet : BaseHeldTool
 		heldBodies.RemoveAt(idx);
 		rb.linearDamping = BasePhysicsObject.STANDARD_LINEAR_DAMPING;
 		rb.angularDamping = BasePhysicsObject.STANDARD_ANGULAR_DAMPING;
-		if (Owner != null) UtilsPhaseB.IgnoreAllCollisions(rb.gameObject, Owner.gameObject, false);
+		if (owner != null) UtilsPhaseB.IgnoreAllCollisions(rb.gameObject, owner.gameObject, false);
 		droppedBodies.Add(new DroppedBodyInfo { Rb = rb, Timer = 3f });
 	}
 	// nice-to-have: selection mode TMP display — shows current grab filter on tool viewmodel
@@ -12856,11 +12876,11 @@ public class ToolMagnet : BaseHeldTool
 	protected override void OnDisable() { base.OnDisable(); DropObjects(_dropForce); }
 	private void FixedUpdate()
 	{
-		if (Owner == null) return;
-		Vector3 pos = Owner.transform.position;
+		if (owner == null) return;
+		Vector3 pos = owner.transform.position;
 		playerVelocity = (pos - lastPlayerPos) / Time.fixedDeltaTime;
 		lastPlayerPos = pos;
-		Vector3 target = Owner.MagnetToolPosition.position + playerVelocity * Time.fixedDeltaTime * 10f;
+		Vector3 target = owner.MagnetToolPosition.position + playerVelocity * Time.fixedDeltaTime * 10f;
 		_pullOrigin.position = Vector3.SmoothDamp(_pullOrigin.position, target, ref pullTargetVelocity, 0.03f, 10f, Time.fixedDeltaTime);
 		CleanupBrokenJoints();
 		CleanupDroppedBodies();
@@ -12943,8 +12963,8 @@ public class ToolPickaxe : BaseHeldTool
 
 	void SwingPickaxe()
 	{
-		if (Owner == null) return;
-		Camera cam = Owner.PlayerCam;
+		if (owner == null) return;
+		Camera cam = owner.PlayerCam;
 		if (cam == null) return;
 		if (_viewModelAnimator != null) _viewModelAnimator.Play("Attack1", -1, 0f);
 		// Phase H: play swing sound
@@ -12954,8 +12974,8 @@ public class ToolPickaxe : BaseHeldTool
 	IEnumerator PerformAttack(float delaySeconds)
 	{
 		yield return new WaitForSeconds(delaySeconds);
-		if (!gameObject.activeInHierarchy || Owner == null) yield break;
-		Camera cam = Owner.PlayerCam;
+		if (!gameObject.activeInHierarchy || owner == null) yield break;
+		Camera cam = owner.PlayerCam;
 		if (cam == null) yield break;
 		if (!Physics.Raycast(cam.transform.position, cam.transform.forward, out RaycastHit hit, _useRange, _hitLayers))
 			yield break;
@@ -13010,8 +13030,8 @@ public class ToolResourceScanner : BaseHeldTool
 	#region Unity Life Cycle
 	private void Update()
 	{
-		if (Owner == null) return;
-		Camera cam = Owner.PlayerCam;
+		if (_owner == null) return;
+		Camera cam = _owner.PlayerCam;
 		if (cam == null) return;
 		string text = "No Target";
 		if (Physics.Raycast(cam.transform.position, cam.transform.forward, out RaycastHit hit, _useRange, _scanLayers))
@@ -13045,15 +13065,15 @@ public class ToolSupportsWrench : BaseHeldTool
 	#region public API — overrides
 	public override void PrimaryFire()
 	{
-		if (Owner == null) return;
-		Camera cam = Owner.PlayerCam;
+		if (_owner == null) return;
+		Camera cam = _owner.PlayerCam;
 		if (cam == null || !Physics.Raycast(cam.transform.position, cam.transform.forward, out RaycastHit hit, _useRange)) return;
 		// Phase D: hit.collider.GetComponentInParent<BuildingObject>()?.EnableBuildingSupports(false);
 	}
 	public override void SecondaryFire()
 	{
-		if (Owner == null) return;
-		Camera cam = Owner.PlayerCam;
+		if (_owner == null) return;
+		Camera cam = _owner.PlayerCam;
 		if (cam == null || !Physics.Raycast(cam.transform.position, cam.transform.forward, out RaycastHit hit, _useRange)) return;
 		// Phase D: hit.collider.GetComponentInParent<BuildingObject>()?.EnableBuildingSupports(true);
 	}
@@ -17986,9 +18006,9 @@ public class BuildingManager : Singleton<BuildingManager>
 	#endregion
 
 	#region public API
-	bool _currentObjectIsSnapped;
-	public bool GetCurrentObjectIsSnapped() => _currentObjectIsSnapped;
-	public void SetCurrentObjectIsSnapped(bool val) => _currentObjectIsSnapped = val;
+	bool currentObjectIsSnapped;
+	public bool GetCurrentObjectIsSnapped() => currentObjectIsSnapped;
+	public void SetCurrentObjectIsSnapped(bool val) => currentObjectIsSnapped = val;
 	public Transform GhostObjectTransform => ghostObject?.transform;
 	public BuildingObject GetGhostObject() => ghostObject;
 	public bool IsInBuildingMode() => ghostObject != null;
@@ -18051,7 +18071,7 @@ public class BuildingManager : Singleton<BuildingManager>
 			{
 				var best = dataService.ResolveBestSnap(snaps);
 				if (activeTool != null) activeTool.SetCurrentRotation(best.Rotation);
-				_currentObjectIsSnapped = true;
+				currentObjectIsSnapped = true;
 			}
 		}
 		return CanPlaceBuilding.valid;
@@ -18063,7 +18083,7 @@ public class BuildingManager : Singleton<BuildingManager>
 		if (previousGhostPos != ghostObject.transform.position)
 		{
 			isEligibleForSnapping = true;
-			_currentObjectIsSnapped = false;
+			currentObjectIsSnapped = false;
 			previousGhostPos = ghostObject.transform.position;
 		}
 		Material mat = _ghostMaterial;
@@ -18090,7 +18110,7 @@ public class BuildingManager : Singleton<BuildingManager>
 	public void CleanUpGhostObject()
 	{
 		isEligibleForSnapping = true;
-		_currentObjectIsSnapped = false;
+		currentObjectIsSnapped = false;
 		if (ghostObject != null) { Destroy(ghostObject.gameObject); ghostObject = null; }
 	}
 	#endregion
@@ -18427,22 +18447,22 @@ public class BuildingCrate : BaseSellableItem, IInteractable
 	#endregion
 
 	#region private API
-	SO_BuildingInventoryDefinition _definition;
-	int _quantity = 1;
+	SO_BuildingInventoryDefinition definition;
+	int quantity = 1;
 	#endregion
 
 	#region public API
-	public SO_BuildingInventoryDefinition GetDefinition() => _definition;
-	public void SetDefinition(SO_BuildingInventoryDefinition def) => _definition = def;
-	public int GetQuantity() => _quantity;
-	public void SetQuantity(int qty) => _quantity = qty;
+	public SO_BuildingInventoryDefinition GetDefinition() => definition;
+	public void SetDefinition(SO_BuildingInventoryDefinition def) => definition = def;
+	public int GetQuantity() => quantity;
+	public void SetQuantity(int qty) => quantity = qty;
 
 	/// <summary> creates ToolBuilder from definition, fires pickup event, destroys crate </summary>
 	public void TryAddToInventory()
 	{
-		if (_definition == null) { Debug.LogWarning("BuildingCrate missing Definition!"); return; }
+		if (definition == null) { Debug.LogWarning("BuildingCrate missing Definition!"); return; }
 		// purpose: InventoryOrchestrator creates ToolBuilder from this definition
-		GameEvents.RaiseBuildingTakeRequested(_definition, _quantity);
+		GameEvents.RaiseBuildingTakeRequested(definition, quantity);
 		Destroy(gameObject);
 	}
 	public override float GetSellValue()
@@ -18455,7 +18475,7 @@ public class BuildingCrate : BaseSellableItem, IInteractable
 	#region public API — IInteractable
 	public bool ShouldUseInteractionWheel() => false;
 	public List<SO_InteractionOption> GetOptions() => _interactions;
-	public string GetObjectName() => _definition?.Name ?? "Crate";
+	public string GetObjectName() => definition?.Name ?? "Crate";
 	public void Interact(SO_InteractionOption selectedOption)
 	{
 		if (selectedOption.interactionType == InteractionType.Take) TryAddToInventory();
@@ -18466,10 +18486,10 @@ public class BuildingCrate : BaseSellableItem, IInteractable
 	#region Unity Life Cycle
 	private void Start()
 	{
-		if (_definition == null || _definition.GetIcon() == null) return;
-		foreach (var img in GetComponentsInChildren<Image>()) img.sprite = _definition.GetIcon();
+		if (definition == null || definition.GetIcon() == null) return;
+		foreach (var img in GetComponentsInChildren<Image>()) img.sprite = definition.GetIcon();
 		foreach (var txt in GetComponentsInChildren<TMP_Text>())
-			txt.text = _quantity > 1 ? $"x{_quantity}" : "";
+			txt.text = quantity > 1 ? $"x{quantity}" : "";
 	}
 	#endregion
 
@@ -19170,36 +19190,36 @@ public class ConveyorBatchRenderingComponent : MonoBehaviour
 	#endregion
 
 	#region private API
-	static bool _needsUpdate = true;
-	Matrix4x4 _cachedMatrix;
+	static bool needsUpdate = true;
+	Matrix4x4 cachedMatrix;
 	#endregion
 
 	#region public API
 	public static readonly List<ConveyorBatchRenderingComponent> AllConveyors = new List<ConveyorBatchRenderingComponent>();
-	public static bool GetNeedsUpdate() => _needsUpdate;
-	public static void SetNeedsUpdate(bool val) => _needsUpdate = val;
-	public Matrix4x4 GetCachedMatrix() => _cachedMatrix;
+	public static bool GetNeedsUpdate() => needsUpdate;
+	public static void SetNeedsUpdate(bool val) => needsUpdate = val;
+	public Matrix4x4 GetCachedMatrix() => cachedMatrix;
 	public int GetMeshIndex() => _meshIndex;
 
 	public void RefreshMatrix()
 	{
-		_cachedMatrix = Matrix4x4.TRS(transform.position, transform.rotation, transform.lossyScale);
-		_needsUpdate = true;
+		cachedMatrix = Matrix4x4.TRS(transform.position, transform.rotation, transform.lossyScale);
+		needsUpdate = true;
 	}
 	#endregion
 
 	#region Unity Life Cycle
 	private void OnEnable()
 	{
-		_cachedMatrix = Matrix4x4.TRS(transform.position, transform.rotation, transform.lossyScale);
+		cachedMatrix = Matrix4x4.TRS(transform.position, transform.rotation, transform.lossyScale);
 		AllConveyors.Add(this);
-		_needsUpdate = true;
+		needsUpdate = true;
 		GetComponent<Renderer>().enabled = false;
 	}
 	private void OnDisable()
 	{
 		AllConveyors.Remove(this);
-		_needsUpdate = true;
+		needsUpdate = true;
 	}
 	#endregion
 }
@@ -19688,60 +19708,60 @@ public class ToolBuilder : BaseHeldTool
 	#endregion
 
 	#region private API
-	SO_BuildingInventoryDefinition _definition;
-	int _quantity = 1;
-	Quaternion _currentRotation = Quaternion.identity;
+	SO_BuildingInventoryDefinition definition;
+	int quantity = 1;
+	Quaternion currentRotation = Quaternion.identity;
 	int currentPrefabIndex;
 	bool isMirrored;
 	#endregion
 
 	#region public API
-	public SO_BuildingInventoryDefinition GetDefinition() => _definition;
-	public void SetDefinition(SO_BuildingInventoryDefinition def) => _definition = def;
-	public int GetQuantity() => _quantity;
-	public void SetQuantity(int qty) => _quantity = qty;
-	public Quaternion GetCurrentRotation() => _currentRotation;
-	public void SetCurrentRotation(Quaternion rot) => _currentRotation = rot;
+	public SO_BuildingInventoryDefinition GetDefinition() => definition;
+	public void SetDefinition(SO_BuildingInventoryDefinition def) => definition = def;
+	public int GetQuantity() => quantity;
+	public void SetQuantity(int qty) => quantity = qty;
+	public Quaternion GetCurrentRotation() => currentRotation;
+	public void SetCurrentRotation(Quaternion rot) => currentRotation = rot;
 	public bool IsUsingMirroredVersion() => isMirrored;
 	/// <summary> configure from definition — called after Instantiate </summary>
 	public void Setup()
 	{
-		if (_definition == null) return;
-		_name = _definition.Name;
-		_inventoryIcon = _definition.GetIcon();
+		if (definition == null) return;
+		_name = definition.Name;
+		_inventoryIcon = definition.GetIcon();
 	}
 	/// <summary> get the currently selected building prefab </summary>
 	public BuildingObject GetCurrentPrefab()
 	{
-		if (_definition == null || _definition.BuildingPrefabs == null || _definition.BuildingPrefabs.Count == 0) return null;
-		currentPrefabIndex = Mathf.Clamp(currentPrefabIndex, 0, _definition.BuildingPrefabs.Count - 1);
-		return _definition.BuildingPrefabs[currentPrefabIndex];
+		if (definition == null || definition.BuildingPrefabs == null || definition.BuildingPrefabs.Count == 0) return null;
+		currentPrefabIndex = Mathf.Clamp(currentPrefabIndex, 0, definition.BuildingPrefabs.Count - 1);
+		return definition.BuildingPrefabs[currentPrefabIndex];
 	}
 	#endregion
 
 	#region public API — overrides
 	public override void PrimaryFire()
 	{
-		if (Owner == null || _definition == null) return;
+		if (owner == null || definition == null) return;
 		var prefab = GetCurrentPrefab();
 		if (prefab == null) return;
 		var mgr = Singleton<BuildingManager>.Ins;
-		Camera cam = Owner.PlayerCam;
+		Camera cam = owner.PlayerCam;
 		if (!Physics.Raycast(cam.transform.position, cam.transform.forward, out var hit, _useRange)) return;
 		Vector3Int gridPos = mgr.DataService.GetClosestGridPosition(hit.point);
-		var canPlace = mgr.CanPlaceObject(gridPos, prefab, _currentRotation,
-			prefab.RequiresFlatGround, _definition.CanBePlacedInTerrain, prefab.PlacementNodeRequirement, this);
+		var canPlace = mgr.CanPlaceObject(gridPos, prefab, currentRotation,
+			prefab.RequiresFlatGround, definition.CanBePlacedInTerrain, prefab.PlacementNodeRequirement, this);
 		if (canPlace != CanPlaceBuilding.valid) return;
 		// place the real building
 		var placed = Object.Instantiate(prefab,
 			gridPos + new Vector3(0.5f, 0f, 0.5f) + prefab.BuildModePlacementOffset,
-			_currentRotation);
+			currentRotation);
 		placed.IsGhost = false;
 		// purpose: quest/research systems track building placed
 		GameEvents.RaiseBuildingPlaced(placed);
 		// consume quantity
-		_quantity--;
-		if (_quantity <= 0)
+		quantity--;
+		if (quantity <= 0)
 		{
 			// remove tool from inventory + cleanup ghost
 			mgr.CleanUpGhostObject();
@@ -19755,14 +19775,14 @@ public class ToolBuilder : BaseHeldTool
 	}
 	public override void Reload()
 	{
-		float dir = _definition != null && _definition.UseReverseRotationDirection ? -90f : 90f;
-		_currentRotation *= Quaternion.Euler(0f, dir, 0f);
+		float dir = definition != null && definition.UseReverseRotationDirection ? -90f : 90f;
+		currentRotation *= Quaternion.Euler(0f, dir, 0f);
 		Singleton<BuildingManager>.Ins.SetCurrentObjectIsSnapped(false);
 	}
 	public override void QButtonPressed()
 	{
-		if (_definition == null || _definition.BuildingPrefabs == null || _definition.BuildingPrefabs.Count <= 1) return;
-		currentPrefabIndex = (currentPrefabIndex + 1) % _definition.BuildingPrefabs.Count;
+		if (definition == null || definition.BuildingPrefabs == null || definition.BuildingPrefabs.Count <= 1) return;
+		currentPrefabIndex = (currentPrefabIndex + 1) % definition.BuildingPrefabs.Count;
 		isMirrored = !isMirrored;
 		Singleton<BuildingManager>.Ins.CleanUpGhostObject();
 	}
@@ -19770,14 +19790,14 @@ public class ToolBuilder : BaseHeldTool
 	{
 		// drop as crate, not raw tool
 		Singleton<BuildingManager>.Ins.CleanUpGhostObject();
-		if (_definition != null)
+		if (definition != null)
 		{
 			var crate = Object.Instantiate(
-				_definition.PackedPrefab ? _definition.PackedPrefab : Singleton<BuildingManager>.Ins.GetBuildingCratePrefab(),
-				Owner != null ? Owner.PlayerCam.transform.position + Owner.PlayerCam.transform.forward * 1.5f : transform.position,
+				definition.PackedPrefab ? definition.PackedPrefab : Singleton<BuildingManager>.Ins.GetBuildingCratePrefab(),
+				owner != null ? owner.PlayerCam.transform.position + owner.PlayerCam.transform.forward * 1.5f : transform.position,
 				Quaternion.identity);
-			crate.SetDefinition(_definition);
-			crate.SetQuantity(_quantity);
+			crate.SetDefinition(definition);
+			crate.SetQuantity(quantity);
 		}
 		Destroy(gameObject);
 	}
@@ -19786,13 +19806,13 @@ public class ToolBuilder : BaseHeldTool
 	#region Unity Life Cycle
 	private void Update()
 	{
-		if (Owner == null || _definition == null) return;
+		if (owner == null || definition == null) return;
 		var prefab = GetCurrentPrefab();
 		if (prefab == null) return;
-		Camera cam = Owner.PlayerCam;
+		Camera cam = owner.PlayerCam;
 		if (!Physics.Raycast(cam.transform.position, cam.transform.forward, out var hit, _useRange)) return;
 		Vector3Int gridPos = Singleton<BuildingManager>.Ins.DataService.GetClosestGridPosition(hit.point);
-		Singleton<BuildingManager>.Ins.UpdateGhostObject(gridPos, prefab, _currentRotation, this);
+		Singleton<BuildingManager>.Ins.UpdateGhostObject(gridPos, prefab, currentRotation, this);
 		// show placement node ghosts
 		foreach (var node in BuildingPlacementNode.All)
 			node.ShowGhost(true, prefab.PlacementNodeRequirement);
