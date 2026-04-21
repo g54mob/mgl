@@ -2226,6 +2226,15 @@ Conventions:
 - `// when X >>` and `// << when X` comment blocks around GameEvents in GameEvents.cs
 - No blank lines between `#endregion` and next `#region`
 - Least possible public API. Least possible private methods. Don't over-fragment.
+- **`[SerializeField]` fields are ALWAYS private** — never `[SerializeField] public`. If another script needs to read a field, add a `Get...()` method. If another script needs to write it, add a `Set...()` method. Only add getters/setters for fields that are actually accessed externally — audit who reads what before exposing.
+  ```csharp
+  // ❌ WRONG — exposes field to everything
+  [SerializeField] public Material GhostMaterial;
+  
+  // ✅ RIGHT — private field + getter only if external scripts need it
+  [SerializeField] Material _ghostMaterial;
+  public Material GetGhostMaterial() => _ghostMaterial;
+  ```
 - The user types every script by hand — keep files concise.
 
 SPACE_UTIL extensions the user has (use these, don't reinvent):
@@ -2542,6 +2551,7 @@ For each phase, the agent must produce:
 - **SubManagers self-init.** Start() builds + subscribes + disables self. OnEnable/OnDisable announce menu state.
 - **No defensive null checks.** Let it crash — the crash is traceable.
 - **Least possible public API.** Default private. Promote only when another script calls it. **After writing every script, audit:** can any public method be made private/protected? If nobody outside the class calls it → make it private. If only subclasses → protected. The user checks this on every review.
+- **`[SerializeField]` is ALWAYS private** — never `[SerializeField] public`. External access via `Get...()` / `Set...()` methods only for fields that external scripts actually need. Audit who reads what before exposing. Example: `[SerializeField] Material _ghost; public Material GetGhostMaterial() => _ghost;`
 - **`// purpose:`** on every Raise call and every += subscription.
 - **Vertical slice = standalone scene.** If a test needs another system, fix the architecture.
 
@@ -15746,17 +15756,20 @@ using UnityEngine;
 public class ParticleManager : Singleton<ParticleManager>
 {
 	#region Inspector Fields
-	[SerializeField] public GameObject GenericHitImpactParticle;
-	[SerializeField] public GameObject OreNodeHitParticlePrefab;
-	[SerializeField] public GameObject BreakOreNodeParticlePrefab;
+	[SerializeField] GameObject _genericHitImpactParticle;
+	[SerializeField] GameObject _oreNodeHitParticlePrefab;
+	[SerializeField] GameObject _breakOreNodeParticlePrefab;
 	#endregion
 
-	#region public API
+	#region public API — read-only getters (external scripts pass these to CreateParticle)
+	public GameObject GetGenericHitImpactParticle() => _genericHitImpactParticle;
+	public GameObject GetOreNodeHitParticlePrefab() => _oreNodeHitParticlePrefab;
+	public GameObject GetBreakOreNodeParticlePrefab() => _breakOreNodeParticlePrefab;
 	/// <summary> spawn a particle at position + rotation </summary>
 	public void CreateParticle(GameObject prefab, Vector3 position, Quaternion rotation = default)
 	{
 		if (prefab == null) return;
-		var go = Object.Instantiate(prefab, position, rotation);
+		Object.Instantiate(prefab, position, rotation);
 	}
 	#endregion
 }
@@ -16171,7 +16184,7 @@ public class DamageableOrePiece : OrePiece, IDamageable
 		{
 			// Phase H: play break sound
 			Singleton<ParticleManager>.Ins.CreateParticle(
-				Singleton<ParticleManager>.Ins.BreakOreNodeParticlePrefab, transform.position);
+				Singleton<ParticleManager>.Ins.GetBreakOreNodeParticlePrefab(), transform.position);
 			CompleteClusterBreaking();
 			UtilsPhaseB.SimpleExplosion(transform.position, 0.5f, 2f, 0.1f);
 		}
@@ -16268,7 +16281,7 @@ public class OreNode : MonoBehaviour, IDamageable
 		// → spawn break particle burst at hit point
 		// Phase H: play break sound
 		Singleton<ParticleManager>.Ins.CreateParticle(
-			Singleton<ParticleManager>.Ins.BreakOreNodeParticlePrefab, hitPosition);
+			Singleton<ParticleManager>.Ins.GetBreakOreNodeParticlePrefab(), hitPosition);
 		// → fire OnOreMined so quest system (Phase F) can track mining progress
 		// purpose: quest system + other listeners react to mining
 		GameEvents.RaiseOreMined(_resourceType, transform.position);
@@ -17930,26 +17943,39 @@ public class BuildingManager : Singleton<BuildingManager>
 {
 	#region Inspector Fields
 	[Header("Layer Masks")]
-	[SerializeField] public LayerMask BuildingPlacementCollisionLayers;
-	[SerializeField] public LayerMask ScaffoldingPlacementCollisionLayers;
-	[SerializeField] public LayerMask BuildingSupportsCollisionLayers;
-	[SerializeField] public LayerMask ScaffoldingSupportsCollisionLayers;
-	[SerializeField] public LayerMask CollisionLayersExcludeGround;
-	[SerializeField] public LayerMask BuildingObjectLayer;
+	[SerializeField] LayerMask _buildingPlacementCollisionLayers;
+	[SerializeField] LayerMask _scaffoldingPlacementCollisionLayers;
+	[SerializeField] LayerMask _buildingSupportsCollisionLayers;
+	[SerializeField] LayerMask _scaffoldingSupportsCollisionLayers;
+	[SerializeField] LayerMask _collisionLayersExcludeGround;
+	[SerializeField] LayerMask _buildingObjectLayer;
 	[Header("Ghost Materials")]
-	[SerializeField] public Material GhostMaterial;
-	[SerializeField] public Material InvalidGhostMaterial;
-	[SerializeField] public Material RequirementGhostMaterial;
-	[SerializeField] public List<Material> MaterialsToNotReplaceOnBuildingGhost;
-	[SerializeField] public Material BuildingNodeGhost;
-	[SerializeField] public Material BuildingNodeGhost_WrongType;
+	[SerializeField] Material _ghostMaterial;
+	[SerializeField] Material _invalidGhostMaterial;
+	[SerializeField] Material _requirementGhostMaterial;
+	[SerializeField] List<Material> _materialsToNotReplaceOnBuildingGhost;
+	[SerializeField] Material _buildingNodeGhost;
+	[SerializeField] Material _buildingNodeGhost_WrongType;
 	[Header("Indicator Materials")]
-	[SerializeField] public Material GreenLightMaterial;
-	[SerializeField] public Material RedLightMaterial;
-	[SerializeField] public Material OrangeLightMaterial;
+	[SerializeField] Material _greenLightMaterial;
+	[SerializeField] Material _redLightMaterial;
+	[SerializeField] Material _orangeLightMaterial;
 	[Header("Prefabs")]
-	[SerializeField] public BuildingCrate BuildingCratePrefab;
-	[SerializeField] public ToolBuilder BuildingToolPrefab;
+	[SerializeField] BuildingCrate _buildingCratePrefab;
+	[SerializeField] ToolBuilder _buildingToolPrefab;
+	#endregion
+
+	#region public API — read-only getters (only what external scripts need)
+	public LayerMask GetBuildingPlacementCollisionLayers() => _buildingPlacementCollisionLayers;
+	public LayerMask GetBuildingSupportsCollisionLayers() => _buildingSupportsCollisionLayers;
+	public LayerMask GetScaffoldingSupportsCollisionLayers() => _scaffoldingSupportsCollisionLayers;
+	public Material GetBuildingNodeGhost() => _buildingNodeGhost;
+	public Material GetBuildingNodeGhost_WrongType() => _buildingNodeGhost_WrongType;
+	public Material GetGreenLightMaterial() => _greenLightMaterial;
+	public Material GetRedLightMaterial() => _redLightMaterial;
+	public Material GetOrangeLightMaterial() => _orangeLightMaterial;
+	public BuildingCrate GetBuildingCratePrefab() => _buildingCratePrefab;
+	public ToolBuilder GetBuildingToolPrefab() => _buildingToolPrefab;
 	#endregion
 
 	#region private API
@@ -17960,7 +17986,9 @@ public class BuildingManager : Singleton<BuildingManager>
 	#endregion
 
 	#region public API
-	public bool CurrentObjectIsSnapped;
+	bool _currentObjectIsSnapped;
+	public bool GetCurrentObjectIsSnapped() => _currentObjectIsSnapped;
+	public void SetCurrentObjectIsSnapped(bool val) => _currentObjectIsSnapped = val;
 	public Transform GhostObjectTransform => ghostObject?.transform;
 	public BuildingObject GetGhostObject() => ghostObject;
 	public bool IsInBuildingMode() => ghostObject != null;
@@ -17973,8 +18001,8 @@ public class BuildingManager : Singleton<BuildingManager>
 		if (ghostObject == null) return CanPlaceBuilding.invalid;
 		// overlap check using ghost colliders
 		LayerMask mask = nodeReq == PlacementNodeRequirement.none
-			? (canPlaceInTerrain ? ScaffoldingPlacementCollisionLayers : BuildingPlacementCollisionLayers)
-			: CollisionLayersExcludeGround;
+			? (canPlaceInTerrain ? _scaffoldingPlacementCollisionLayers : _buildingPlacementCollisionLayers)
+			: _collisionLayersExcludeGround;
 		var colliders = new List<Collider>();
 		if (ghostObject.BuildingPlacementColliderObject != null)
 			colliders.AddRange(ghostObject.BuildingPlacementColliderObject.GetComponentsInChildren<Collider>());
@@ -18003,13 +18031,13 @@ public class BuildingManager : Singleton<BuildingManager>
 			return CanPlaceBuilding.requirementsNotMet;
 		}
 		// flat ground check
-		if (requiresFlat && !UtilsPhaseD.IsFlatGround(position, BuildingPlacementCollisionLayers, out _))
+		if (requiresFlat && !UtilsPhaseD.IsFlatGround(position, _buildingPlacementCollisionLayers, out _))
 			return CanPlaceBuilding.requirementsNotMet;
 		// conveyor snap
 		if (isEligibleForSnapping && ghostObject.ConveyorInputSnapPositions.Count > 0)
 		{
 			var snaps = new List<BuildingRotationInfo>();
-			var nearby = Physics.OverlapSphere(ghostObject.transform.position, 1.25f, BuildingObjectLayer);
+			var nearby = Physics.OverlapSphere(ghostObject.transform.position, 1.25f, _buildingObjectLayer);
 			foreach (var col in nearby)
 			{
 				var neighbor = col.GetComponentInParent<BuildingObject>();
@@ -18022,8 +18050,8 @@ public class BuildingManager : Singleton<BuildingManager>
 			if (snaps.Count > 0)
 			{
 				var best = dataService.ResolveBestSnap(snaps);
-				if (activeTool != null) activeTool.CurrentRotation = best.Rotation;
-				CurrentObjectIsSnapped = true;
+				if (activeTool != null) activeTool.SetCurrentRotation(best.Rotation);
+				_currentObjectIsSnapped = true;
 			}
 		}
 		return CanPlaceBuilding.valid;
@@ -18035,14 +18063,14 @@ public class BuildingManager : Singleton<BuildingManager>
 		if (previousGhostPos != ghostObject.transform.position)
 		{
 			isEligibleForSnapping = true;
-			CurrentObjectIsSnapped = false;
+			_currentObjectIsSnapped = false;
 			previousGhostPos = ghostObject.transform.position;
 		}
-		Material mat = GhostMaterial;
+		Material mat = _ghostMaterial;
 		var result = CanPlaceObject(gridPos, prefab, rotation, prefab.RequiresFlatGround,
-			activeTool.Definition.CanBePlacedInTerrain, prefab.PlacementNodeRequirement, activeTool);
-		if (result == CanPlaceBuilding.invalid) mat = InvalidGhostMaterial;
-		else if (result == CanPlaceBuilding.requirementsNotMet) mat = RequirementGhostMaterial;
+			activeTool.GetDefinition().CanBePlacedInTerrain, prefab.PlacementNodeRequirement, activeTool);
+		if (result == CanPlaceBuilding.invalid) mat = _invalidGhostMaterial;
+		else if (result == CanPlaceBuilding.requirementsNotMet) mat = _requirementGhostMaterial;
 		// swap all renderer materials to ghost material
 		if (ghostObject != null)
 		{
@@ -18052,7 +18080,7 @@ public class BuildingManager : Singleton<BuildingManager>
 					continue;
 				var mats = r.sharedMaterials;
 				for (int i = 0; i < mats.Length; i++)
-					if (!MaterialsToNotReplaceOnBuildingGhost.Contains(mats[i]))
+					if (!_materialsToNotReplaceOnBuildingGhost.Contains(mats[i]))
 						mats[i] = mat;
 				r.sharedMaterials = mats;
 			}
@@ -18062,7 +18090,7 @@ public class BuildingManager : Singleton<BuildingManager>
 	public void CleanUpGhostObject()
 	{
 		isEligibleForSnapping = true;
-		CurrentObjectIsSnapped = false;
+		_currentObjectIsSnapped = false;
 		if (ghostObject != null) { Destroy(ghostObject.gameObject); ghostObject = null; }
 	}
 	#endregion
@@ -18398,16 +18426,23 @@ public class BuildingCrate : BaseSellableItem, IInteractable
 	[SerializeField] List<SO_InteractionOption> _interactions;
 	#endregion
 
+	#region private API
+	SO_BuildingInventoryDefinition _definition;
+	int _quantity = 1;
+	#endregion
+
 	#region public API
-	public SO_BuildingInventoryDefinition Definition;
-	public int Quantity = 1;
+	public SO_BuildingInventoryDefinition GetDefinition() => _definition;
+	public void SetDefinition(SO_BuildingInventoryDefinition def) => _definition = def;
+	public int GetQuantity() => _quantity;
+	public void SetQuantity(int qty) => _quantity = qty;
 
 	/// <summary> creates ToolBuilder from definition, fires pickup event, destroys crate </summary>
 	public void TryAddToInventory()
 	{
-		if (Definition == null) { Debug.LogWarning("BuildingCrate missing Definition!"); return; }
+		if (_definition == null) { Debug.LogWarning("BuildingCrate missing Definition!"); return; }
 		// purpose: InventoryOrchestrator creates ToolBuilder from this definition
-		GameEvents.RaiseBuildingTakeRequested(Definition, Quantity);
+		GameEvents.RaiseBuildingTakeRequested(_definition, _quantity);
 		Destroy(gameObject);
 	}
 	public override float GetSellValue()
@@ -18420,7 +18455,7 @@ public class BuildingCrate : BaseSellableItem, IInteractable
 	#region public API — IInteractable
 	public bool ShouldUseInteractionWheel() => false;
 	public List<SO_InteractionOption> GetOptions() => _interactions;
-	public string GetObjectName() => Definition?.Name ?? "Crate";
+	public string GetObjectName() => _definition?.Name ?? "Crate";
 	public void Interact(SO_InteractionOption selectedOption)
 	{
 		if (selectedOption.interactionType == InteractionType.Take) TryAddToInventory();
@@ -18431,10 +18466,10 @@ public class BuildingCrate : BaseSellableItem, IInteractable
 	#region Unity Life Cycle
 	private void Start()
 	{
-		if (Definition == null || Definition.GetIcon() == null) return;
-		foreach (var img in GetComponentsInChildren<Image>()) img.sprite = Definition.GetIcon();
+		if (_definition == null || _definition.GetIcon() == null) return;
+		foreach (var img in GetComponentsInChildren<Image>()) img.sprite = _definition.GetIcon();
 		foreach (var txt in GetComponentsInChildren<TMP_Text>())
-			txt.text = Quantity > 1 ? $"x{Quantity}" : "";
+			txt.text = _quantity > 1 ? $"x{_quantity}" : "";
 	}
 	#endregion
 
@@ -18529,9 +18564,9 @@ public class BuildingObject : MonoBehaviour, IInteractable
 		Vector3 pos = _buildingCrateSpawnPoint ? _buildingCrateSpawnPoint.position : (transform.position + new Vector3(0f, 0.25f, 0f));
 		Quaternion rot = _buildingCrateSpawnPoint ? _buildingCrateSpawnPoint.rotation : Quaternion.identity;
 		var crate = Instantiate(
-			_definition.PackedPrefab ? _definition.PackedPrefab : Singleton<BuildingManager>.Ins.BuildingCratePrefab,
+			_definition.PackedPrefab ? _definition.PackedPrefab : Singleton<BuildingManager>.Ins.GetBuildingCratePrefab(),
 			pos, rot);
-		crate.Definition = _definition;
+		crate.SetDefinition(_definition);
 		var rb = crate.GetComponent<Rigidbody>();
 		if (rb != null)
 		{
@@ -18586,7 +18621,7 @@ public class BuildingObject : MonoBehaviour, IInteractable
 		_physicalColliderObject?.SetActive(false);
 		_buildingPlacementColliderObject?.SetActive(false);
 		if (Physics.Raycast(transform.position, Vector3.up, out var hit, 20f,
-			Singleton<BuildingManager>.Ins.BuildingSupportsCollisionLayers))
+			Singleton<BuildingManager>.Ins.GetBuildingSupportsCollisionLayers()))
 		{
 			var support = hit.collider.GetComponentInParent<ModularBuildingSupports>();
 			if (support != null) support.RespawnSupports(RespawnNextFrame: true);
@@ -18644,8 +18679,8 @@ public class BuildingPlacementNode : MonoBehaviour
 		if (show && _ghostPrefab != null)
 		{
 			Material mat = (requirement == PlacementNodeRequirement.none || requirement == _requirementType)
-				? Singleton<BuildingManager>.Ins.BuildingNodeGhost
-				: Singleton<BuildingManager>.Ins.BuildingNodeGhost_WrongType;
+				? Singleton<BuildingManager>.Ins.GetBuildingNodeGhost()
+				: Singleton<BuildingManager>.Ins.GetBuildingNodeGhost_WrongType();
 			foreach (var r in _ghostPrefab.GetComponentsInChildren<Renderer>())
 			{
 				var mats = r.sharedMaterials;
@@ -18715,8 +18750,8 @@ public class ChuteHatch : MonoBehaviour, IInteractable
 		_isClosed = closed;
 		// Phase H: play toggle sound
 		ChangeLightMaterial(closed
-			? Singleton<BuildingManager>.Ins.RedLightMaterial
-			: Singleton<BuildingManager>.Ins.GreenLightMaterial);
+			? Singleton<BuildingManager>.Ins.GetRedLightMaterial()
+			: Singleton<BuildingManager>.Ins.GetGreenLightMaterial());
 		// → swap active objects
 		if (_closedObjects != null) _closedObjects.SetActive(closed);
 		if (_openObjects != null) _openObjects.SetActive(!closed);
@@ -18801,7 +18836,7 @@ public class ChuteTop : MonoBehaviour
 		// → raycast up 1m to check for Hopper building above
 		Vector3 origin = transform.position + Vector3.up * 0.25f;
 		if (Physics.Raycast(origin, Vector3.up, out var hit, 1f,
-			Singleton<BuildingManager>.Ins.BuildingPlacementCollisionLayers))
+			Singleton<BuildingManager>.Ins.GetBuildingPlacementCollisionLayers()))
 		{
 			// Phase E: check for Hopper component
 			// if (hit.collider.GetComponentInParent<Hopper>() != null) ConvertToHopperVersion();
@@ -18851,7 +18886,10 @@ public class ModularBuildingSupports : BaseModularSupports
 
 	#region private API
 	List<GameObject> spawnedSupports = new List<GameObject>();
-	public SupportType SupportType => _supportType;
+	#endregion
+
+	#region public API — read-only getter
+	public SupportType GetSupportType() => _supportType;
 	#endregion
 
 	#region public API
@@ -18862,7 +18900,7 @@ public class ModularBuildingSupports : BaseModularSupports
 		Vector3 pos = transform.position;
 		Quaternion rot = transform.rotation * Quaternion.Euler(_rotationOffset);
 		if (!Physics.Raycast(pos + transform.rotation * _raycastOffset, Vector3.down,
-			out var hit, _supportSpacing * _maxSupports, Singleton<BuildingManager>.Ins.BuildingSupportsCollisionLayers))
+			out var hit, _supportSpacing * _maxSupports, Singleton<BuildingManager>.Ins.GetBuildingSupportsCollisionLayers()))
 			return;
 		int numSupports = Mathf.Min(Mathf.RoundToInt((hit.distance - _raycastOffset.y) / _supportSpacing) + 1, _maxSupports);
 		bool spawnTop = _topSupportPrefab != null;
@@ -19095,7 +19133,7 @@ public class ScaffoldingSupportLeg : BaseModularSupports
 		foreach (Transform child in transform) Destroy(child.gameObject);
 		if (_buildingObject != null && !_buildingObject.BuildingSupportsEnabled) return;
 		if (!Physics.Raycast(transform.position, Vector3.down, out var hit, 20f,
-			Singleton<BuildingManager>.Ins.ScaffoldingSupportsCollisionLayers)) return;
+			Singleton<BuildingManager>.Ins.GetScaffoldingSupportsCollisionLayers())) return;
 		int count = Mathf.RoundToInt(hit.distance / _supportSpacing) + 1;
 		Vector3 pos = transform.position;
 		for (int i = 0; i < count; i++)
@@ -19127,31 +19165,41 @@ using UnityEngine;
 /// </summary>
 public class ConveyorBatchRenderingComponent : MonoBehaviour
 {
+	#region Inspector Fields
+	[SerializeField] int _meshIndex;
+	#endregion
+
+	#region private API
+	static bool _needsUpdate = true;
+	Matrix4x4 _cachedMatrix;
+	#endregion
+
 	#region public API
 	public static readonly List<ConveyorBatchRenderingComponent> AllConveyors = new List<ConveyorBatchRenderingComponent>();
-	public static bool NeedsUpdate = true;
-	public Matrix4x4 CachedMatrix;
-	[SerializeField] public int MeshIndex;
+	public static bool GetNeedsUpdate() => _needsUpdate;
+	public static void SetNeedsUpdate(bool val) => _needsUpdate = val;
+	public Matrix4x4 GetCachedMatrix() => _cachedMatrix;
+	public int GetMeshIndex() => _meshIndex;
 
 	public void RefreshMatrix()
 	{
-		CachedMatrix = Matrix4x4.TRS(transform.position, transform.rotation, transform.lossyScale);
-		NeedsUpdate = true;
+		_cachedMatrix = Matrix4x4.TRS(transform.position, transform.rotation, transform.lossyScale);
+		_needsUpdate = true;
 	}
 	#endregion
 
 	#region Unity Life Cycle
 	private void OnEnable()
 	{
-		CachedMatrix = Matrix4x4.TRS(transform.position, transform.rotation, transform.lossyScale);
+		_cachedMatrix = Matrix4x4.TRS(transform.position, transform.rotation, transform.lossyScale);
 		AllConveyors.Add(this);
-		NeedsUpdate = true;
+		_needsUpdate = true;
 		GetComponent<Renderer>().enabled = false;
 	}
 	private void OnDisable()
 	{
 		AllConveyors.Remove(this);
-		NeedsUpdate = true;
+		_needsUpdate = true;
 	}
 	#endregion
 }
@@ -19177,9 +19225,17 @@ using UnityEngine;
 public class ConveyorBelt : MonoBehaviour
 {
 	#region Inspector Fields
-	[SerializeField] public float Speed = 0.8f;
-	[SerializeField] public bool Disabled;
-	[SerializeField] public bool RetainYVelocity;
+	[SerializeField] float _speed = 0.8f;
+	[SerializeField] bool _disabled;
+	[SerializeField] bool _retainYVelocity;
+	#endregion
+
+	#region public API — getters/setters (ConveyorBlocker reads/writes Disabled, subclasses read Speed)
+	public float GetSpeed() => _speed;
+	public void SetSpeed(float val) { _speed = val; _pushVelocity = transform.forward * _speed; }
+	public bool GetDisabled() => _disabled;
+	public void SetDisabled(bool val) => _disabled = val;
+	public bool GetRetainYVelocity() => _retainYVelocity;
 	#endregion
 
 	#region private API
@@ -19193,8 +19249,8 @@ public class ConveyorBelt : MonoBehaviour
 	/// <summary> change speed at runtime </summary>
 	public void ChangeSpeed(float newSpeed)
 	{
-		Speed = newSpeed;
-		_pushVelocity = transform.forward * Speed;
+		_speed = newSpeed;
+		_pushVelocity = transform.forward * _speed;
 	}
 	/// <summary> add a physics object to this belt's push list </summary>
 	public void AddPhysicsObject(BasePhysicsObject obj)
@@ -19231,9 +19287,9 @@ public class ConveyorBelt : MonoBehaviour
 	}
 	protected virtual void FixedUpdate()
 	{
-		if (Disabled || _physicsObjectsOnBelt.Count == 0) return;
+		if (_disabled || _physicsObjectsOnBelt.Count == 0) return;
 		for (int i = _physicsObjectsOnBelt.Count - 1; i >= 0; i--)
-			_physicsObjectsOnBelt[i].AddConveyorVelocity(_pushVelocity, RetainYVelocity);
+			_physicsObjectsOnBelt[i].AddConveyorVelocity(_pushVelocity, _retainYVelocity);
 	}
 	private void OnTriggerEnter(Collider other)
 	{
@@ -19288,14 +19344,14 @@ public class ConveyorBeltShaker : ConveyorBelt
 	}
 	protected override void FixedUpdate()
 	{
-		if (Disabled || _physicsObjectsOnBelt.Count == 0) return;
+		if (GetDisabled() || _physicsObjectsOnBelt.Count == 0) return;
 		float t = Time.fixedTime;
 		float lateral = Mathf.Sign(Mathf.Sin(t * MathF.PI * 2f * _shakeFrequency));
 		Vector3 shake = rightDir * (_shakeSpeed * lateral);
 		float vertical = Mathf.Sin(t * MathF.PI * 2f * _verticalShakeFrequency);
 		shake += upDir * (_verticalShakeSpeed * vertical);
 		for (int i = _physicsObjectsOnBelt.Count - 1; i >= 0; i--)
-			_physicsObjectsOnBelt[i].AddConveyorVelocity(_pushVelocity + shake, RetainYVelocity);
+			_physicsObjectsOnBelt[i].AddConveyorVelocity(_pushVelocity + shake, GetRetainYVelocity());
 	}
 	#endregion
 }
@@ -19327,11 +19383,11 @@ public class ConveyorBeltShakerHorizontal : ConveyorBelt
 	}
 	protected override void FixedUpdate()
 	{
-		if (Disabled || _physicsObjectsOnBelt.Count == 0) return;
+		if (GetDisabled() || _physicsObjectsOnBelt.Count == 0) return;
 		float lateral = Mathf.Sign(Mathf.Sin(Time.fixedTime * MathF.PI * 2f * _shakeFrequency));
 		Vector3 shake = rightDir * (_shakeSpeed * lateral);
 		for (int i = _physicsObjectsOnBelt.Count - 1; i >= 0; i--)
-			_physicsObjectsOnBelt[i].AddConveyorVelocity(_pushVelocity + shake, RetainYVelocity);
+			_physicsObjectsOnBelt[i].AddConveyorVelocity(_pushVelocity + shake, GetRetainYVelocity());
 	}
 	#endregion
 }
@@ -19354,7 +19410,7 @@ public class ConveyorBlocker : MonoBehaviour
 	private void Update()
 	{
 		if (_hinge != null && _conveyor != null)
-			_conveyor.Disabled = _hinge.angle < _closedAngle;
+			_conveyor.SetDisabled(_hinge.angle < _closedAngle);
 	}
 	#endregion
 }
@@ -19438,19 +19494,20 @@ public class ConveyorRenderer : MonoBehaviour
 	#region Unity Life Cycle
 	private void LateUpdate()
 	{
-		if (ConveyorBatchRenderingComponent.NeedsUpdate)
+		if (ConveyorBatchRenderingComponent.GetNeedsUpdate())
 		{
 			meshBatches.Clear();
 			foreach (var conv in ConveyorBatchRenderingComponent.AllConveyors)
 			{
-				if (!meshBatches.TryGetValue(conv.MeshIndex, out var list))
+				int idx = conv.GetMeshIndex();
+				if (!meshBatches.TryGetValue(idx, out var list))
 				{
 					list = new List<Matrix4x4>();
-					meshBatches[conv.MeshIndex] = list;
+					meshBatches[idx] = list;
 				}
-				list.Add(conv.CachedMatrix);
+				list.Add(conv.GetCachedMatrix());
 			}
-			ConveyorBatchRenderingComponent.NeedsUpdate = false;
+			ConveyorBatchRenderingComponent.SetNeedsUpdate(false);
 		}
 		foreach (var kvp in meshBatches)
 		{
@@ -19630,53 +19687,61 @@ public class ToolBuilder : BaseHeldTool
 	[SerializeField] float _useRange = 3f;
 	#endregion
 
-	#region public API
-	public SO_BuildingInventoryDefinition Definition;
-	public int Quantity = 1;
-	public Quaternion CurrentRotation = Quaternion.identity;
+	#region private API
+	SO_BuildingInventoryDefinition _definition;
+	int _quantity = 1;
+	Quaternion _currentRotation = Quaternion.identity;
 	int currentPrefabIndex;
 	bool isMirrored;
+	#endregion
 
+	#region public API
+	public SO_BuildingInventoryDefinition GetDefinition() => _definition;
+	public void SetDefinition(SO_BuildingInventoryDefinition def) => _definition = def;
+	public int GetQuantity() => _quantity;
+	public void SetQuantity(int qty) => _quantity = qty;
+	public Quaternion GetCurrentRotation() => _currentRotation;
+	public void SetCurrentRotation(Quaternion rot) => _currentRotation = rot;
 	public bool IsUsingMirroredVersion() => isMirrored;
 	/// <summary> configure from definition — called after Instantiate </summary>
 	public void Setup()
 	{
-		if (Definition == null) return;
-		_name = Definition.Name;
-		_inventoryIcon = Definition.GetIcon();
+		if (_definition == null) return;
+		_name = _definition.Name;
+		_inventoryIcon = _definition.GetIcon();
 	}
 	/// <summary> get the currently selected building prefab </summary>
 	public BuildingObject GetCurrentPrefab()
 	{
-		if (Definition == null || Definition.BuildingPrefabs == null || Definition.BuildingPrefabs.Count == 0) return null;
-		currentPrefabIndex = Mathf.Clamp(currentPrefabIndex, 0, Definition.BuildingPrefabs.Count - 1);
-		return Definition.BuildingPrefabs[currentPrefabIndex];
+		if (_definition == null || _definition.BuildingPrefabs == null || _definition.BuildingPrefabs.Count == 0) return null;
+		currentPrefabIndex = Mathf.Clamp(currentPrefabIndex, 0, _definition.BuildingPrefabs.Count - 1);
+		return _definition.BuildingPrefabs[currentPrefabIndex];
 	}
 	#endregion
 
 	#region public API — overrides
 	public override void PrimaryFire()
 	{
-		if (Owner == null || Definition == null) return;
+		if (Owner == null || _definition == null) return;
 		var prefab = GetCurrentPrefab();
 		if (prefab == null) return;
 		var mgr = Singleton<BuildingManager>.Ins;
 		Camera cam = Owner.PlayerCam;
 		if (!Physics.Raycast(cam.transform.position, cam.transform.forward, out var hit, _useRange)) return;
 		Vector3Int gridPos = mgr.DataService.GetClosestGridPosition(hit.point);
-		var canPlace = mgr.CanPlaceObject(gridPos, prefab, CurrentRotation,
-			prefab.RequiresFlatGround, Definition.CanBePlacedInTerrain, prefab.PlacementNodeRequirement, this);
+		var canPlace = mgr.CanPlaceObject(gridPos, prefab, _currentRotation,
+			prefab.RequiresFlatGround, _definition.CanBePlacedInTerrain, prefab.PlacementNodeRequirement, this);
 		if (canPlace != CanPlaceBuilding.valid) return;
 		// place the real building
 		var placed = Object.Instantiate(prefab,
 			gridPos + new Vector3(0.5f, 0f, 0.5f) + prefab.BuildModePlacementOffset,
-			CurrentRotation);
+			_currentRotation);
 		placed.IsGhost = false;
 		// purpose: quest/research systems track building placed
 		GameEvents.RaiseBuildingPlaced(placed);
 		// consume quantity
-		Quantity--;
-		if (Quantity <= 0)
+		_quantity--;
+		if (_quantity <= 0)
 		{
 			// remove tool from inventory + cleanup ghost
 			mgr.CleanUpGhostObject();
@@ -19685,19 +19750,19 @@ public class ToolBuilder : BaseHeldTool
 		}
 		else
 		{
-			mgr.CurrentObjectIsSnapped = false;
+			mgr.SetCurrentObjectIsSnapped(false);
 		}
 	}
 	public override void Reload()
 	{
-		float dir = Definition != null && Definition.UseReverseRotationDirection ? -90f : 90f;
-		CurrentRotation *= Quaternion.Euler(0f, dir, 0f);
-		Singleton<BuildingManager>.Ins.CurrentObjectIsSnapped = false;
+		float dir = _definition != null && _definition.UseReverseRotationDirection ? -90f : 90f;
+		_currentRotation *= Quaternion.Euler(0f, dir, 0f);
+		Singleton<BuildingManager>.Ins.SetCurrentObjectIsSnapped(false);
 	}
 	public override void QButtonPressed()
 	{
-		if (Definition == null || Definition.BuildingPrefabs == null || Definition.BuildingPrefabs.Count <= 1) return;
-		currentPrefabIndex = (currentPrefabIndex + 1) % Definition.BuildingPrefabs.Count;
+		if (_definition == null || _definition.BuildingPrefabs == null || _definition.BuildingPrefabs.Count <= 1) return;
+		currentPrefabIndex = (currentPrefabIndex + 1) % _definition.BuildingPrefabs.Count;
 		isMirrored = !isMirrored;
 		Singleton<BuildingManager>.Ins.CleanUpGhostObject();
 	}
@@ -19705,14 +19770,14 @@ public class ToolBuilder : BaseHeldTool
 	{
 		// drop as crate, not raw tool
 		Singleton<BuildingManager>.Ins.CleanUpGhostObject();
-		if (Definition != null)
+		if (_definition != null)
 		{
 			var crate = Object.Instantiate(
-				Definition.PackedPrefab ? Definition.PackedPrefab : Singleton<BuildingManager>.Ins.BuildingCratePrefab,
+				_definition.PackedPrefab ? _definition.PackedPrefab : Singleton<BuildingManager>.Ins.GetBuildingCratePrefab(),
 				Owner != null ? Owner.PlayerCam.transform.position + Owner.PlayerCam.transform.forward * 1.5f : transform.position,
 				Quaternion.identity);
-			crate.Definition = Definition;
-			crate.Quantity = Quantity;
+			crate.SetDefinition(_definition);
+			crate.SetQuantity(_quantity);
 		}
 		Destroy(gameObject);
 	}
@@ -19721,13 +19786,13 @@ public class ToolBuilder : BaseHeldTool
 	#region Unity Life Cycle
 	private void Update()
 	{
-		if (Owner == null || Definition == null) return;
+		if (Owner == null || _definition == null) return;
 		var prefab = GetCurrentPrefab();
 		if (prefab == null) return;
 		Camera cam = Owner.PlayerCam;
 		if (!Physics.Raycast(cam.transform.position, cam.transform.forward, out var hit, _useRange)) return;
 		Vector3Int gridPos = Singleton<BuildingManager>.Ins.DataService.GetClosestGridPosition(hit.point);
-		Singleton<BuildingManager>.Ins.UpdateGhostObject(gridPos, prefab, CurrentRotation, this);
+		Singleton<BuildingManager>.Ins.UpdateGhostObject(gridPos, prefab, _currentRotation, this);
 		// show placement node ghosts
 		foreach (var node in BuildingPlacementNode.All)
 			node.ShowGhost(true, prefab.PlacementNodeRequirement);
@@ -21131,4 +21196,5 @@ The PlayerController is a textbook God Object but splitting it would be a refact
 - **ToolBuilder fully completed:** Phase B partial had empty PrimaryFire/Update. Now: Update raycasts + UpdateGhostObject, PrimaryFire validates + Instantiates + RaiseBuildingPlaced, DropItem spawns crate instead of raw drop, OnDisable cleans up ghost.
 - **Enum camelCase convention caught by memory retrieval:** All Phase D enum values (CanPlaceBuilding.valid, PlacementNodeRequirement.none, SupportType.flat, etc.) fixed to camelCase per GOAL.md convention. Field names stay PascalCase (they're public SerializeField, not enum values). Had to fix an accidental duplicate-field bug caused by a multi_edit replacing field names alongside enum values.
 - **Cross-phase modifications documented:** Phase D needs 5 modifications to earlier phases: InteractionType enum (add pack/switchDirection), BasePhysicsObject conveyor stubs, FresnelHighlighter building/wrench checks, SO_ShopItemDef building definition field, AutoMiner.SetResourceDefinition method.
-- **Test scripts enriched:** BuildingTest now has Take (U) and Pack (I) keys + FindNearestBuilding raycast helper + OnBuildingTakeRequested subscription. ConveyorTest now has OnOreSold + OnOreLimitChanged subscriptions + P key for snapshot. Both have README TextArea + comprehensive class summeries.
+- **Test scripts enriched:** BuildingTest now has Take (U) and Pack (I) keys + FindNearestBuilding raycast helper + OnBuildingTakeRequested subscription. ConveyorTest now has OnOreSold + OnOreLimitChanged subscriptions + P key for snapshot. Both have README TextArea + comprehensive class summaries.
+
