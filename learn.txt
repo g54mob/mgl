@@ -17036,6 +17036,1084 @@ M/N → menu toggle";
 	#endregion
 }
 
+<!-- ==== FILE: learn/phase-d(New)/GUIDE.md ==== -->
+# Phase D — Building & Conveyor System (15%)
+
+## What It Looks Like When Running
+
+```
+Open shop → buy "Conveyor Belt" → a crate spawns near elevator.
+Walk to crate, press E → "Take" → goes into hotbar as ToolBuilder.
+
+Equip the conveyor tool from hotbar:
+  - A transparent green ghost follows your camera aim, snapped to 1m grid
+  - Move mouse → ghost slides along grid positions
+  - Look at invalid spot (overlapping building) → ghost turns red
+  - Press R → ghost rotates 90°
+  - Press Q → ghost mirrors (for L/R variants)
+  - Place near another conveyor → auto-snaps input→output
+  - Left-click → real conveyor belt instantiates at ghost position
+  - Tool quantity decreases. At 0, tool is consumed.
+
+Conveyor belt in the world:
+  - Ore touching the belt trigger gets pushed forward via physics
+  - Place multiple belts end-to-end → ore flows along the line
+  - Belt has visual texture scroll (ConveyorRenderer batch rendering)
+
+Conveyor variants:
+  - ConveyorBeltShaker: oscillates left-right + up-down (sieving)
+  - ConveyorBeltShakerHorizontal: oscillates left-right only
+  - ConveyorBlocker: hinge gate, disables belt when closed
+  - ConveyorBlockerT2: interactable sliding gate (IInteractable "Toggle")
+  - ConveyorSplitterT2: rotating arm that alternates ore direction
+  - RoutingConveyor: interactable direction switch (IInteractable)
+
+Equip hammer → look at placed building:
+  - FresnelHighlighter outlines it in cyan
+  - Press E → interaction wheel: "Take" or "Pack"
+  - Take → building goes back into inventory as ToolBuilder
+  - Pack → building becomes a crate on the ground
+
+Buildings on uneven ground:
+  - Modular scaffolding legs raycast downward
+  - Legs spawn dynamically to reach the floor
+  - Toggle supports on/off with wrench tool
+```
+
+---
+
+## Folder Structure
+
+```
+phase-d(New)/
+├── 0-Core/
+│   └── GameEvents.cs                           (partial: OnBuildingPlaced, OnBuildingRemoved)
+├── 1-Managers/
+│   ├── BuildingManager.cs                       → "I manage ghost preview + grid placement + conveyor snap"
+│   └── ConveyorBeltManager.cs                   → "I apply accumulated conveyor velocities in FixedUpdate"
+├── 2-Data/
+│   ├── SO_BuildingInventoryDefinition.cs        → "I define a building type (name, icon, prefabs, stack size)"
+│   ├── DataService/
+│   │   └── BuildingDataService.cs               → "I validate grid placement + detect conveyor snap alignment"
+│   ├── Enums/
+│   │   └── GlobalEnumsD.cs                      → "CanPlaceBuilding, PlacementNodeRequirement, SupportType"
+│   └── Entities/
+│       ├── BuildingRotationInfo.cs              → "snap rotation + mirror flag for conveyor alignment"
+│       └── BuildingObjectEntry.cs               → "save data for one placed building (Phase G)"
+├── 3-MonoBehaviours/
+│   ├── Building/
+│   │   ├── BuildingObject.cs                    → "I'm a placed building with IInteractable (Take/Pack)"
+│   │   ├── BuildingCrate.cs                     → "I'm a packed building crate on the ground"
+│   │   ├── BuildingPlacementNode.cs             → "I mark where AutoMiners attach (resource node spots)"
+│   │   ├── BaseModularSupports.cs               → "I'm the base for scaffolding leg systems"
+│   │   ├── ModularBuildingSupports.cs           → "I spawn dynamic scaffolding legs via raycast"
+│   │   └── ScaffoldingSupportLeg.cs             → "I spawn simple repeating support legs"
+│   ├── Conveyor/
+│   │   ├── ConveyorBelt.cs                      → "I push physics objects forward via trigger"
+│   │   ├── ConveyorBeltShaker.cs                → "I shake left-right + up-down (sieving table)"
+│   │   ├── ConveyorBeltShakerHorizontal.cs      → "I shake left-right only"
+│   │   ├── ConveyorBlocker.cs                   → "I disable belt when hinge gate is closed"
+│   │   ├── ConveyorBlockerT2.cs                 → "I'm an interactable sliding gate blocker"
+│   │   ├── ConveyorSplitterT2.cs                → "I swing a rotating arm to alternate ore direction"
+│   │   ├── RoutingConveyor.cs                   → "I'm an interactable direction switch conveyor"
+│   │   ├── ConveyorRenderer.cs                  → "I batch-render all conveyor meshes via DrawMeshInstanced"
+│   │   ├── ConveyorBatchRenderingComponent.cs   → "I cache my transform matrix for batch rendering"
+│   │   └── ConveyorSoundSource.cs               → "I mark where conveyor sound plays (Phase H)"
+│   └── Tool/
+│       └── ToolBuilder.cs                       → "I complete the Phase B partial — ghost + grid + place"
+├── 4-Utils/
+│   ├── UtilsPhaseD.cs                           → "grid math + building placement helpers"
+│   └── PhaseDLOG.cs                             → "building/conveyor snapshot formatters"
+└── 5-Tests/
+    ├── BuildingTest.cs                           → "I test place/rotate/snap without player"
+    ├── ConveyorTest.cs                           → "I test ore flows along belt chain"
+    └── Manual/
+        ├── BuildingPlacementTest.md             (ghost preview, grid snap, rotation, conveyor snap)
+        ├── ConveyorFlowTest.md                  (belt texture scroll, ore flow, variants)
+        └── ScaffoldingTest.md                   (scaffolding legs raycast, wrench toggle)
+```
+
+---
+
+## Script Purpose — One Sentence Each
+
+| Script | Purpose |
+|--------|---------|
+| `GameEvents.cs` | I deliver Phase D messages (building placed, building removed) |
+| `BuildingManager.cs` | I manage ghost preview, grid placement validation, conveyor snap detection |
+| `ConveyorBeltManager.cs` | I apply accumulated conveyor velocities to registered physics objects in FixedUpdate |
+| `SO_BuildingInventoryDefinition.cs` | I define a building type with name, icon, prefabs, stack size, placement options |
+| `BuildingDataService.cs` | I validate grid placement (overlap, flat ground, node requirement) + detect conveyor snap |
+| `GlobalEnumsD.cs` | I hold Phase D enums: CanPlaceBuilding, PlacementNodeRequirement, SupportType |
+| `BuildingRotationInfo.cs` | I store a snap rotation + mirror flag for conveyor alignment voting |
+| `BuildingObjectEntry.cs` | I store save data for one placed building (Phase G uses this) |
+| `BuildingObject.cs` | I'm a placed building with IInteractable — Take returns to inventory, Pack spawns crate |
+| `BuildingCrate.cs` | I'm a packed building crate on the ground — Take creates ToolBuilder + adds to inventory |
+| `BuildingPlacementNode.cs` | I mark where AutoMiners attach — self-registers, shows ghost indicator |
+| `BaseModularSupports.cs` | I'm the base class for all scaffolding leg systems |
+| `ModularBuildingSupports.cs` | I spawn dynamic scaffolding legs via downward raycast + support type matching |
+| `ScaffoldingSupportLeg.cs` | I spawn simple repeating support legs downward |
+| `ConveyorBelt.cs` | I push physics objects forward via trigger enter/exit + FixedUpdate velocity |
+| `ConveyorBeltShaker.cs` | I extend ConveyorBelt with left-right + up-down oscillation (sieving) |
+| `ConveyorBeltShakerHorizontal.cs` | I extend ConveyorBelt with left-right oscillation only |
+| `ConveyorBlocker.cs` | I disable my paired ConveyorBelt when hinge gate angle exceeds threshold |
+| `ConveyorBlockerT2.cs` | I'm an interactable sliding gate — Toggle opens/closes with tween |
+| `ConveyorSplitterT2.cs` | I swing a rotating arm back and forth to alternate ore flow direction |
+| `RoutingConveyor.cs` | I'm an interactable direction switch — Toggle rotates between two directions |
+| `ConveyorRenderer.cs` | I batch-render all conveyor meshes using DrawMeshInstanced for performance |
+| `ConveyorBatchRenderingComponent.cs` | I cache my transform matrix and self-register for batch rendering |
+| `ConveyorSoundSource.cs` | I mark where conveyor sound plays (Phase H wires audio) |
+| `ToolBuilder.cs` | I complete the Phase B partial — ghost preview, grid snap, place, consume quantity |
+| `UtilsPhaseD.cs` | I hold grid math helpers + building layer utilities |
+| `PhaseDLOG.cs` | I format building/conveyor snapshots for test logging |
+
+---
+
+## Hand-Typing Order (Compile Groups)
+
+### Group 1 — Pure Data
+1. `GlobalEnumsD.cs`
+2. `BuildingRotationInfo.cs`
+3. `BuildingObjectEntry.cs`
+
+**STOP — compile.**
+
+### Group 2 — SO + DataService
+4. `SO_BuildingInventoryDefinition.cs`
+5. `BuildingDataService.cs`
+
+**STOP — compile. Run DEBUG if needed.**
+
+### Group 3 — GameEvents + Utils
+6. `GameEvents.cs` (partial)
+7. `UtilsPhaseD.cs`
+8. `PhaseDLOG.cs`
+
+**STOP — compile.**
+
+### Group 4 — Conveyor Chain
+9. `ConveyorBelt.cs`
+10. `ConveyorBeltShaker.cs`
+11. `ConveyorBeltShakerHorizontal.cs`
+12. `ConveyorBlocker.cs`
+13. `ConveyorBlockerT2.cs`
+14. `ConveyorSplitterT2.cs`
+15. `RoutingConveyor.cs`
+16. `ConveyorBatchRenderingComponent.cs`
+17. `ConveyorRenderer.cs`
+18. `ConveyorSoundSource.cs`
+
+**STOP — compile.**
+
+### Group 5 — Building Chain
+19. `BaseModularSupports.cs`
+20. `ModularBuildingSupports.cs`
+21. `ScaffoldingSupportLeg.cs`
+22. `BuildingObject.cs`
+23. `BuildingCrate.cs`
+24. `BuildingPlacementNode.cs`
+
+**STOP — compile.**
+
+### Group 6 — Managers
+25. `BuildingManager.cs`
+26. `ConveyorBeltManager.cs`
+
+**STOP — compile.**
+
+### Group 7 — ToolBuilder (complete Phase B partial)
+27. `ToolBuilder.cs`
+
+**STOP — compile.**
+
+### Group 8 — Tests
+28. `BuildingTest.cs`
+29. `ConveyorTest.cs`
+
+**STOP — compile. Run all tests + 3 manual tests.**
+
+---
+
+## Vertical Slice Tests (`.cs` — automated bootstrap)
+
+### 1. BuildingTest — Place/Rotate/Snap (UI-Level)
+
+**What you need to type first:** All Phase D scripts + BuildingManager + ToolBuilder
+**What you DON'T need:** Player movement (use test controls), shop, ore
+
+**Controls:**
+- `Space` → place building at grid position ahead
+- `R` → rotate ghost 90°
+- `Q` → cycle building variant
+- `U` → take nearest building back
+- `I` → pack nearest building into crate
+- `O` → log all placed buildings
+
+**Checklist:**
+- [ ] Ghost appears at grid-snapped position
+- [ ] Ghost turns green (valid) or red (invalid/overlap)
+- [ ] R rotates ghost 90° per press
+- [ ] Space places real building at ghost position
+- [ ] Conveyor auto-snap aligns to neighbor output→input
+- [ ] U takes building back into inventory
+- [ ] I packs building into crate on ground
+- [ ] Placement near node → ghost snaps to node position
+
+### 2. ConveyorTest — Ore Flow (UI-Level)
+
+**What you need to type first:** ConveyorBelt + ConveyorBeltManager + Phase C OrePiece + Pool
+**What you DON'T need:** Player, shop, building placement
+
+**Controls:**
+- `Space` → spawn ore piece above first conveyor
+- `U` → toggle ConveyorBlockerT2 (open/close)
+- `I` → toggle RoutingConveyor direction
+
+**Checklist:**
+- [ ] Ore placed on belt → pushed forward at belt speed
+- [ ] Multiple belts end-to-end → ore flows through chain
+- [ ] ConveyorBeltShaker → ore oscillates left-right + up-down
+- [ ] ConveyorBlocker closed → belt disabled, ore stops
+- [ ] ConveyorBlockerT2 Toggle → gate slides, belt state changes
+- [ ] RoutingConveyor Toggle → direction switches
+- [ ] ConveyorSplitterT2 → arm swings, alternates ore direction
+
+---
+
+## Manual Tests (`5-Tests/Manual/*.md`)
+
+> These teach the system's internal flow AND test visually. Setup + How It Works + DO/EXPECT + Checklist.
+
+| # | File | What to verify |
+|---|------|---------------|
+| 1 | `BuildingPlacementTest.md` | Ghost preview: `BuildingManager.UpdateGhostObject` → grid snap → OverlapBox validation → material swap green/red → conveyor snap voting → place via Instantiate |
+| 2 | `ConveyorFlowTest.md` | Belt physics: `ConveyorBelt.OnTriggerEnter` → `AddPhysicsObject` → `FixedUpdate` velocity → `ConveyorBeltManager` applies accumulated velocity. All variants tested. |
+| 3 | `ScaffoldingTest.md` | Support spawning: `BaseModularSupports.Start` → `SpawnSupports` → downward raycast → leg prefab instantiation. Wrench toggle: `EnableBuildingSupports` → `RespawnSupports` |
+
+---
+
+## Art & Scene Work (Non-Script)
+
+### Materials
+
+| Material | Used By | Description |
+|----------|---------|-------------|
+| `M_Ghost_Valid` | BuildingManager | Transparent green for valid placement |
+| `M_Ghost_Invalid` | BuildingManager | Transparent red for invalid/overlapping |
+| `M_Ghost_Requirement` | BuildingManager | Transparent yellow for unmet requirements |
+| `M_BuildingNodeGhost` | BuildingPlacementNode | Shows matching node indicator |
+| `M_BuildingNodeGhost_WrongType` | BuildingPlacementNode | Shows wrong-type node indicator |
+| `M_GreenLight` | AutoMiner/BuildingManager | Green indicator on machines |
+| `M_RedLight` | AutoMiner/BuildingManager | Red indicator on machines |
+
+### Layers
+
+| Name | Used By |
+|------|---------|
+| `BuildingGhost` | Ghost object during placement preview |
+| `BuildingObject` | Placed buildings' physical colliders |
+
+### Building Prefab Hierarchy
+
+```
+ConveyorBelt_Prefab (root)
+├── BuildingObject component (Definition, SavableObjectID, snap positions)
+├── PhysicalColliderObject (child — BoxCollider, layer BuildingObject)
+├── BuildingPlacementColliderObject (child — for overlap checks)
+├── ConveyorBelt component (Speed, trigger collider IsTrigger=true)
+├── ConveyorBatchRenderingComponent (MeshIndex for batch render)
+├── ConveyorInputSnapPositions (empty children marking input snap points)
+├── ConveyorOutputSnapPositions (empty children marking output snap points)
+├── ModularBuildingSupports (optional — for scaffolding)
+└── BuildingCrateSpawnPoint (empty child — where crate spawns on Pack)
+```
+
+---
+
+## Modifications to Earlier Phases
+
+| File (Phase) | How | Change | Why |
+|-------------|-----|--------|-----|
+| `ToolBuilder.cs` (B) | **replace** | Complete placement logic — ghost + grid + place | Phase B was partial stubs |
+| `SO_ShopItemDef.cs` (A) | **direct modify** | Add `SO_BuildingInventoryDefinition` field | Links shop items to building data |
+| `BasePhysicsObject.cs` (B) | **direct modify** | Complete conveyor registration stubs | Phase B had `// Phase D:` stubs |
+| `FresnelHighlighter.cs` (B) | **direct modify** | Add building + wrench highlight checks | Phase D outlines buildings with hammer/wrench |
+
+---
+
+## Source vs Phase Diff
+
+| What | Original Did | What We Did | Why |
+|------|-------------|-------------|-----|
+| BuildingManager | 404 lines, all placement + ghost + snap in one class | Split: `BuildingManager` (ghost/material, 1-Manager) + `BuildingDataService` (pure math validation) | DataService testable without scene |
+| BuildingObject.TryAddToInventory | `FindObjectOfType<PlayerInventory>()` | `GameEvents.RaiseBuildingTakeRequested(definition)` → InventoryOrchestrator subscribes | Decoupled |
+| ConveyorBeltManager | Static Register/Unregister + FixedUpdate velocity | Same pattern — centralized FixedUpdate avoids per-belt overhead | Matches original, good design |
+| RoutingConveyor/ConveyorBlockerT2 | DOTween for animation | Same (DOTween is allowed) or fallback to coroutine lerp | Keep DOTween if available |
+| SetLayerRecursively | In BuildingManager as private | In `UtilsPhaseB.SetLayerRecursively` (already exists) | DRY |
+
+---
+
+## Systems & Testability
+
+### Individual Systems
+
+| # | System | Scripts | Decoupled Via |
+|---|--------|---------|---------------|
+| 1 | **Building Placement** | `BuildingManager`, `BuildingDataService`, `ToolBuilder`, `BuildingPlacementNode` | `OnBuildingPlaced` |
+| 2 | **Building Lifecycle** | `BuildingObject`, `BuildingCrate` | `OnBuildingRemoved`, IInteractable |
+| 3 | **Conveyor Physics** | `ConveyorBelt`, `ConveyorBeltShaker`, `ConveyorBeltShakerHorizontal`, `ConveyorBeltManager` | Self-registration (`AllConveyorBelts`), `BasePhysicsObject` accumulation |
+| 4 | **Conveyor Variants** | `ConveyorBlocker`, `ConveyorBlockerT2`, `ConveyorSplitterT2`, `RoutingConveyor` | IInteractable for toggleable variants |
+| 5 | **Conveyor Rendering** | `ConveyorRenderer`, `ConveyorBatchRenderingComponent` | Static list, DrawMeshInstanced |
+| 6 | **Scaffolding** | `BaseModularSupports`, `ModularBuildingSupports`, `ScaffoldingSupportLeg` | `BuildingObject.EnableBuildingSupports` |
+
+### Testability Matrix
+
+| System | `.cs` Test | `Manual/*.md` | Needs other systems? |
+|--------|-----------|---------------|---------------------|
+| Placement + Ghost | `BuildingTest` | `BuildingPlacementTest.md` | Needs BuildingManager, ToolBuilder |
+| Conveyor Flow | `ConveyorTest` | `ConveyorFlowTest.md` | Needs OrePiece (Phase C), ConveyorBeltManager |
+| Scaffolding | — | `ScaffoldingTest.md` | Needs BuildingObject + ModularBuildingSupports |
+| Building Lifecycle | `BuildingTest` | `BuildingPlacementTest.md` | Needs BuildingManager |
+| Conveyor Variants | `ConveyorTest` | `ConveyorFlowTest.md` | Needs ConveyorBelt base |
+| Batch Rendering | — | `ConveyorFlowTest.md` | Visual only — DrawMeshInstanced |
+
+**6 systems, 27 scripts, 2 `.cs` tests, 3 manual tests. Zero tight coupling between systems.**
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/0-Core/GameEvents.cs ==== -->
+using System;
+using UnityEngine;
+
+/// <summary>
+/// partial extend for phase-d — building placed/removed events
+/// </summary>
+public static partial class GameEvents
+{
+	// when a building was placed in the world >>
+	public static event Action<BuildingObject> OnBuildingPlaced;
+	public static void RaiseBuildingPlaced(BuildingObject building)
+	{
+		LogSubscribersCount(nameof(OnBuildingPlaced), OnBuildingPlaced);
+		GameEvents.OnBuildingPlaced?.Invoke(building);
+	}
+	// << when building placed
+
+	// when a building was removed (taken or packed) >>
+	public static event Action<BuildingObject> OnBuildingRemoved;
+	public static void RaiseBuildingRemoved(BuildingObject building)
+	{
+		LogSubscribersCount(nameof(OnBuildingRemoved), OnBuildingRemoved);
+		GameEvents.OnBuildingRemoved?.Invoke(building);
+	}
+	// << when building removed
+
+	// when a building crate requests to be added to inventory >>
+	public static event Action<SO_BuildingInventoryDefinition, int> OnBuildingTakeRequested;
+	public static void RaiseBuildingTakeRequested(SO_BuildingInventoryDefinition def, int qty = 1)
+	{
+		LogSubscribersCount(nameof(OnBuildingTakeRequested), OnBuildingTakeRequested);
+		GameEvents.OnBuildingTakeRequested?.Invoke(def, qty);
+	}
+	// << when building crate take requested
+}
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/2-Data/DataService/BuildingDataService.cs ==== -->
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+
+/// <summary>
+/// purely C# — validates grid placement + detects conveyor snap alignment.
+/// Ghost instantiation, material swapping, layer setting stay in BuildingManager (Unity API).
+/// Only pure geometry math lives here.
+/// </summary>
+public class BuildingDataService
+{
+	#region public API — Grid
+	/// <summary> snaps world position to 1m integer grid </summary>
+	public Vector3Int GetClosestGridPosition(Vector3 worldPosition)
+	{
+		worldPosition -= new Vector3(0.5f, 0.4f, 0.5f);
+		return new Vector3Int(Mathf.RoundToInt(worldPosition.x), Mathf.RoundToInt(worldPosition.y), Mathf.RoundToInt(worldPosition.z));
+	}
+	#endregion
+
+	#region public API — Snap
+	/// <summary> tests 4 rotations × input/output snap points, returns entries where distance < 0.25 </summary>
+	public List<BuildingRotationInfo> GetNearbySnapConnections(Vector3 ghostPos, BuildingObject building, BuildingObject neighbor, bool isMirrored)
+	{
+		var results = new List<BuildingRotationInfo>();
+		// test neighbor outputs → building inputs (4 rotations)
+		if (neighbor.ConveyorOutputSnapPositions.Count > 0)
+		{
+			for (int r = 0; r < 4; r++)
+			{
+				Quaternion rot = Quaternion.Euler(0f, r * 90f, 0f);
+				Matrix4x4 m = Matrix4x4.TRS(ghostPos, rot, Vector3.one);
+				foreach (var inp in building.ConveyorInputSnapPositions)
+				{
+					Vector3 worldInp = m.MultiplyPoint3x4(inp.localPosition);
+					foreach (var outp in neighbor.ConveyorOutputSnapPositions)
+						if (Vector3.Distance(worldInp, outp.position) < 0.25f)
+							results.Add(new BuildingRotationInfo { Rotation = rot, IsMirroredMode = isMirrored });
+				}
+			}
+		}
+		// test neighbor inputs → building outputs (4 rotations)
+		if (neighbor.ConveyorInputSnapPositions.Count > 0)
+		{
+			for (int r = 0; r < 4; r++)
+			{
+				Quaternion rot = Quaternion.Euler(0f, r * 90f, 0f);
+				Matrix4x4 m = Matrix4x4.TRS(ghostPos, rot, Vector3.one);
+				foreach (var outp in building.ConveyorOutputSnapPositions)
+				{
+					Vector3 worldOutp = m.MultiplyPoint3x4(outp.localPosition);
+					foreach (var inp in neighbor.ConveyorInputSnapPositions)
+						if (Vector3.Distance(worldOutp, inp.position) < 0.25f)
+							results.Add(new BuildingRotationInfo { Rotation = rot, IsMirroredMode = isMirrored });
+				}
+			}
+		}
+		return results;
+	}
+	/// <summary> groups snap results by rotation, picks most-voted or first </summary>
+	public BuildingRotationInfo ResolveBestSnap(List<BuildingRotationInfo> snaps)
+	{
+		if (snaps.Count <= 1) return snaps[0];
+		var groups = snaps.GroupBy(s => s).OrderByDescending(g => g.Count()).ToList();
+		return groups[0].Count() > 1 ? groups[0].Key : snaps[0];
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/2-Data/Entities/BuildingObjectEntry.cs ==== -->
+using System;
+using UnityEngine;
+
+/// <summary>
+/// save data for one placed building — Phase G uses this for persistence
+/// </summary>
+[Serializable]
+public class BuildingObjectEntry
+{
+	public SavableObjectID SavableObjectID;
+	public Vector3 Position;
+	public Vector3 Rotation;
+	public string CustomDataJson;
+	public bool BuildingSupportsEnable = true;
+}
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/2-Data/Entities/BuildingRotationInfo.cs ==== -->
+using System;
+using UnityEngine;
+
+/// <summary>
+/// snap rotation + mirror flag — used during conveyor snap voting to pick best alignment
+/// </summary>
+public struct BuildingRotationInfo : IEquatable<BuildingRotationInfo>
+{
+	public Quaternion Rotation;
+	public bool IsMirroredMode;
+
+	public bool Equals(BuildingRotationInfo other) => Rotation.Equals(other.Rotation) && IsMirroredMode == other.IsMirroredMode;
+	public override bool Equals(object obj) => obj is BuildingRotationInfo other && Equals(other);
+	public override int GetHashCode() => (17 * 23 + Rotation.GetHashCode()) * 23 + IsMirroredMode.GetHashCode();
+	public static bool operator ==(BuildingRotationInfo l, BuildingRotationInfo r) => l.Equals(r);
+	public static bool operator !=(BuildingRotationInfo l, BuildingRotationInfo r) => !l.Equals(r);
+}
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/2-Data/Enums/GlobalEnumsD.cs ==== -->
+/// <summary>
+/// all enums introduced in Phase D — one file, one place
+/// </summary>
+
+/// <summary> result of BuildingDataService.CanPlace validation </summary>
+public enum CanPlaceBuilding
+{
+	Valid = 1,
+	Invalid = 2,
+	RequirementsNotMet = 3
+}
+
+/// <summary> what kind of placement node a building requires (e.g. AutoMiner spots) </summary>
+public enum PlacementNodeRequirement
+{
+	None = 0,
+	AutoMiner = 1,
+	HeavyAutoMiner = 2
+}
+
+/// <summary> what kind of support legs a building base connects to </summary>
+public enum SupportType
+{
+	None = 0,
+	Conveyor = 1,
+	Roller = 2,
+	Flat = 3,
+	Chute = 4,
+	Walled = 5
+}
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/2-Data/SO_BuildingInventoryDefinition.cs ==== -->
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+
+/// <summary>
+/// defines a building type — name, icon, prefabs, stack size, placement options
+/// </summary>
+[CreateAssetMenu(menuName = "SO/SO_BuildingInventoryDefinition", fileName = "SO_BuildingInventoryDefinition")]
+public class SO_BuildingInventoryDefinition : ScriptableObject
+{
+	public string Name = "Unknown Item";
+	public Sprite ProgrammerInventoryIcon;
+	public Sprite InventoryIcon;
+	[TextArea] public string Description = "Placeholder Description!";
+	public string QButtonFunction = "Mirror";
+	public int MaxInventoryStackSize = 1;
+	public List<BuildingObject> BuildingPrefabs;
+	public BuildingCrate PackedPrefab;
+	public bool UseReverseRotationDirection;
+	public bool CanBePlacedInTerrain;
+
+	/// <summary> returns the primary (first) building prefab </summary>
+	public BuildingObject GetMainPrefab() => BuildingPrefabs?.FirstOrDefault();
+	/// <summary> returns inventory icon (programmer icon as fallback) </summary>
+	public Sprite GetIcon()
+	{
+		// Phase H: SettingsManager.ShouldUseProgrammerIcons() check
+		return InventoryIcon != null ? InventoryIcon : ProgrammerInventoryIcon;
+	}
+}
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/3-MonoBehaviours/Conveyor/ConveyorBatchRenderingComponent.cs ==== -->
+using System.Collections.Generic;
+using UnityEngine;
+
+/// <summary>
+/// caches transform matrix for batch rendering — self-registers in static list,
+/// disables own Renderer (ConveyorRenderer draws all conveyors via DrawMeshInstanced)
+/// </summary>
+public class ConveyorBatchRenderingComponent : MonoBehaviour
+{
+	#region public API
+	public static readonly List<ConveyorBatchRenderingComponent> AllConveyors = new List<ConveyorBatchRenderingComponent>();
+	public static bool NeedsUpdate = true;
+	public Matrix4x4 CachedMatrix;
+	[SerializeField] public int MeshIndex;
+
+	public void RefreshMatrix()
+	{
+		CachedMatrix = Matrix4x4.TRS(transform.position, transform.rotation, transform.lossyScale);
+		NeedsUpdate = true;
+	}
+	#endregion
+
+	#region Unity Life Cycle
+	private void OnEnable()
+	{
+		CachedMatrix = Matrix4x4.TRS(transform.position, transform.rotation, transform.lossyScale);
+		AllConveyors.Add(this);
+		NeedsUpdate = true;
+		GetComponent<Renderer>().enabled = false;
+	}
+	private void OnDisable()
+	{
+		AllConveyors.Remove(this);
+		NeedsUpdate = true;
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/3-MonoBehaviours/Conveyor/ConveyorBelt.cs ==== -->
+using System.Collections.Generic;
+using UnityEngine;
+
+/// <summary>
+/// I push physics objects forward via trigger. Objects enter OnTriggerEnter → register on belt →
+/// FixedUpdate adds velocity → OnTriggerExit removes. Self-registers in static AllConveyorBelts.
+/// ConveyorBeltManager applies accumulated velocities centrally.
+/// </summary>
+public class ConveyorBelt : MonoBehaviour
+{
+	#region Inspector Fields
+	[SerializeField] public float Speed = 0.8f;
+	[SerializeField] public bool Disabled;
+	[SerializeField] public bool RetainYVelocity;
+	#endregion
+
+	#region private API
+	protected List<BasePhysicsObject> _physicsObjectsOnBelt = new List<BasePhysicsObject>();
+	protected Vector3 _pushVelocity;
+	#endregion
+
+	#region public API
+	public static List<ConveyorBelt> AllConveyorBelts { get; private set; } = new List<ConveyorBelt>();
+
+	/// <summary> change speed at runtime </summary>
+	public void ChangeSpeed(float newSpeed)
+	{
+		Speed = newSpeed;
+		_pushVelocity = transform.forward * Speed;
+	}
+	/// <summary> add a physics object to this belt's push list </summary>
+	public void AddPhysicsObject(BasePhysicsObject obj)
+	{
+		_physicsObjectsOnBelt.Add(obj);
+		obj.AddTouchingConveyorBelt(this);
+	}
+	/// <summary> remove a physics object from this belt's push list </summary>
+	public void RemovePhysicsObject(BasePhysicsObject obj) => _physicsObjectsOnBelt.Remove(obj);
+	/// <summary> remove null/inactive/kinematic entries — called by ConveyorBeltManager round-robin </summary>
+	public void ClearNullObjectsOnBelt()
+	{
+		for (int i = _physicsObjectsOnBelt.Count - 1; i >= 0; i--)
+		{
+			var obj = _physicsObjectsOnBelt[i];
+			if (obj == null || !obj.isActiveAndEnabled || obj.Rb.isKinematic)
+				_physicsObjectsOnBelt.RemoveAt(i);
+		}
+	}
+	#endregion
+
+	#region Unity Life Cycle
+	protected virtual void OnEnable()
+	{
+		_pushVelocity = transform.forward * Speed;
+		AllConveyorBelts.Add(this);
+	}
+	protected virtual void OnDisable()
+	{
+		foreach (var obj in _physicsObjectsOnBelt)
+			if (obj != null) obj.RemoveTouchingConveyorBelt(this);
+		_physicsObjectsOnBelt.Clear();
+		AllConveyorBelts.Remove(this);
+	}
+	protected virtual void FixedUpdate()
+	{
+		if (Disabled || _physicsObjectsOnBelt.Count == 0) return;
+		for (int i = _physicsObjectsOnBelt.Count - 1; i >= 0; i--)
+			_physicsObjectsOnBelt[i].AddConveyorVelocity(_pushVelocity, RetainYVelocity);
+	}
+	private void OnTriggerEnter(Collider other)
+	{
+		var rb = other.attachedRigidbody;
+		if (rb == null || rb.isKinematic) return;
+		var obj = rb.GetComponent<BasePhysicsObject>();
+		if (obj == null) obj = rb.gameObject.AddComponent<BasePhysicsObject>();
+		if (obj != null) AddPhysicsObject(obj);
+	}
+	private void OnTriggerExit(Collider other)
+	{
+		var rb = other.attachedRigidbody;
+		if (rb == null) return;
+		var obj = rb.GetComponent<BasePhysicsObject>();
+		if (obj != null)
+		{
+			_physicsObjectsOnBelt.Remove(obj);
+			obj.RemoveTouchingConveyorBelt(this);
+		}
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/3-MonoBehaviours/Conveyor/ConveyorBeltShaker.cs ==== -->
+using System;
+using UnityEngine;
+
+/// <summary>
+/// extends ConveyorBelt with left-right + up-down oscillation for sieving tables
+/// </summary>
+public class ConveyorBeltShaker : ConveyorBelt
+{
+	#region Inspector Fields
+	[Header("Shaker Settings")]
+	[SerializeField] float _shakeSpeed = 2f;
+	[SerializeField] float _shakeFrequency = 2f;
+	[SerializeField] float _verticalShakeSpeed = 1f;
+	[SerializeField] float _verticalShakeFrequency = 3f;
+	#endregion
+
+	#region private API
+	Vector3 rightDir;
+	Vector3 upDir;
+	#endregion
+
+	#region Unity Life Cycle
+	protected override void OnEnable()
+	{
+		base.OnEnable();
+		rightDir = transform.right;
+		upDir = transform.up;
+	}
+	protected override void FixedUpdate()
+	{
+		if (Disabled || _physicsObjectsOnBelt.Count == 0) return;
+		float t = Time.fixedTime;
+		float lateral = Mathf.Sign(Mathf.Sin(t * MathF.PI * 2f * _shakeFrequency));
+		Vector3 shake = rightDir * (_shakeSpeed * lateral);
+		float vertical = Mathf.Sin(t * MathF.PI * 2f * _verticalShakeFrequency);
+		shake += upDir * (_verticalShakeSpeed * vertical);
+		for (int i = _physicsObjectsOnBelt.Count - 1; i >= 0; i--)
+			_physicsObjectsOnBelt[i].AddConveyorVelocity(_pushVelocity + shake, RetainYVelocity);
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/3-MonoBehaviours/Conveyor/ConveyorBeltShakerHorizontal.cs ==== -->
+using System;
+using UnityEngine;
+
+/// <summary>
+/// extends ConveyorBelt with left-right oscillation only (no vertical component)
+/// </summary>
+public class ConveyorBeltShakerHorizontal : ConveyorBelt
+{
+	#region Inspector Fields
+	[Header("Shaker Settings")]
+	[SerializeField] float _shakeSpeed = 2f;
+	[SerializeField] float _shakeFrequency = 2f;
+	#endregion
+
+	#region private API
+	Vector3 rightDir;
+	#endregion
+
+	#region Unity Life Cycle
+	protected override void OnEnable()
+	{
+		base.OnEnable();
+		rightDir = transform.right;
+	}
+	protected override void FixedUpdate()
+	{
+		if (Disabled || _physicsObjectsOnBelt.Count == 0) return;
+		float lateral = Mathf.Sign(Mathf.Sin(Time.fixedTime * MathF.PI * 2f * _shakeFrequency));
+		Vector3 shake = rightDir * (_shakeSpeed * lateral);
+		for (int i = _physicsObjectsOnBelt.Count - 1; i >= 0; i--)
+			_physicsObjectsOnBelt[i].AddConveyorVelocity(_pushVelocity + shake, RetainYVelocity);
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/3-MonoBehaviours/Conveyor/ConveyorBlocker.cs ==== -->
+using UnityEngine;
+
+/// <summary>
+/// disables paired ConveyorBelt when hinge gate angle exceeds threshold — physics-driven gate
+/// </summary>
+public class ConveyorBlocker : MonoBehaviour
+{
+	#region Inspector Fields
+	[SerializeField] HingeJoint _hinge;
+	[SerializeField] ConveyorBelt _conveyor;
+	[SerializeField] float _closedAngle = -80f;
+	#endregion
+
+	#region Unity Life Cycle
+	private void Update()
+	{
+		if (_hinge != null && _conveyor != null)
+			_conveyor.Disabled = _hinge.angle < _closedAngle;
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/3-MonoBehaviours/Conveyor/ConveyorBlockerT2.cs ==== -->
+using System.Collections.Generic;
+using UnityEngine;
+
+/// <summary>
+/// interactable sliding gate blocker — Toggle opens/closes with lerp. Implements IInteractable.
+/// Phase H adds DOTween animation. Currently uses instant position set.
+/// </summary>
+public class ConveyorBlockerT2 : MonoBehaviour, IInteractable
+{
+	#region Inspector Fields
+	[SerializeField] bool _isClosed;
+	[SerializeField] Vector3 _closedPosition;
+	[SerializeField] Vector3 _openPosition;
+	[SerializeField] Transform _movingPart;
+	[SerializeField] float _moveDuration = 0.35f;
+	[SerializeField] List<SO_InteractionOption> _interactions;
+	#endregion
+
+	#region public API
+	public bool IsClosed => _isClosed;
+	public void Toggle() => SetClosed(!_isClosed);
+	public void SetClosed(bool closed)
+	{
+		_isClosed = closed;
+		// Phase H: DOTween or coroutine lerp
+		_movingPart.localPosition = closed ? _closedPosition : _openPosition;
+		// Phase H: play toggle sound
+	}
+	#endregion
+
+	#region public API — IInteractable
+	public bool ShouldUseInteractionWheel() => true;
+	public string GetObjectName() => "Conveyor Blocker T2";
+	public List<SO_InteractionOption> GetOptions() => _interactions;
+	public void Interact(SO_InteractionOption selectedOption)
+	{
+		if (selectedOption.interactionType == InteractionType.Toggle) Toggle();
+	}
+	#endregion
+
+	#region Unity Life Cycle
+	private void OnEnable() => SetClosed(_isClosed);
+	#endregion
+
+	#region extra
+	// Phase G: ICustomSaveDataProvider — LoadFromSave/GetCustomSaveData for IsClosed state
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/3-MonoBehaviours/Conveyor/ConveyorRenderer.cs ==== -->
+using System;
+using System.Collections.Generic;
+using UnityEngine;
+
+/// <summary>
+/// batch-renders all conveyor meshes using DrawMeshInstanced — reads ConveyorBatchRenderingComponent
+/// static list, groups by MeshIndex, renders in batches of 1023 (Unity limit)
+/// </summary>
+public class ConveyorRenderer : MonoBehaviour
+{
+	#region Inspector Fields
+	[Serializable]
+	public class ConveyorMeshSet
+	{
+		public Mesh Mesh;
+		public Material[] Materials;
+	}
+	[SerializeField] ConveyorMeshSet[] _conveyorMeshSets;
+	#endregion
+
+	#region private API
+	readonly Dictionary<int, List<Matrix4x4>> meshBatches = new Dictionary<int, List<Matrix4x4>>();
+	const int BATCH_SIZE = 1023;
+	#endregion
+
+	#region Unity Life Cycle
+	private void LateUpdate()
+	{
+		if (ConveyorBatchRenderingComponent.NeedsUpdate)
+		{
+			meshBatches.Clear();
+			foreach (var conv in ConveyorBatchRenderingComponent.AllConveyors)
+			{
+				if (!meshBatches.TryGetValue(conv.MeshIndex, out var list))
+				{
+					list = new List<Matrix4x4>();
+					meshBatches[conv.MeshIndex] = list;
+				}
+				list.Add(conv.CachedMatrix);
+			}
+			ConveyorBatchRenderingComponent.NeedsUpdate = false;
+		}
+		foreach (var kvp in meshBatches)
+		{
+			var meshSet = _conveyorMeshSets[kvp.Key];
+			var matrices = kvp.Value;
+			for (int mat = 0; mat < meshSet.Materials.Length; mat++)
+			{
+				for (int i = 0; i < matrices.Count; i += BATCH_SIZE)
+				{
+					int count = Mathf.Min(BATCH_SIZE, matrices.Count - i);
+					Graphics.DrawMeshInstanced(meshSet.Mesh, mat, meshSet.Materials[mat], matrices.GetRange(i, count));
+				}
+			}
+		}
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/3-MonoBehaviours/Conveyor/ConveyorSoundSource.cs ==== -->
+using UnityEngine;
+
+/// <summary>
+/// marks where conveyor sound plays — Phase H wires LoopingSoundPlayer here
+/// </summary>
+public class ConveyorSoundSource : MonoBehaviour
+{
+	// Phase H: [SerializeField] LoopingSoundPlayer _loopingSound;
+}
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/3-MonoBehaviours/Conveyor/ConveyorSplitterT2.cs ==== -->
+using System.Collections;
+using UnityEngine;
+
+/// <summary>
+/// swinging arm that alternates ore direction — oscillates between minY and maxY with pause
+/// </summary>
+public class ConveyorSplitterT2 : MonoBehaviour
+{
+	#region Inspector Fields
+	[SerializeField] float _minY = -35f;
+	[SerializeField] float _maxY = 35f;
+	[SerializeField] float _duration = 1.5f;
+	[SerializeField] float _pauseTime = 2f;
+	[SerializeField] float _idleTime = 1f;
+	[SerializeField] Transform _rotatingThing;
+	#endregion
+
+	#region private API
+	Coroutine swingRoutine;
+	float timeSinceLastObject;
+	#endregion
+
+	#region Unity Life Cycle
+	private void OnEnable()
+	{
+		swingRoutine = StartCoroutine(SwingLoop());
+		timeSinceLastObject = 0f;
+	}
+	private void OnDisable()
+	{
+		if (swingRoutine != null) StopCoroutine(swingRoutine);
+	}
+	private void OnTriggerEnter(Collider other) => timeSinceLastObject = 0f;
+	private void Update() => timeSinceLastObject += Time.deltaTime;
+	#endregion
+
+	#region private API — coroutine
+	IEnumerator SwingLoop()
+	{
+		bool goingToMax = true;
+		while (true)
+		{
+			if (timeSinceLastObject > _idleTime)
+			{
+				yield return new WaitForSeconds(0.25f);
+				continue;
+			}
+			float startAngle = goingToMax ? _minY : _maxY;
+			float endAngle = goingToMax ? _maxY : _minY;
+			float elapsed = 0f;
+			while (elapsed < _duration)
+			{
+				elapsed += Time.deltaTime;
+				float t = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(elapsed / _duration));
+				float y = Mathf.Lerp(startAngle, endAngle, t);
+				var euler = _rotatingThing.localEulerAngles;
+				_rotatingThing.localEulerAngles = new Vector3(euler.x, y, euler.z);
+				yield return null;
+			}
+			yield return new WaitForSeconds(_pauseTime);
+			goingToMax = !goingToMax;
+		}
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/3-MonoBehaviours/Conveyor/RoutingConveyor.cs ==== -->
+using System.Collections.Generic;
+using UnityEngine;
+
+/// <summary>
+/// interactable direction switch — Toggle rotates between two directions. Implements IInteractable.
+/// </summary>
+public class RoutingConveyor : MonoBehaviour, IInteractable
+{
+	#region Inspector Fields
+	[SerializeField] string _name = "Routing Conveyor";
+	[SerializeField] bool _isClosed;
+	[SerializeField] GameObject _closedObjects;
+	[SerializeField] GameObject _openObjects;
+	[SerializeField] Vector3 _closedRotation;
+	[SerializeField] Vector3 _openRotation;
+	[SerializeField] Transform _rotatingPart;
+	[SerializeField] float _rotateDuration = 0.35f;
+	[SerializeField] List<SO_InteractionOption> _interactions;
+	#endregion
+
+	#region public API
+	public bool IsClosed => _isClosed;
+	public void ToggleDirection() => SetDirection(!_isClosed);
+	public void SetDirection(bool closed)
+	{
+		_isClosed = closed;
+		// Phase H: DOTween or coroutine lerp + sound
+		Vector3 euler = closed ? _closedRotation : _openRotation;
+		_rotatingPart.localRotation = Quaternion.Euler(euler);
+		if (_closedObjects != null) _closedObjects.SetActive(closed);
+		if (_openObjects != null) _openObjects.SetActive(!closed);
+	}
+	#endregion
+
+	#region public API — IInteractable
+	public bool ShouldUseInteractionWheel() => true;
+	public string GetObjectName() => _name;
+	public List<SO_InteractionOption> GetOptions() => _interactions;
+	public void Interact(SO_InteractionOption selectedOption)
+	{
+		if (selectedOption.interactionType == InteractionType.Toggle) ToggleDirection();
+	}
+	#endregion
+
+	#region Unity Life Cycle
+	private void OnEnable() => SetDirection(_isClosed);
+	#endregion
+
+	#region extra
+	// Phase G: ICustomSaveDataProvider — LoadFromSave/GetCustomSaveData for IsClosed state
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/4-Utils/PhaseDLOG.cs ==== -->
+using System.Collections.Generic;
+using UnityEngine;
+using SPACE_UTIL;
+
+/// <summary>
+/// formats building/conveyor snapshots for test logging
+/// </summary>
+public static class PhaseDLOG
+{
+	public static string LIST_CONVEYOR_BELTS__TO__JSON()
+	{
+		var snapshot = ConveyorBelt.AllConveyorBelts.map(c => new
+		{
+			Name = c.gameObject.name,
+			c.Speed,
+			c.Disabled,
+			ObjectsOnBelt = c.GetType().Name
+		});
+		return snapshot.ToNSJson(pretify: true);
+	}
+}
+
+<!-- ==== FILE: learn/phase-d(New)/Scripts/4-Utils/UtilsPhaseD.cs ==== -->
+using UnityEngine;
+
+/// <summary>
+/// grid math + building placement helpers
+/// </summary>
+public static class UtilsPhaseD
+{
+	/// <summary> checks if OverlapBox at collider bounds detects any collision on layerMask </summary>
+	public static bool IsOverlapping(Collider col, LayerMask layerMask)
+	{
+		if (col is BoxCollider box)
+		{
+			Vector3 center = box.transform.TransformPoint(box.center);
+			Vector3 halfExtents = Vector3.Scale(box.size * 0.5f, box.transform.lossyScale);
+			return Physics.OverlapBox(center, halfExtents, box.transform.rotation, layerMask, QueryTriggerInteraction.Ignore).Length > 0;
+		}
+		return false;
+	}
+	/// <summary> checks if surface normal is flat enough for building (dot with up > 0.9) </summary>
+	public static bool IsFlatGround(Vector3 position, LayerMask groundLayer, out float distance)
+	{
+		distance = 0f;
+		if (!Physics.Raycast(position + new Vector3(0.5f, 0.1f, 0.5f), Vector3.down, out var hit, 1f, groundLayer))
+			return false;
+		distance = hit.distance;
+		return Vector3.Dot(hit.normal, Vector3.up) >= 0.9f && hit.distance <= 0.2f;
+	}
+}
+
 <!-- ==== FILE: learn/surfer.md ==== -->
 # Surfer — Critical Thoughts Log
 
