@@ -2057,13 +2057,24 @@ When a system requires visual/hands-on verification (UI flows, 3D animations, ph
   - Inspector values: defaults, ranges, layer masks, tags
   - Wiring tables: `| Field | Drag From |` format for complex components
   - Final hierarchy tree showing parent-child relationships
+- **How It Works (System Flow)** — before the DO/EXPECT test steps, explain the system's data flow in plain English:
+  - What happens internally when the player performs each action (which script calls which, what GameEvents fire, which GOs activate/deactivate, which components change state)
+  - Example for inventory drag: *"When you begin dragging slot 0, `UIEventRelay[0].OnBeginDrag` fires → `InventoryOrchestrator.HandleBeginDrag` stores `dragFromIndex = 0`, hides the slot content via `Field_InventorySlot.SetDragVisible(false)` (the `HideWhenDragged` child GO is `SetActive(false)`), and activates the `DragGhostIcon` GO with the dragged item's sprite."*
+  - This teaches the reader WHY things happen, not just WHAT they see
+  - Keep it conversation-style: **bold** for GO state changes, `code` for method/field names, *italics* for important context
 - **Manual Test Flow** — numbered DO/EXPECT steps:
   - Each step: one player action (press key, wait, drag, click)
-  - Each EXPECT: exactly what the screen/console should show — bold for visual changes, `code` for console messages
+  - Each EXPECT: exactly what the screen/console should show — **bold** for visual changes, `code` for console messages
+  - **Also explain WHAT HAPPENS BEHIND THE SCENES** for each step:
+    - Which script method runs
+    - Which GameEvent fires (and who receives it)
+    - Which GOs become active/inactive (`SetActive(true/false)`)
+    - Which component fields change (e.g. `_background.color = _selectedColor`)
+    - Which Unity callbacks trigger (e.g. `OnEnable → RaiseMenuStateChanged(true)`)
   - Cover: initial state → primary action → edge cases → error conditions
 - **Summary Checklist** — pass/fail items at the end
 
-**The Manual/*.md must be comprehensive enough for a beginner** who has never used Unity to follow. Assume zero prior knowledge of the system being tested. Every inspector field, every component, every wiring reference must be explicit. See `phase-b(New)/Scripts/5-Tests/Manual/InventoryUITest.md` as the gold standard — it has a 9-step UI setup guide with Canvas settings, prefab hierarchies, 16 DO/EXPECT test steps, and 18 checklist items.
+**The Manual/*.md must be comprehensive enough for a beginner** who has never used Unity to follow AND must teach the internal flow so the reader understands the full data path. It's not just "click → see result" — it's "click → this script fires → this event reaches this subscriber → this GO activates → you see this on screen." The reader should understand the architecture by reading the manual test.
 
 These are purely hand-tested — no script automates them. The `.md` is the test. One file per system.
 
@@ -2454,21 +2465,25 @@ For each phase, the agent must produce:
    - Minimal bootstrap — systems handle their own Update()
    - Fire GameEvents to trigger actions (never call methods directly)
 
-4. **Manual Test Guides (`5-Tests/Manual/*.md`)** — **comprehensive, beginner-level** for any system needing visual/hands-on verification (UI, animations, physics, effects, audio):
+4. **Manual Test Guides (`5-Tests/Manual/*.md`)** — **comprehensive, beginner-level, teaches the internal flow** for any system needing visual/hands-on verification (UI, animations, physics, effects, audio):
    - **Prerequisites** — exactly which singletons, prefabs, test scripts needed
    - **Setup Guide** — beginner-level step-by-step Unity Editor instructions:
      - Every GO: name, parent, components, `[SerializeField]` wiring (`| Field | Drag From |` table)
      - Prefab hierarchies: every child with RectTransform, Image, tag, layer, default values
      - Final hierarchy tree showing parent-child layout
+   - **How It Works (System Flow)** — before the DO/EXPECT steps, explain the system's data flow in **conversation-style plain English**:
+     - What happens internally per action: which script → which method → which GameEvent → which subscriber → which GO activates/deactivates → which field changes
+     - Teaches WHY things happen, not just what the reader sees on screen
    - **Manual Test Flow** — numbered DO/EXPECT steps:
      - One action per step (press key, wait Xs, drag here, click there)
      - EXPECT: **bold** for visual changes, `code` for console messages
+     - **Behind the scenes per step:** which method runs, which event fires, which GOs SetActive, which component fields change, which Unity callbacks trigger
      - Cover: initial state → primary actions → edge cases → error conditions
    - **Summary Checklist** — pass/fail items
-   - **Must be comprehensive enough for a beginner** — assume zero prior knowledge. Every field, every component, every wiring explicit. No "see GUIDE.md" shortcuts — the Manual/*.md is self-contained.
-   - One `.md` per system. The `.md` IS the test. No script.
+   - **Must be comprehensive enough for a beginner AND teach the architecture** — the reader should understand the full data path by reading the manual test. Not just "click → see result" but "click → this script → this event → this subscriber → this GO activates → you see this."
+   - One `.md` per system. Self-contained — no "see GUIDE.md" shortcuts. The `.md` IS the test.
    - **Always analyse main source** for each phase: "Does this system have UI, animations, physics visuals, or dense inspector setup?" If yes → `Manual/*.md`.
-   - Gold standard: `phase-b(New)/Scripts/5-Tests/Manual/InventoryUITest.md` (9-step setup, 16 DO/EXPECT, 18 checklist)
+   - Gold standard: `phase-b(New)/Scripts/5-Tests/Manual/InventoryUITest.md`
    - Full list: PhaseMap.md + StructureMap.md `All Manual Tests` table.
 
 ---
@@ -9925,15 +9940,20 @@ phase-b(New)/
 
 ## Manual Tests (`5-Tests/Manual/*.md` — hands-on, no script)
 
-> These are `.md` files with DO/EXPECT steps. You follow them by hand in Play mode. They cover visual/UI flows that `.cs` tests can't verify.
+> These `.md` files teach the system's internal flow AND test it visually. Each contains:
+> - **Setup Guide** — beginner-level GO creation, prefab hierarchy, wiring tables
+> - **How It Works** — data flow in plain English (which script → event → subscriber → GO state change)
+> - **DO/EXPECT steps** — each step includes behind-the-scenes: which method runs, which event fires, which GOs activate/deactivate
+> - **Checklist** — pass/fail items
+>
+> The reader should understand the full architecture by reading the manual test.
 
 | # | File | What to verify |
 |---|------|---------------|
-| 1 | `InventoryUITest.md` | Full inventory UI: prefab setup (Canvas, slot, info panel, drag ghost), drag-drop hotbar↔extended, selected item info, equip/drop buttons, edge cases |
-| 2 | `ToolViewModelTest.md` | ViewModel equip/unequip swap, pickaxe swing animation timing, magnet pull visual, tool switch transitions |
-| 3 | `GrabRopeTest.md` | SpringJoint + LineRenderer rope: connects on grab, follows movement, breaks at distance, disappears on release |
-
-> Full setup instructions + test flow + checklist inside each `.md`. Start with `InventoryUITest.md` — it has the densest UI setup guide.
+| 1 | `InventoryUITest.md` | Full inventory UI: Canvas setup, slot prefab, drag-drop flow (which scripts fire, which GOs SetActive), info panel, equip/drop |
+| 2 | `ToolViewModelTest.md` | ViewModel equip/unequip (OnEnable parents to ViewModelContainer), animation timing, magnet SpringJoint visuals |
+| 3 | `GrabRopeTest.md` | SpringJoint + LineRenderer flow (PlayerGrab.GrabObject → dragger activates → rope enables), joint break → ForceRelease |
+| 4 | `FresnelHighlightTest.md` | Highlight Plus outline on hover (raycast → HighlightEffect added at runtime), clear on look away |
 
 ---
 
@@ -9993,17 +10013,70 @@ ToolMagnet_Controller: optional — Attack1 = subtle pulse. Or skip entirely.
 
 > All marked as `// Phase H:` stubs in scripts. No AudioSource/SoundManager needed until Phase H.
 
-### Highlight Plus Profiles
+### Fresnel Highlight (URP — temporary, replace with Highlight Plus later)
 
-| Profile Asset | Outline Color | Width | Glow | See-Through | Used By |
-|--------------|--------------|-------|------|-------------|---------|
-| `HP_Tool` | Cyan (0.25, 0.85, 1) | 1.0 | Off | Off | Tools, terminals, crates |
-| `HP_Grabbable` | Cyan (0.25, 0.85, 1) | 0.8 | Off | Off | Physics objects with "Grabbable" tag |
-| `HP_Building` | Cyan (0.25, 0.85, 1) | 1.2 | Off | Off | Phase D — buildings when holding hammer |
-| `HP_WrenchEnable` | Green (0.3, 1, 0.3) | 1.0 | Off | Off | Phase D — building supports can be enabled |
-| `HP_WrenchDisable` | Red (1, 0.3, 0.3) | 1.0 | Off | Off | Phase D — building supports can be disabled |
+> This is a **temporary** URP-native fresnel highlight using Shader Graph + Renderer Feature.
+> When Highlight Plus is imported, replace the layer-swap logic in `FresnelHighlighter.cs`
+> with `HighlightEffect.SetHighlighted(true/false)` per object.
 
-**How to create:** Unity → Create → Highlight Plus → Profile → set outline color/width → save as `.asset`
+**Step 1 — Create "Highlighted" layer:**
+1. Edit → Project Settings → Tags and Layers
+2. Add a new layer at slot 31 (or any free slot) → name it `"Highlighted"`
+
+**Step 2 — Create Shader Graph: `Highlight_Fresnel_Additive`:**
+1. Project panel → Create → Shader Graph → URP → Unlit Shader Graph
+2. Name it `Highlight_Fresnel_Additive`
+3. Add these properties (Blackboard):
+   - `_Color` (Color, default cyan `0.25, 0.85, 1, 1`)
+   - `_Power` (Float, default `2`, range 0.5–8)
+   - `_Intensity` (Float, default `1.2`, range 0–3)
+4. Build the graph:
+   ```
+   Fresnel Effect (Power = _Power)
+       ↓
+   Multiply (A = Fresnel output, B = _Intensity)
+       ↓
+   Multiply (A = above, B = _Color)
+       ↓
+   → Emission (on Fragment output)
+   ```
+5. Graph Inspector settings:
+   - Surface Type: **Transparent**
+   - Blending Mode: **Additive**
+   - Render Face: **Both**
+   - ZWrite: **Off**
+   - ZTest: **LessEqual** (change to Always for xray in future)
+6. Save the Shader Graph
+
+**Step 3 — Create Material:**
+1. Project panel → Create → Material
+2. Name it `M_Highlight_Fresnel`
+3. Assign the `Highlight_Fresnel_Additive` shader
+4. Set defaults: Color = cyan (0.25, 0.85, 1), Power = 2, Intensity = 1.2
+
+**Step 4 — URP Renderer Feature:**
+1. Find your URP Renderer Data asset (Project Settings → Graphics → Scriptable Render Pipeline → click the renderer)
+2. Add Renderer Feature → **Render Objects**
+3. Configure:
+   - Name: `FresnelHighlight`
+   - Event: **AfterRenderingOpaques**
+   - Filters → Queue: Opaque
+   - Filters → Layer Mask: **Highlighted** (the layer from Step 1)
+   - Overrides → Material: `M_Highlight_Fresnel`
+   - Overrides → Depth → Write Depth: **Off**
+   - Overrides → Depth → Depth Test: **LessEqual**
+
+**Result:** Any object on the "Highlighted" layer gets a second render pass with the fresnel additive material — cyan rim glow on edges. `FresnelHighlighter.cs` swaps layers on raycast hit and restores them each frame.
+
+**Color presets** (set on `FresnelHighlighter` inspector):
+
+| Preset | Color | Used By |
+|--------|-------|---------|
+| `_toolColor` | Cyan (0.25, 0.85, 1) | Tools, terminals, crates |
+| `_grabbableColor` | Cyan (0.25, 0.85, 1) | Grabbable physics objects |
+| Phase D: `_buildingColor` | Cyan (0.25, 0.85, 1) | Buildings when holding hammer |
+| Phase D: `_wrenchEnableColor` | Green (0.3, 1, 0.3) | Building supports can be enabled |
+| Phase D: `_wrenchDisableColor` | Red (1, 0.3, 0.3) | Building supports can be disabled |
 
 ### Tool Prefabs (per tool type)
 
@@ -10677,17 +10750,24 @@ public class SO_FootstepSoundDefinition : ScriptableObject
 using System.Collections.Generic;
 using UnityEngine;
 // ──────────────────────────────────────────────────────────────
-// HIGHLIGHT PLUS: uncomment the line below once the package is imported
-// using HighlightPlus;
+// TEMPORARY: URP Renderer Feature + Shader Graph fresnel approach.
+// When Highlight Plus is imported, replace the layer-swap logic
+// with HighlightEffect.SetHighlighted(true/false) per object.
 // ──────────────────────────────────────────────────────────────
 
 /// <summary>
-/// I outline whatever the player looks at with a fresnel/highlight effect. Every Update I
-/// raycast from the camera. If I hit a BaseHeldTool, I apply the tool highlight profile. If
-/// I hit something tagged Grabbable, I apply the grabbable profile. Phase D adds building +
-/// wrench profiles. All Highlight Plus code is commented out with [HP] markers — uncomment
-/// after importing the Highlight Plus package. Without the package, the raycast still runs
-/// but no visual outline appears.
+/// I outline whatever the player looks at with a fresnel rim glow. Every Update I raycast
+/// from the camera. If I hit a tool/grabbable, I swap its layer to "Highlighted" — the URP
+/// Renderer Feature renders it a second time with the additive fresnel material.
+/// ClearAll restores original layers each frame. Phase D adds building + wrench colors.
+///
+/// SETUP REQUIRED:
+///   1. Create "Highlighted" layer in Unity (Edit → Project Settings → Tags and Layers)
+///   2. Create Shader Graph: Highlight_Fresnel_Additive (see GUIDE.md Art section)
+///   3. Create Material M_Highlight_Fresnel from that shader
+///   4. URP Renderer Data → Add Renderer Feature → Render Objects:
+///      Event=AfterRenderingOpaques, Layer="Highlighted", Override Material=M_Highlight_Fresnel
+///   5. Assign _highlightLayer in inspector → "Highlighted"
 ///
 /// Who uses me: Self (Update raycasts from camera). No external callers.
 /// Events I fire: none. Events I subscribe to: none.
@@ -10695,73 +10775,71 @@ using UnityEngine;
 public class FresnelHighlighter : MonoBehaviour
 {
 	#region Inspector Fields
-	// ── [HP] uncomment these once HighlightPlus is imported ──
-	// [Header("Profiles (Create → Highlight Plus → Profile)")]
-	// [SerializeField] HighlightProfile _toolProfile;
-	// [SerializeField] HighlightProfile _grabbableProfile;
-	// [SerializeField] HighlightProfile _buildingProfile;
-	// [SerializeField] HighlightProfile _wrenchEnableProfile;
-	// [SerializeField] HighlightProfile _wrenchDisableProfile;
-
 	[Header("Raycast")]
 	[SerializeField] Camera _cam;
 	[SerializeField] float _interactRange = 2f;
 	[SerializeField] LayerMask _interactLayerMask;
+	[Header("Highlight Layer (URP Renderer Feature renders this layer with fresnel material)")]
+	[SerializeField] int _highlightLayer = 31;
+	[Header("Color Overrides (via MaterialPropertyBlock on highlighted renderers)")]
+	[SerializeField] Color _toolColor = new Color(0.25f, 0.85f, 1f, 1f);
+	[SerializeField] Color _grabbableColor = new Color(0.25f, 0.85f, 1f, 1f);
+	// Phase D: [SerializeField] Color _buildingColor, _wrenchEnableColor, _wrenchDisableColor
 	#endregion
 
 	#region private API
-	// ── [HP] uncomment once HighlightPlus is imported ──
-	// readonly List<HighlightEffect> activeEffects = new List<HighlightEffect>();
-	//
-	// void HighlightObject(GameObject obj, HighlightProfile profile)
-	// {
-	// 	var effect = obj.GetComponent<HighlightEffect>();
-	// 	if (effect == null) effect = obj.AddComponent<HighlightEffect>();
-	// 	effect.ProfileLoad(profile);
-	// 	effect.SetHighlighted(true);
-	// 	activeEffects.Add(effect);
-	// }
-	// void ClearAll()
-	// {
-	// 	foreach (var effect in activeEffects)
-	// 		if (effect != null) effect.SetHighlighted(false);
-	// 	activeEffects.Clear();
-	// }
+	struct HighlightedEntry { public GameObject Go; public int OriginalLayer; }
+	readonly List<HighlightedEntry> highlighted = new List<HighlightedEntry>();
+	static readonly int ColorID = Shader.PropertyToID("_Color");
+	MaterialPropertyBlock mpb;
 
-	/// <summary> Raycasts from camera forward within _interactRange. If it hits a BaseHeldTool,
-	/// applies tool highlight profile. If it hits a Grabbable tag, applies grabbable profile.
-	/// Phase D adds building + wrench profiles. All [HP] code is commented until import. </summary>
+	void HighlightObject(GameObject obj, Color color)
+	{
+		int origLayer = obj.layer;
+		UtilsPhaseB.SetLayerRecursively(obj, _highlightLayer);
+		highlighted.Add(new HighlightedEntry { Go = obj, OriginalLayer = origLayer });
+		if (mpb == null) mpb = new MaterialPropertyBlock();
+		foreach (var r in obj.GetComponentsInChildren<Renderer>(false))
+		{
+			if (r is ParticleSystemRenderer || !r.enabled) continue;
+			mpb.SetColor(ColorID, color);
+			r.SetPropertyBlock(mpb);
+		}
+	}
+	void ClearAll()
+	{
+		foreach (var entry in highlighted)
+		{
+			if (entry.Go == null) continue;
+			UtilsPhaseB.SetLayerRecursively(entry.Go, entry.OriginalLayer);
+			foreach (var r in entry.Go.GetComponentsInChildren<Renderer>(false))
+				r.SetPropertyBlock(null);
+		}
+		highlighted.Clear();
+	}
 	void OutlineLookedAtThing()
 	{
-		// → raycast from camera center forward within interact range
 		if (!Physics.Raycast(_cam.transform.position, _cam.transform.forward, out RaycastHit hit, _interactRange, _interactLayerMask))
 			return;
-
-		// ── [HP] uncomment the highlight calls once HighlightPlus is imported ──
 		if (hit.collider.GetComponentInParent<BaseHeldTool>() != null)
 		{
-			// HighlightObject(hit.collider.gameObject, _toolProfile);
+			HighlightObject(hit.collider.gameObject, _toolColor);
 			return;
 		}
 		if (hit.collider.HasTag(TagType.Grabbable))
 		{
-			// HighlightObject(hit.collider.gameObject, _grabbableProfile);
+			HighlightObject(hit.collider.gameObject, _grabbableColor);
 			return;
 		}
-		// Phase A: ComputerTerminal, ContractsTerminal → _toolProfile
-		// Phase D: BuildingObject (ToolHammer → _buildingProfile, ToolSupportsWrench → _wrenchEnable/_wrenchDisableProfile)
+		// Phase A: ComputerTerminal, ContractsTerminal → _toolColor
+		// Phase D: BuildingObject (ToolHammer → _buildingColor, ToolSupportsWrench → _wrenchEnable/_wrenchDisableColor)
 	}
 	#endregion
 
 	#region Unity Life Cycle
-	/// <summary> Every frame: clears previous highlights (when HP imported), then raycasts to
-	/// find what the player is looking at and applies the matching highlight profile. </summary>
 	private void Update()
 	{
-		// → clear all previous frame highlights (when HP imported)
-		// ── [HP] uncomment ClearAll once HighlightPlus is imported ──
-		// ClearAll();
-		// → raycast and apply highlight to whatever the player looks at
+		ClearAll();
 		OutlineLookedAtThing();
 	}
 	#endregion
@@ -12910,36 +12988,58 @@ O → log snapshot";
 <!-- ==== FILE: learn/phase-b(New)/Scripts/5-Tests/Manual/FresnelHighlightTest.md ==== -->
 # Fresnel Highlight — Manual Test Flow
 
-> Verifies Highlight Plus outlines appear on hover, correct profile per object type, clears on look away.
+> Verifies URP fresnel outlines appear on hover, correct color per object type, clears on look away.
+> Temporary URP approach — will be replaced with Highlight Plus later.
 
 ---
 
 ## Prerequisites
 
-- Highlight Plus asset imported
+- URP project with Shader Graph support
 - Player GO with PlayerMovement + PlayerCamera
 - FresnelHighlighter on Camera GO (or separate GO)
-- 5 HighlightProfile assets created (see setup below)
+- Shader Graph + Renderer Feature configured (see setup below)
 
 ---
 
 ## Setup Guide
 
-### Step 1 — Create HighlightProfile Assets
+### Step 1 — "Highlighted" Layer
 
-In Unity Project panel: Create → Highlight Plus → Profile
+1. Edit → Project Settings → Tags and Layers
+2. Add layer at slot 31 → name `"Highlighted"`
 
-| Asset Name | Outline Color | Outline Width | Glow | See-Through |
-|-----------|--------------|---------------|------|-------------|
-| `HP_Tool` | Cyan (0.25, 0.85, 1) | 1.0 | Off | Off |
-| `HP_Grabbable` | Cyan (0.25, 0.85, 1) | 0.8 | Off | Off |
-| `HP_Building` | Cyan (0.25, 0.85, 1) | 1.2 | Off | Off |
-| `HP_WrenchEnable` | Green (0.3, 1, 0.3) | 1.0 | Off | Off |
-| `HP_WrenchDisable` | Red (1, 0.3, 0.3) | 1.0 | Off | Off |
+### Step 2 — Shader Graph: `Highlight_Fresnel_Additive`
 
-> Phase B only uses HP_Tool + HP_Grabbable. Others are for Phase D.
+1. Create → Shader Graph → URP → Unlit Shader Graph → name `Highlight_Fresnel_Additive`
+2. Blackboard properties:
+   - `_Color` (Color, default cyan `0.25, 0.85, 1, 1`)
+   - `_Power` (Float, default `2`, range 0.5–8)
+   - `_Intensity` (Float, default `1.2`, range 0–3)
+3. Graph:
+   ```
+   Fresnel Effect (Power = _Power) → Multiply (_Intensity) → Multiply (_Color) → Emission
+   ```
+4. Graph Inspector: Surface = Transparent, Blend = Additive, Render Face = Both, ZWrite = Off
+5. Save
 
-### Step 2 — FresnelHighlighter Component
+### Step 3 — Material: `M_Highlight_Fresnel`
+
+1. Create → Material → name `M_Highlight_Fresnel`
+2. Shader: `Highlight_Fresnel_Additive`
+3. Defaults: Color = cyan, Power = 2, Intensity = 1.2
+
+### Step 4 — URP Renderer Feature
+
+1. Project Settings → Graphics → click URP Renderer Data asset
+2. Add Renderer Feature → **Render Objects**
+3. Name: `FresnelHighlight`
+4. Event: **AfterRenderingOpaques**
+5. Filters → Layer Mask: **Highlighted**
+6. Overrides → Material: `M_Highlight_Fresnel`
+7. Overrides → Depth → Write: Off, Test: LessEqual
+
+### Step 5 — FresnelHighlighter Component
 
 1. Select Camera GO (or create separate GO)
 2. Add `FresnelHighlighter` component
@@ -12950,17 +13050,15 @@ In Unity Project panel: Create → Highlight Plus → Profile
 | `_cam` | Camera component |
 | `_interactRange` | 2 |
 | `_interactLayerMask` | "Interact" layer |
-| `_toolProfile` | HP_Tool asset |
-| `_grabbableProfile` | HP_Grabbable asset |
-| `_buildingProfile` | HP_Building asset (Phase D, can leave empty) |
-| `_wrenchEnableProfile` | HP_WrenchEnable asset (Phase D, can leave empty) |
-| `_wrenchDisableProfile` | HP_WrenchDisable asset (Phase D, can leave empty) |
+| `_highlightLayer` | 31 (or whichever slot "Highlighted" is at) |
+| `_toolColor` | Cyan (0.25, 0.85, 1) |
+| `_grabbableColor` | Cyan (0.25, 0.85, 1) |
 
-### Step 3 — Player GO (if not already set up)
+### Step 6 — Player GO (if not already set up)
 
 Use the player setup from GrabRopeTest.md Steps 1-6. Key requirement: `PlayerMovement` with `_playerCam` wired to Camera child. FresnelHighlighter needs the Camera for raycasting.
 
-### Step 4 — Test Objects in Scene
+### Step 7 — Test Objects in Scene
 
 Create 4 test objects. Place all in front of player spawn, within 2m reach:
 
@@ -13004,12 +13102,30 @@ Scene Root
 
 ---
 
+## How It Works (System Flow)
+
+**Every frame:** `FresnelHighlighter.Update()` runs. First it calls `ClearAll()` — loops through all previously highlighted objects, **restores their original layer** via `UtilsPhaseB.SetLayerRecursively(go, originalLayer)`, and clears `MaterialPropertyBlock` on all renderers. Then `OutlineLookedAtThing()` raycasts from `_cam` forward using `_interactLayerMask`.
+
+**Tool detected:** If the raycast hits a collider, it checks `hit.collider.GetComponentInParent<BaseHeldTool>()`. If found → calls `HighlightObject(hit.collider.gameObject, _toolColor)`. Inside: the object's **layer is swapped** to `_highlightLayer` (layer 31 = "Highlighted") via `UtilsPhaseB.SetLayerRecursively()`. The URP Renderer Feature is configured to render this layer with the **additive fresnel material** (`M_Highlight_Fresnel`) — so the object gets a second render pass with cyan rim glow. A `MaterialPropertyBlock` sets `_Color` on each renderer for per-object color control. The entry (GO + original layer) is stored for cleanup next frame.
+
+**Grabbable detected:** If no tool found, checks `hit.collider.HasTag(TagType.Grabbable)`. If true → `HighlightObject(go, _grabbableColor)` — same layer-swap process, same or different color.
+
+**No match:** If raycast misses or hits something with no matching type → no highlight applied. `ClearAll()` already restored last frame's layers, so nothing is on the "Highlighted" layer — no outline.
+
+**Result:** Exactly one object is outlined at a time (or zero). Layer swap + restore happens within 1 frame — no fade, instant.
+
+> **Note:** This is a **temporary** URP-native approach using Shader Graph + Renderer Feature. When Highlight Plus is imported, replace the layer-swap logic with `HighlightEffect.SetHighlighted(true/false)` per object.
+
+---
+
 ## 1. Initial State
 
 **DO:** Press Play, look at empty space (floor/sky)
 **EXPECT:**
 - No outlines visible anywhere
 - No console errors from FresnelHighlighter
+
+**Behind the scenes:** `FresnelHighlighter.Update()` raycasts but hits nothing (floor is layer "Default") → `OutlineLookedAtThing` returns early. `ClearAll()` has nothing to clear (empty list).
 
 ---
 
@@ -13252,13 +13368,25 @@ Scene Root
 
 ---
 
+## How It Works (System Flow)
+
+**Grab:** When the player right-clicks, `PlayerGrab.Update()` detects `Mouse1` and calls `TryGrab()`. It checks `isAnyMenuOpen` (blocks if true), then checks if already holding (calls `Release()` if so). Then it raycasts from `_cam` using `_interactLayerMask`. If the hit collider's tag is `"Grabbable"`, it calls `GrabObject(hit)`. Inside: the **RigidbodyDragger child GO activates** (`SetActive(true)`), parents to `_holdPos`, a `SpringJoint` is **added at runtime** to the dragger and connected to the cube's `Rigidbody`. `UtilsPhaseB.IgnoreAllCollisions(cube, player, true)` prevents clipping. The cube's `linearDamping` increases (feels heavy) and `interpolation` is set to `Interpolate` (smooth visual). The **LineRenderer enables** with `positionCount = 2`.
+
+**Every frame while holding:** `PlayerGrab.Update()` calls `_rope.SetPosition(0, _dragger.position)` and `_rope.SetPosition(1, cubeAnchorPoint)` — the rope visually connects hand to cube. The dragger follows `_holdPos` which is a child of the camera — so moving/looking moves the grab target.
+
+**Release:** Right-click again → `TryGrab()` sees `heldObject != null` → calls `Release()`. The `SpringJoint` is **Destroyed** (runtime component removal), the dragger **deactivates** (`SetActive(false)`), cube drag/angular drag restored to originals, collisions re-enabled. A coroutine waits 3s then sets `interpolation = None` on the cube (saves CPU when idle). The **rope disables** (`_rope.enabled = false`).
+
+**Joint break:** If the player pulls too far, the `SpringJoint.breakForce` (120) is exceeded → Unity calls `OnJointBreak` on the dragger → `RigidbodyDraggerController.OnJointBreak()` calls `_playerGrab.ForceRelease()` — same cleanup as normal release.
+
+---
+
 ## 1. Initial State
 
 **DO:** Press Play
 **EXPECT:**
 - All cubes sitting on ground, physics settled
-- LineRenderer **not visible** (rope disabled)
-- RigidbodyDragger GO is **inactive**
+- LineRenderer **not visible** (`_rope.enabled = false` in `PlayerGrab.Start()`)
+- RigidbodyDragger GO is **inactive** (set inactive in editor)
 - Cursor locked (FPS mode)
 
 ---
@@ -13580,6 +13708,20 @@ Canvas
 
 ---
 
+## How It Works (System Flow)
+
+Before testing, understand how the inventory data flows:
+
+**Scene loads:** `InventoryUI` GO starts active → `OnEnable` fires with `isFirstEnable = true` → it calls `_orchestrator.Init(dataService)`. Inside Init, `InventoryDataService.Build()` creates 40 `Slot` objects (10 hotbar + 30 extended). `InventoryOrchestrator.BuildSlotFields()` instantiates 40 `Field_InventorySlot` prefabs — first 10 go under `_hotbarContainer`, rest under `_extendedContainer`. For each slot, it calls `AddComponent<UIEventRelay>()` and wires drag/pointer callbacks. Then `InventoryUI` subscribes to `OnOpenInventoryView` and `OnCloseAllSubManagers`, **self-disables** (`SetActive(false)`), and returns. The extended panel is now hidden but hotbar is visible (it's a separate container that stays active).
+
+**Tool pickup:** Player interacts with a tool → `BaseHeldTool.Interact(InteractionType.Take)` fires `GameEvents.RaiseToolPickupRequested(this)` → `InventoryOrchestrator.HandleToolPickup` receives it → `dataService.TryAdd(tool)` finds first empty slot → tool's GO is `SetActive(false)` (WorldModel disappears from ground). If `EquipWhenPickedUp`, it calls `SwitchToSlot(idx)` which sets the tool's GO active again → `BaseHeldTool.OnEnable` parents it to `ViewModelContainer` → `GameEvents.RaiseToolEquipped(tool)` fires → `PlayerGrab` sets `tool.Owner = _movement`. Finally `RefreshAllSlots()` loops all 40 `Field_InventorySlot` and calls `SetData(icon, name, qty)` or `SetEmpty()`.
+
+**Drag-drop:** When you click-and-drag a slot, `UIEventRelay.OnBeginDrag` fires → orchestrator stores `dragFromIndex`, calls `FIELD_SLOT[i].SetDragVisible(false)` which **hides the `HideWhenDragged` child GO** (`SetActive(false)`) — the slot *looks empty*. The `DragGhostIcon` GO **activates** with the dragged item's sprite. Every frame during drag, `OnDrag` moves the ghost to cursor position. On drop over another slot, `UIEventRelay.OnDrop` fires → `dataService.Swap(from, to)` exchanges the two slots in data → `RefreshAllSlots()` updates all displays. `OnEndDrag` restores the source slot visual and **deactivates** the ghost.
+
+**Open/close inventory:** `UIManager.Update()` detects Tab key → fires `GameEvents.RaiseOpenInventoryView()` → `InventoryUI` receives → `SetActive(true)` → `OnEnable` fires (not first time) → `GameEvents.RaiseMenuStateChanged(true)` → `UIManager` sets `isAnyMenuOpen = true`, `PlayerMovement` unlocks cursor + disables input. Closing: `InventoryUI.Update()` detects ESC/Tab → fires `RaiseCloseInventoryView()` → `SetActive(false)` → `OnDisable` → `RaiseMenuStateChanged(false)` → cursor locks, input re-enables.
+
+---
+
 ## 1. Initial State (Scene Start)
 
 **DO:** Press Play
@@ -13590,6 +13732,8 @@ Canvas
 - DragGhostIcon is **hidden**
 - All slots: dark background (`_notSelectedColor`), no icon, no text
 - Cursor is **locked** (FPS mode)
+
+**Behind the scenes:** `InventoryUI.OnEnable()` ran with `isFirstEnable = true` → called `_orchestrator.Init()` → built 40 slots → subscribed to events → called `SetActive(false)` on itself. `OnDisable` fired → `RaiseMenuStateChanged(false)` → cursor locked.
 
 ---
 
@@ -13603,6 +13747,8 @@ Canvas
 - Pickaxe ViewModel **appears** in front of camera (parented to ViewModelContainer)
 - Console: `[GameEvents] OnToolPickupRequested raised for -> 1 subscribers`
 - Console: `[GameEvents] OnItemPickedUp raised for -> N subscribers`
+
+**Behind the scenes:** `GameEvents.RaiseToolPickupRequested(tool)` → `InventoryOrchestrator.HandleToolPickup` → `dataService.TryAdd(tool)` returns index 0 → `tool.gameObject.SetActive(false)` (WorldModel gone) → `SwitchToSlot(0)` → `tool.gameObject.SetActive(true)` → `BaseHeldTool.OnEnable()` parents to `Owner.ViewModelContainer` → `RaiseToolEquipped` → `PlayerGrab` sets `tool.Owner` → `RefreshAllSlots()` → `FIELD_SLOT[0].SetData(icon, "Pickaxe", 1)` + `SetHighlighted(true)` → `_background.color = _selectedColor`.
 
 ---
 
@@ -13697,6 +13843,8 @@ Canvas
 - Slot 1 (Magnet) does NOT become active — no auto-switch
 - Console: `OnItemDropped` fired
 
+**Behind the scenes:** `InventoryOrchestrator.HandleDropActiveTool()` → `tool.DropItem()` → `SetActive(true)`, `HideWorldModel(false)` (WorldModel visible), `HideViewModel()` (ViewModel hidden), unparent from ViewModelContainer, `rb.linearVelocity = cam.forward * 5f` → `Owner = null` → `dataService.Remove(tool)` → slot[0].Tool = null → `RaiseItemDropped(tool)` → `RefreshAllSlots()` → `FIELD_SLOT[0].SetEmpty()`.
+
 ---
 
 ## 8. Open Extended Inventory (Tab)
@@ -13708,6 +13856,8 @@ Canvas
 - Player movement/look **disabled** (isAnyMenuOpen = true)
 - Extended slots 0-29 all empty
 - Hotbar slots still show tools (Magnet, Hammer, MiningHat in slots 1-3)
+
+**Behind the scenes:** `UIManager.Update()` → `!isAnyMenuOpen && Tab pressed` → `GameEvents.RaiseOpenInventoryView()` → `InventoryUI` receives (subscribed in first OnEnable) → `this.gameObject.SetActive(true)` → `OnEnable` fires (isFirstEnable is false) → `GameEvents.RaiseMenuStateChanged(true)` → `UIManager.isAnyMenuOpen = true` + `PlayerMovement` receives → `isAnyMenuOpen = true` → cursor unlocks, WASD/look disabled. The `InventoryUI` GO becoming active makes the `ExtendedSlotsPanel` child visible (it's inside the InventoryUI GO).
 
 ---
 
@@ -13731,6 +13881,8 @@ Canvas
 **EXPECT:**
 - SelectedItemInfoPanel **hides**
 
+**Behind the scenes:** `UIEventRelay.OnPointerDown` fires → `InventoryOrchestrator.UpdateSelectedItemInfo(slot[i].Tool)`. If tool != null: `_selectedItemInfo.SetActive(true)`, fills name/desc/icon/amount texts, sets equip button text to "Equip" (or "Build" for ToolBuilder). If tool == null: `_selectedItemInfo.SetActive(false)`.
+
 ---
 
 ## 10. Equip From Info Panel
@@ -13739,8 +13891,10 @@ Canvas
 **EXPECT:**
 - Magnet becomes active tool (slot 1 highlighted)
 - Extended inventory **closes** (Tab auto-close)
-- Cursor **re-locks** (FPS mode)
+- Cursor **re-locked** (FPS mode)
 - Magnet ViewModel visible
+
+**Behind the scenes:** `EquipSelectedTool()` → finds slot index for selected tool via `dataService.GetIndexFor(tool)` → `SwitchToSlot(idx)` → previous tool hides, Magnet `SetActive(true)` → `OnEnable` parents to ViewModelContainer → `RaiseToolEquipped` → `PlayerGrab` sets Owner → then `GameEvents.RaiseCloseInventoryView()` → `InventoryUI.SetActive(false)` → `OnDisable` → `RaiseMenuStateChanged(false)` → cursor locks.
 
 ---
 
@@ -13752,6 +13906,8 @@ Canvas
 - Slot 2 becomes empty
 - SelectedItemInfoPanel **hides**
 - Extended inventory stays open
+
+**Behind the scenes:** `DropSelectedTool()` → `tool.DropItem()` (WorldModel visible, ViewModel hidden, rb velocity forward, Owner null) → `dataService.Remove(tool)` → `RaiseItemDropped(tool)` → `UpdateSelectedItemInfo(null)` → `_selectedItemInfo.SetActive(false)` → `RefreshAllSlots()`.
 
 ---
 
@@ -13768,6 +13924,9 @@ Canvas
 - Extended slot 10 shows **Magnet icon**
 - DragGhostIcon **hidden**
 - Slot 1 `HideWhenDragged` content **restored**
+
+**Behind the scenes (drag):** `UIEventRelay[1].OnBeginDrag` → `HandleBeginDrag(relay, e)` → `dragFromIndex = 1` → `FIELD_SLOT[1].SetDragVisible(false)` (→ `_hideWhenDragged.SetActive(false)` — slot content hidden) → `_dragGhostIcon.SetActive(true)` + `_dragGhostImage.sprite = magnet icon` + `SetAsLastSibling()` (renders on top). Every frame: `HandleDrag(e)` → `_dragGhostIcon.position = e.position`.
+**Behind the scenes (drop):** `UIEventRelay[10].OnDrop` → `HandleDrop(relay, e)` → `dataService.Swap(1, 10)` (exchanges Slot objects in the list) → `RefreshAllSlots()`. Then `UIEventRelay[1].OnEndDrag` → `HandleEndDrag` → `FIELD_SLOT[1].SetDragVisible(true)` (→ `_hideWhenDragged.SetActive(true)`) → `_dragGhostIcon.SetActive(false)`.
 
 **DO:** Drag extended slot 10 (Magnet) back to hotbar slot 1
 **EXPECT:**
@@ -13987,6 +14146,20 @@ Scene Root
 
 ---
 
+## How It Works (System Flow)
+
+**Tool on ground:** Each tool prefab has two child GOs: `WorldModel` (visible on ground) and `ViewModel` (visible when equipped). When the tool is on the ground, both are active but `BaseHeldTool.OnEnable()` checks `Owner == null` → shows WorldModel, hides ViewModel.
+
+**Pickup → Equip:** Player fires `RaiseToolPickupRequested(tool)` → `InventoryOrchestrator.HandleToolPickup` → `dataService.TryAdd(tool)` → `tool.gameObject.SetActive(false)` (disappears from ground) → `SwitchToSlot(idx)` → `tool.gameObject.SetActive(true)` → `BaseHeldTool.OnEnable()` fires → `RaiseToolEquipped` → `PlayerGrab` sets `tool.Owner = _movement` → tool calls `HideWorldModel()` (WorldModel child `SetActive(false)`) + `HideViewModel(false)` (ViewModel child `SetActive(true)`) → tool **parents itself to `Owner.ViewModelContainer`** (child of camera) → ViewModel now visible as first-person held tool.
+
+**Tool switch:** `InventoryOrchestrator.SwitchToSlot(newIndex)` → previous tool `SetActive(false)` → ViewModel disappears → new tool `SetActive(true)` → `OnEnable` → parents to ViewModelContainer → ViewModel appears.
+
+**Swing animation:** `ToolPickaxe.PrimaryFireHeld()` → `SwingPickaxe()` → `_viewModelAnimator.Play("Attack1", -1, 0f)` → Animator plays Attack1 state → `HasExitTime = true` → auto-returns to Idle after clip finishes. Cooldown timer prevents spam.
+
+**Drop:** `tool.DropItem()` → `HideWorldModel(false)` (WorldModel visible) → `HideViewModel()` (ViewModel hidden) → unparent from ViewModelContainer → `rb.linearVelocity = cam.forward * 5f` → tool flies forward → `Owner = null`.
+
+---
+
 ## 1. Initial State
 
 **DO:** Place all 4 tools on ground in scene → Press Play
@@ -13994,6 +14167,8 @@ Scene Root
 - All tools show **WorldModel** (mesh visible on ground)
 - All tools have **ViewModel hidden**
 - No Animator playing
+
+**Behind the scenes:** Each tool's `BaseHeldTool.OnEnable()` fires on scene load. `Owner == null` (not equipped yet), so it defaults to showing WorldModel. ViewModel stays hidden until `SwitchToSlot` equips it.
 
 ---
 
@@ -14754,11 +14929,19 @@ phase-c(New)/
 
 ## Manual Tests (`5-Tests/Manual/*.md` — hands-on, no script)
 
+> These `.md` files teach the system's internal flow AND test it visually. Each contains:
+> - **Setup Guide** — beginner-level singleton creation, prefab hierarchies, wiring tables
+> - **How It Works** — data flow in plain English (which script → event → subscriber → GO state change)
+> - **DO/EXPECT steps** — each step includes behind-the-scenes: which method runs, which event fires, which GOs activate/deactivate
+> - **Checklist** — pass/fail items
+>
+> The reader should understand the full mining architecture by reading these manual tests.
+
 | # | File | What to verify |
 |---|------|---------------|
-| 1 | `MiningFlowTest.md` | Hit node → particles → health bar → shatter → ore pieces fly + bounce + settle |
-| 2 | `AutoMinerVisualTest.md` | Rotator spins, ore spawns on timer, probability-based, rate adjustable |
-| 3 | `SellerMachineTest.md` | Ore enters trigger → waits → money increases → ore returns to pool |
+| 1 | `MiningFlowTest.md` | Mining flow: `OreNode.TakeDamage` → health decreases → `BreakNode` → `OrePiecePoolManager.SpawnPooledOre` → ore pieces fly → `RaiseOreMined` fires |
+| 2 | `AutoMinerVisualTest.md` | Auto mining: `AutoMiner.Update` rotates + timer → `TrySpawnOre` → `OreLimitManager` throttle → `SO_AutoMinerResourceDefinition.GetOrePrefab` weighted selection |
+| 3 | `SellerMachineTest.md` | Selling flow: `SellerMachine.OnTriggerEnter` → `OrePiece.SellAfterDelay` → tag MarkedForDestruction → 2s coroutine → `EconomyManager.AddMoney` → `RaiseOreSold` → `Delete` → pool return |
 
 ---
 
@@ -16215,6 +16398,20 @@ Scene Root
 
 ---
 
+## How It Works (System Flow)
+
+**Initialization:** `AutoMiner.Start()` sets `timeUntilNextSpawn = _spawnRate`, picks `rotationAxis` based on `_rotateY`/`_rotateZ` flags. If `_resourceDefinition` is assigned, it copies `SpawnProbability` and `SpawnRate` from the SO.
+
+**Every frame:** `AutoMiner.Update()` runs when `_enabled = true`. It rotates `_rotator` child at `360° / (SpawnRate × OresPerRotation)` degrees per second — visually the drill spins. A timer counts down. When it reaches 0 → `TrySpawnOre()` fires.
+
+**Spawn logic:** `TrySpawnOre()` first checks `Singleton<OreLimitManager>.Ins.ShouldBlockOreSpawning()` — if `Blocked`, returns immediately (no spawn). Then a random roll: `Random.Range(0, 100) <= SpawnProbability` — at 80%, roughly 1 in 5 cycles produces nothing. If both checks pass, `_resourceDefinition.GetOrePrefab(CanProduceGems)` uses `UtilsPhaseC.WeightedRandom()` to pick a prefab from the weighted list, then `OrePiecePoolManager.SpawnPooledOre(prefab, spawnPoint)` creates or recycles an ore piece.
+
+**Timer reset:** After spawn attempt, timer resets to `_spawnRate * OreLimitManager.GetAutoMinerSpawnTimeMultiplier()`. The multiplier is 1.0 at Regular, 1.25 at SlightlyLimited, 1.5 at HighlyLimited, 2.0 at Blocked — effectively **throttling** spawn rate under load.
+
+**Limit detection:** `OreLimitManager.Update()` checks every 15 seconds — counts non-sleeping `Rigidbody` in `OrePiece.AllOrePieces`. Exceeding thresholds changes `OreLimitState` → fires `GameEvents.RaiseOreLimitChanged()` → `PhysicsLimitUIWarning` shows/hides warning text.
+
+---
+
 ## 1. Initial State
 
 **DO:** Press Play, look at AutoMiner
@@ -16451,6 +16648,20 @@ Scene Root
 
 ---
 
+## How It Works (System Flow)
+
+**Scene loads:** `OreNode.Start()` picks a random index from `_models[]` and calls `SetActive(true)` on that one, `SetActive(false)` on all others — each node shows a random rock variant. `OrePiecePoolManager.Awake()` builds a `Dictionary<OrePieceKey, OrePiece>` from `_allOrePiecePrefabs` — mapping each (ResourceType, PieceType, IsPolished) to its prefab for O(1) lookup.
+
+**Taking damage:** When `OreNode.TakeDamage(damage, position)` is called (by ToolPickaxe or OreTest), it subtracts `damage` from `_health`. If health > 0 → nothing else happens (Phase H would play a hit sound here). If health ≤ 0 → `BreakNode(hitPosition)` fires.
+
+**Breaking:** `BreakNode` picks a random drop count between `_minDrops` and `_maxDrops`. For each drop, `UtilsPhaseC.WeightedRandom(_possibleDrops, d => d.Weight)` selects an `OrePiece` prefab based on weights. Then `Singleton<OrePiecePoolManager>.Ins.SpawnPooledOre(prefab, pos, rotation)` either **dequeues a recycled piece** from the pool or **Instantiates a new one**. Each spawned piece gets random velocity (upward + lateral) and random angular velocity — they **fly out and tumble**. `ParticleManager.CreateParticle(BreakOreNodeParticlePrefab, hitPosition)` spawns a burst particle. `GameEvents.RaiseOreMined(resourceType, position)` fires for quest tracking. Finally `Destroy(gameObject)` removes the node permanently.
+
+**OrePiece lifecycle:** On `SetActive(true)` (from pool or fresh), `OrePiece.OnEnable()` adds itself to the static `AllOrePieces` list. `Start()` picks a random mesh from `_possibleMeshes`, applies random scale variance, and sets `randomPriceMultiplier` (0.9–1.1). The piece is now a live physics object — grabbable, pullable by magnet, pushable onto conveyors.
+
+**Pool return:** When `OrePiece.Delete()` is called (by SellerMachine or OreManager cleanup), `OrePiecePoolManager.ReturnToPool(piece)` **deactivates** it (`SetActive(false)`), resets velocity/drag/rotation, clears all state, re-tags as "Grabbable", parents under the pool root, and **enqueues** it. `OnDisable` removes it from `AllOrePieces`.
+
+---
+
 ## 1. Initial State
 
 **DO:** Press Play
@@ -16459,6 +16670,8 @@ Scene Root
 - No ore pieces on ground
 - No particles visible
 - Console: no errors
+
+**Behind the scenes:** `OreNode.Start()` randomized model variants. `OrePiecePoolManager.Awake()` built the prefab lookup dictionary. `OreManager.Awake()` called `oreDataService.Build(_allResourceDescriptions)`. `OreLimitManager` timer is at 0 — first check in 15 seconds.
 
 ---
 
@@ -16610,6 +16823,18 @@ Scene Root
 ├── OreTest
 └── Floor
 ```
+
+---
+
+## How It Works (System Flow)
+
+**Trigger enter:** When any `Rigidbody` enters the `SellerMachine`'s trigger collider (`IsTrigger = true`), Unity calls `SellerMachine.OnTriggerEnter(Collider other)`. First it checks `other.CompareTag("MarkedForDestruction")` — if true, returns (already being sold). Then checks `other.attachedRigidbody == null` — if no rigidbody, returns (ignore static objects).
+
+**OrePiece path:** `other.GetComponentInParent<OrePiece>()` — if found, calls `orePiece.SellAfterDelay(2f)`. Inside `SellAfterDelay`: if the piece is held by a magnet, `CurrentMagnetTool.DetachBody(Rb)` releases it first. Then `gameObject.tag = "MarkedForDestruction"` — this prevents other triggers from double-selling it. A **coroutine** starts: waits 2 seconds, then calls `Singleton<EconomyManager>.Ins.AddMoney(sellValue)` → `GameEvents.RaiseMoneyChanged(newTotal)` → then `GameEvents.RaiseOreSold(price, resourceType, pieceType)` (for quest tracking in Phase F) → finally `Delete()` which calls `OrePiecePoolManager.ReturnToPool(this)`. The pool **deactivates** the piece (`SetActive(false)`), resets all state (velocity, drag, tag back to "Grabbable"), parents under pool root, and **enqueues** it for reuse.
+
+**BaseSellableItem path:** If not an OrePiece, checks `other.GetComponentInParent<BaseSellableItem>()` — if found, directly calls `EconomyManager.AddMoney(sellValue)` and `Destroy(gameObject)` (not pooled — only OrePiece uses the pool).
+
+**MarkedForDestruction guard:** Once tagged, any other seller trigger that receives this ore will see `CompareTag("MarkedForDestruction")` → return immediately. This prevents double-sell even if ore enters multiple triggers.
 
 ---
 
