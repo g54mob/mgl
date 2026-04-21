@@ -17732,3 +17732,4 @@ The PlayerController is a textbook God Object but splitting it would be a refact
 - **Added "Documentation Voice & Tone" section to NewAgent-general.md** — explicitly defining what "beginner-friendly" means (conversational, first-person "I", assumes zero prior knowledge) and what it does NOT mean (not dumbed-down, not long, not skipping "why"). Plus FLOW.md formatting rules (bold/italic/code semantics).
 - **Key insight:** The generalized docs had the rules but not the philosophy or the examples. Rules tell you what. Philosophy tells you why. Examples tell you how. All three are needed for a new project.
 
+
