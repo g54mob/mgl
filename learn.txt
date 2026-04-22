@@ -9374,7 +9374,7 @@ In Unity 6000.3+, Shader Graph uses the **URP** target by default:
 
 ## AnimParamType Enum (grows per phase)
 
-> Lives in `phase-All/2-Data/Enums/GlobalEnumsAll.cs`. Use `.ToString()` when calling Animator methods.
+> Lives in `phase-b(New)/Scripts/2-Data/Enums/GlobalEnumsB.cs`. Use `.ToString()` when calling Animator methods.
 
 ```csharp
 /// <summary> Animator parameter names as enum — never use raw strings.
@@ -9554,6 +9554,15 @@ Same structure, `Attack1` → `ToolMagnet_Attack1.anim` (0.2s pulse). Can skip i
 > The drill rotation is done in `AutoMiner.Update()` via `_rotator.Rotate()` — no animation clip.
 > Speed = `360° / (SpawnRate × OresPerRotation)` per second.
 > **No AnimatorController needed** — pure code rotation.
+
+### ConveyorBelt (shader-driven texture scroll — NO animation)
+
+> The belt surface scrolls via `ConveyorBelt_ScrollingTexture` Shader Graph (see `6-Shaders/ShaderGuide.md`).
+> The `_Time` node moves UV offset continuously — zero code for visuals. Ore moves via physics
+> (`ConveyorBelt.FixedUpdate` → `rb.linearVelocity`), not animation. Batch rendering via
+> `DrawMeshInstanced` preserves the scroll (same material, same `_Time` node).
+>
+> **No AnimatorController. No animation clip. No code rotation.** Pure shader.
 
 ### ConveyorSplitterT2 (code-driven coroutine)
 
@@ -11868,6 +11877,14 @@ public enum InteractionType
 	// ToggleDirection,
 }
 
+/// <summary> animator parameter names as enum — never use raw strings.
+/// usage: _animator.Play(AnimParamType.attack1.ToString(), -1, 0f) </summary>
+public enum AnimParamType
+{
+	attack1,
+	// Phase E: isRunning, isSmelting, speed, fillPercent
+}
+
 /// <summary> magnet tool grab filter modes </summary>
 public enum MagnetToolSelectionMode
 {
@@ -13430,7 +13447,7 @@ public class BaseHeldTool : BaseSellableItem, IInteractable, ISaveLoadableObject
 	/// <summary> single click fire </summary>
 	public virtual void PrimaryFire()
 	{
-		if (_viewModelAnimator != null) _viewModelAnimator.Play("Attack1", -1, 0f);
+		if (_viewModelAnimator != null) _viewModelAnimator.Play(AnimParamType.attack1.ToString(), -1, 0f);
 	}
 	/// <summary> held fire (continuous) </summary>
 	public virtual void PrimaryFireHeld() { }
@@ -13882,7 +13899,7 @@ public class ToolPickaxe : BaseHeldTool
 		if (owner == null) return;
 		Camera cam = owner.PlayerCam;
 		if (cam == null) return;
-		if (_viewModelAnimator != null) _viewModelAnimator.Play("Attack1", -1, 0f);
+		if (_viewModelAnimator != null) _viewModelAnimator.Play(AnimParamType.attack1.ToString(), -1, 0f);
 		// Phase H: play swing sound
 		StartCoroutine(PerformAttack(0.2f));
 		lastAttackTime = Time.time;
