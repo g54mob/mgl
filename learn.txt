@@ -22393,6 +22393,36 @@ The PlayerController is a textbook God Object but splitting it would be a refact
 - **40 files total (after gap fix):** Initially 34, then added 5 missing: ChuteHatch (dual-rotating toggleable hatch), ChuteTop (checks for Hopper above), RobotGrabberArm (automated IK ore-grabbing arm), RoutingConveyorSaveData, ISaveLoadableBuildingObject. All found by comparing every original source file against what was delivered.
 - **ToolBuilder fully completed:** Phase B partial had empty PrimaryFire/Update. Now: Update raycasts + UpdateGhostObject, PrimaryFire validates + Instantiates + RaiseBuildingPlaced, DropItem spawns crate instead of raw drop, OnDisable cleans up ghost.
 - **Enum camelCase convention caught by memory retrieval:** All Phase D enum values (CanPlaceBuilding.valid, PlacementNodeRequirement.none, SupportType.flat, etc.) fixed to camelCase per GOAL.md convention. Field names stay PascalCase (they're public SerializeField, not enum values). Had to fix an accidental duplicate-field bug caused by a multi_edit replacing field names alongside enum values.
+
+## Prompt: "Least possible public API — [SerializeField] public is wrong, Get/Set methods"
+
+**What I thought:**
+- **User caught the `[SerializeField] public` anti-pattern.** BuildingManager had 21 public fields exposed to everything. User provided a breakdown table showing which fields need external access and which don't. This triggered a cascade: private fields + Get/Set getters for only what's externally needed.
+- **No C# property accessors (`{ get; set; }`) — user wants explicit Get/Set methods.** Properties look like fields but hide logic. User's preference: `GetSpeed()` / `SetSpeed()` make the access cost visible. Updated GOAL.md + NewAgent.md with this rule.
+- **`_` prefix only for `[SerializeField]` — non-serialized fields use camelCase.** Had to fix `_owner`, `_definition`, `_quantity`, `_currentRotation`, `_isInWater`, `_currentObjectIsSnapped`, `_needsUpdate`, `_cachedMatrix` across all phases. 48+ references for `owner` alone across 8 tool files.
+- **protected fields for subclass access:** `owner` on BaseHeldTool is `protected` so 6 tool subclasses can use it directly without `GetOwner()` call overhead. Same for `_worldModel`, `_viewModel`, `_viewModelAnimator` (these are `[SerializeField] protected` — `_` prefix is correct because they ARE serialized).
+
+## Prompt: "Comprehensive summaries on every method — Phase C and D"
+
+**What I thought:**
+- **Phase C was already mostly covered.** The regex flagged 9 "missing" on OrePiece but those were one-liner property getters (`ResourceType =>`) not methods. Real gaps: PhysicsLimitUIWarning.Start, OreTest.Start/Update, DEBUG_CheckC.Update — all quick fixes.
+- **Phase D had the real gaps.** BuildingManager (15 missing), BuildingObject (19 missing), ConveyorBelt (12 missing), ToolBuilder (12 missing). Systematically added summaries to every Unity lifecycle method, IInteractable implementation, and private helper.
+- **Get/Set one-liners are self-documenting** — `public float GetSpeed() => _speed;` doesn't need a summary. GOAL.md explicitly states this exception.
+
+## Prompt: "Update PhaseMap.md + StructureMap.md"
+
+**What I thought:**
+- **PhaseMap Phase C was wrong.** Listed `SO_ResourceDescription`, `WOrePiece`, `SO_WeightedOreChance` — none of these exist. Replaced with actual file list matching phase-c(New): managers in 1-Managers, entities as Entities, DamageableOrePiece added, GlobalEnumsC.
+- **PhaseMap Phase D was incomplete.** Had 15 files listed, actual is 40. Added all conveyor variants, ChuteHatch/ChuteTop/RobotGrabberArm, correct subfolder structure (Building/, Conveyor/, Tool/), expanded cross-phase mods from 3 to 6 entries.
+- **StructureMap marked as implemented.** OreDataService + BuildingDataService both ✅. Fixed collection type (`ResourceDescription` not `SO_ResourceDescription`), noted CanPlace moved to BuildingManager (needs Unity API).
+
+## Prompt: "7-3D folder — MODEL.md, ANIM.md, WORLD.md + AnimParamType enum"
+
+**What I thought:**
+- **Centralized in phase-All, not per-phase.** User explicitly corrected my initial per-phase approach. One MODEL.md/ANIM.md/WORLD.md with `## Phase X` sections that grow. Same pattern as ShaderGuide.md.
+- **AnimParamType enum replaces raw animator strings.** Same philosophy as TagType — type-safe enum instead of magic strings. Added to GlobalEnumsB.cs, updated BaseHeldTool and ToolPickaxe to use `AnimParamType.attack1.ToString()`.
+- **ConveyorBelt has NO animation — pure shader.** Belt texture scroll is shader-driven (`_Time` node), ore physics is code-driven. No AnimatorController needed. Documented in ANIM.md Phase D section.
+- **WORLD.md with ASCII maps is surprisingly useful.** Top-down map + legend + prefab placement table + "what the player sees" narrative gives spatial context that script code alone can't provide.
 - **Cross-phase modifications documented:** Phase D needs 5 modifications to earlier phases: InteractionType enum (add pack/switchDirection), BasePhysicsObject conveyor stubs, FresnelHighlighter building/wrench checks, SO_ShopItemDef building definition field, AutoMiner.SetResourceDefinition method.
 - **Test scripts enriched:** BuildingTest now has Take (U) and Pack (I) keys + FindNearestBuilding raycast helper + OnBuildingTakeRequested subscription. ConveyorTest now has OnOreSold + OnOreLimitChanged subscriptions + P key for snapshot. Both have README TextArea + comprehensive class summaries.
 
