@@ -1497,8 +1497,12 @@ Scripts/phase-All/                      → "shared scripts that grow across pha
 │       └── GlobalEnumsAll.cs           → "TagType enum — Unity tags as enum, grows across phases"
 ├── 4-Utils/
 │   └── UtilsPhaseAll.cs                → "shared extensions (HasTag, SetTag) — auto-available via C# extension methods"
-└── 6-Shaders/
-    └── ShaderGuide.md                  → "ALL shaders, materials, URP settings across all phases — Shader Graph setup, property values, Renderer Features, layers"
+├── 6-Shaders/
+│   └── ShaderGuide.md                  → "ALL shaders, materials, URP settings across all phases"
+└── 7-3D/
+    ├── MODEL.md                        → "ALL 3D meshes across all phases — shape, dimensions, hierarchy, variants"
+    ├── ANIM.md                         → "ALL animations + AnimatorController graphs + AnimParamType enum"
+    └── WORLD.md                        → "world layout per phase — ASCII maps, prefab placement, lighting"
 
 Scripts/phase-X/
 │
@@ -1617,7 +1621,13 @@ The deciding question: **"Does this script own shared state that other scripts q
 
 **All summaries are reference-only** — you read them while typing to understand the flow. You do NOT type them. When hand-typing, keep your own one-liner (e.g. `/// recycles ore objects to avoid GC spikes`).
 
-### Class Summary — conversation-style, first person "I"
+### Class Summary — comprehensive, conversation-style, first person "I" (mandatory)
+
+**Every class gets a multi-line `/// <summary>`** that covers:
+1. **What I do** — explain the full behavior in conversational English (not just "manages X")
+2. **How I work** — trace the main data flow: what calls what, what events fire, what GOs activate
+3. **Who uses me** — which scripts call my methods or subscribe to my events
+4. **Events I fire / subscribe to** — GameEvents connections
 
 ```csharp
 /// <summary>
@@ -1634,7 +1644,11 @@ The deciding question: **"Does this script own shared state that other scripts q
 public class OrePiecePoolManager : Singleton<OrePiecePoolManager>
 ```
 
-### Method Summary — 2-line English explaining what happens inside + `// →` inline steps
+### Method Summary — EVERY method gets a `/// <summary>` (mandatory)
+
+**Every public method, every private method, every Unity lifecycle method** gets a `/// <summary>` that explains what happens inside in 1-2 lines of plain English. No exceptions.
+
+**Exception:** One-liner `Get...()` / `Set...()` methods that just return/set a private field are self-documenting and DON'T need summaries. Example: `public float GetSpeed() => _speed;` — the name IS the documentation.
 
 **Public methods** — slightly more comprehensive (external callers need to understand the full effect):
 ```csharp
@@ -2098,6 +2112,39 @@ These are purely hand-tested — no script automates them. The `.md` is the test
 
 **When building any phase, always ask:** "Are there any systems in this phase that need visual/hands-on verification?" If yes, create a `Manual/*.md` for each. Analyse the main source for UI panels, animations, physics visuals, and any complex inspector setup that a `.cs` test can't verify. See PhaseMap.md + StructureMap.md for the full list of required manual tests per phase.
 
+---
+
+## 7-3D — Models, Animations, World Layout (centralized in phase-All)
+
+`phase-All/7-3D/` contains three `.md` files that cover **ALL phases** in one place — not per-phase. Each file has sections per phase (## Phase B, ## Phase C, etc.) so everything grows in one document. These are **beginner-friendly visual guides** — someone who has never used Blender or Unity's animation system should be able to follow them.
+
+**`MODEL.md`** — every 3D mesh this phase needs:
+- Name, rough shape description (e.g. "rectangular box 0.5m × 0.3m × 0.2m")
+- Component hierarchy: which child GOs have MeshFilter, MeshCollider, Rigidbody
+- Vertex count range (low-poly target: 50-500 tris for tools, 500-2000 for machines)
+- Prefab hierarchy tree (same format as Manual/*.md setup guides)
+- Multiple mesh variants where applicable (e.g. OreNode has 3 rock variants)
+
+**`ANIM.md`** — every animation clip + AnimatorController:
+- **Animation Clips**: name, duration, what moves (which transform, what property, keyframes)
+- **AnimatorController State Machine**: ASCII graph showing states + transitions
+- **Parameters**: use `AnimParamType` enum (like `TagType`) — never raw strings for trigger/bool/float names
+  ```csharp
+  // in GlobalEnumsX.cs
+  public enum AnimParamType { attack1, isRunning, speed }
+  // usage: _animator.SetTrigger(AnimParamType.attack1.ToString());
+  ```
+- **Transition rules**: HasExitTime, ExitTime, TransitionDuration, conditions
+- **Wiring**: which script field connects to which Animator
+
+**`WORLD.md`** — how the world looks in this phase:
+- Room/area layout with ASCII top-down map
+- Where key prefabs are placed (spawn points, ore nodes, seller machines, conveyors)
+- Lighting setup (directional light, point lights, ambient)
+- Camera position for test scenes
+- Layer/tag setup specific to this phase's world
+- Visual reference: "what the player sees when they walk in"
+
 ----
 
 ## Hand-Typing Order
@@ -2155,7 +2202,12 @@ Every phase folder has a `GUIDE.md` with:
   - Layers & Tags required
   - Any SO assets to create (e.g. SO_InteractionOption "Take"/"Destroy")
 - **Scene setup** (step-by-step — every GO, every component, every `[SerializeField]` wiring)
-- **Modifications to Earlier Phases** (table: File | How | Change | Why)
+- **Modifications to Earlier Phases** — NOT just a table. For each cross-phase change, include:
+  - File path (which phase's script)
+  - What to change (ADD / REPLACE / MODIFY)
+  - **Exact code in ` ``` ` blocks** showing what to add/replace, with comments explaining where to insert it
+  - Example: if Phase D needs `InteractionType.pack` added to Phase B's `GlobalEnumsB.cs`, show the full enum with `// ← ADD` markers
+  - Example: if Phase D needs a new method on Phase C's `AutoMiner.cs`, show the complete method with summary
 - **Source vs Phase diff** (what original did vs what we changed)
 - **Systems & Testability** (at the end):
   - **Individual Systems** table — each system's name, scripts, and how it's decoupled (which GameEvents)
@@ -2469,11 +2521,19 @@ For each phase, the agent must produce:
      - Checklist: pass/fail items
      - Reference: see `phase-b(New)/GUIDE.md` tests for the gold standard format
    - Scene Setup (full — GOs, components, wiring checklist)
-   - Modifications to Earlier Phases (table: File | How | Change | Why)
+   - Modifications to Earlier Phases — **include exact code diffs** in fenced ` ``` ` blocks for each cross-phase change (file path, ADD/REPLACE/MODIFY, complete code with `// ← ADD` markers and summaries)
    - Source vs Phase diff (what original did vs what we changed)
    - Systems & Testability (at end): Individual Systems table (name, scripts, decoupling events) + Testability Matrix (which test covers what, dependencies). Final count line.
 
 1b. **FLOW.md** with:
+   (see below)
+
+1c. **Update `phase-All/7-3D/`** — centralized, grows per phase (NOT per-phase folders):
+   - **`MODEL.md`** — add a `## Phase X` section with every 3D mesh: name, shape, dimensions, component hierarchy tree, vertex count, variants
+   - **`ANIM.md`** — add a `## Phase X` section with every animation clip (name, duration, keyframes), AnimatorController state machines (ASCII graph), parameters as `AnimParamType` enum (never raw strings), transition rules, wiring
+   - **`WORLD.md`** — add a `## Phase X` section with world layout: ASCII top-down map, prefab placement, lighting, camera, "what the player sees"
+
+1b-continued. **FLOW.md** with:
    - **System Map** — ASCII box diagram: all systems, what each owns, connections via GameEvents/SerializeField
    - **Data Flows** — one per major user action. Written in **conversation-style plain English** with `code refs`, **bold** for key moments, *italics* for context. NOT swim lanes or ASCII tables — readable prose.
    - **Event Registry** — table: every GameEvent in that phase, who fires it, who subscribes
@@ -2482,13 +2542,14 @@ For each phase, the agent must produce:
 
 2. **All scripts** following GOAL.md rules:
    - `#region` blocks for sections
-   - **Beginner-friendly summaries on everything** (reference-only — user reads while typing, does NOT type these):
-     - **Class**: conversation-style first person "I" — what I do, how I work, who uses me, events I fire/subscribe
+   - **Beginner-friendly `/// <summary>` on EVERY class and EVERY method — mandatory, no exceptions:**
+     - **Class**: comprehensive multi-line, conversation-style first person "I" — (1) what I do, (2) how I work (trace data flow), (3) who uses me, (4) events I fire/subscribe
      - **Public method**: 2-line English explaining the full effect (what happens inside, not just the name)
      - **Private method**: same — describe what actually happens, not just the method name being called
      - **Unity lifecycle** (Start, Update, Awake, OnEnable, OnDisable, OnCollisionEnter, OnTriggerEnter, OnDestroy, FixedUpdate): 2-line explaining what THIS script does in this hook — don't just say "called by Unity"
      - **Interface**: who implements it, who calls it, what it enforces
      - **Enum**: what each value means in context (which system uses it, what changes per value)
+     - **Exception:** One-liner `Get...()` / `Set...()` that just return/set a field — self-documenting, no summary needed
    - **`// →` inline flow markers** inside every method body — one per logical step, describes what happens at that point (if a method call does 5 things, list those 5 things)
    - `// purpose:` on every `.Raise...()` and `+=` subscription
    - Zero `FindObjectOfType` — use GameEvents, `[SerializeField]`, Owner chain
@@ -3036,67 +3097,66 @@ SellerMachine        → "I sell ore that enters my trigger for money"
 OreDataService       → "I manage ore pool, weighted drops, resource descriptions"
 ```
 
-### Files
+### Files (ACTUAL — matches phase-c(New))
 
 ```
 0-Core/
-└── GameEvents.cs                        — Modify: add OnOreMined, OnOreSold, OnOreLimitChanged
+└── GameEvents.cs                        — partial: OnOreMined, OnOreSold, OnOreLimitChanged
 
 1-Managers/
-└── OreManager.cs                        — singleton: round-robin ore cleanup
+├── OreManager.cs                        — singleton: round-robin ore cleanup, owns OreDataService
+├── OrePiecePoolManager.cs               — singleton: recycles ore objects via Dictionary<OrePieceKey, Queue>
+├── OreLimitManager.cs                   — singleton: throttles spawning when too many physics objects
+└── ParticleManager.cs                   — singleton: spawns particle prefabs at world positions
 
 2-Data/
-├── SO_ResourceDescription.cs
-├── SO_AutoMinerResourceDefinition.cs
-├── SO_WeightedOreChance.cs
-├── SO_WeightedNodeDrop.cs
+├── SO_AutoMinerResourceDefinition.cs    — spawn rate + weighted ore drop list (pure data)
 ├── Interface/
-│   └── IDamageable.cs
-├── DataWrapper/
-│   └── WOrePiece.cs                     — runtime ore state (resource type, piece type, polish %)
+│   └── IDamageable.cs                   — TakeDamage(float, Vector3)
 ├── DataService/
-│   └── OreDataService.cs               — pool management, weighted drops, resource queries
+│   └── OreDataService.cs               — resource descriptions, color lookups, formatted strings
+├── Enums/
+│   └── GlobalEnumsC.cs                  — ResourceType, PieceType, OreLimitState
 └── Entities/
-    ├── ResourceType.cs                  — enum
-    ├── PieceType.cs                     — enum
-    ├── OrePieceKey.cs
-    └── OrePieceEntry.cs
+    ├── WeightedNodeDrop.cs              — OrePrefab + Weight (used by OreNode)
+    ├── WeightedOreChance.cs             — OrePrefab + Weight (used by AutoMiner + OrePiece)
+    ├── ResourceDescription.cs           — ResourceType + DisplayColor
+    ├── OrePieceKey.cs                   — composite key: ResourceType + PieceType + IsPolished
+    └── OrePieceEntry.cs                 — save data for one ore piece (Phase G)
 
 3-MonoBehaviours/
-├── OreNode.cs
-├── OrePiece.cs
-├── OrePiecePoolManager.cs
-├── OreLimitManager.cs
-├── AutoMiner.cs
-├── SellerMachine.cs
-├── ParticleManager.cs
-└── PhysicsLimitUIWarning.cs
+├── OreNode.cs                           — breakable rock, drops ore via pool
+├── OrePiece.cs                          — physical ore object, sell/crush/pool lifecycle
+├── DamageableOrePiece.cs                — OrePiece that breaks on collision damage
+├── AutoMiner.cs                         — spawns ore on timer, throttled by OreLimitManager
+├── SellerMachine.cs                     — sells ore entering trigger, fires OnOreSold
+└── PhysicsLimitUIWarning.cs             — shows/hides ore limit warning panel
 
 4-Utils/
-├── UtilsPhaseC.cs
-└── PhaseCLOG.cs
+├── UtilsPhaseC.cs                       — WeightedRandom<T>, PickOrePrefab
+└── PhaseCLOG.cs                         — resource description snapshot formatter
 
 5-Tests/
-├── OreTest.cs                           — spawn/mine/sell flow without player
 ├── DEBUG_CheckC.cs                      — OreDataService plain C# test
+├── OreTest.cs                           — spawn/mine/sell flow without player
 └── Manual/
-    ├── MiningFlowTest.md                (manual: hit node → particles → shatter → ore pieces fly)
-    ├── AutoMinerVisualTest.md           (manual: rotator spins, ore spawns on timer, probability)
-    └── SellerMachineTest.md             (manual: ore enters trigger → waits → money increases)
+    ├── MiningFlowTest.md
+    ├── AutoMinerVisualTest.md
+    └── SellerMachineTest.md
 ```
 
 ### Modifications to Earlier Phases
 
 | File (Phase) | Change | Why |
 |-------------|--------|-----|
-| `0-Core/GameEvents.cs` (A) | Add `OnOreMined`, `OnOreSold`, `OnOreLimitChanged` | Quest system (Phase F) subscribes to these |
+| `0-Core/GameEvents.cs` (A) | partial extend — `OnOreMined`, `OnOreSold`, `OnOreLimitChanged` | No modification to Phase A file |
 
 ### Vertical Slice Tests
 
 | Test | Tests what independently | NOT required |
 |------|------------------------|-------------|
-| DEBUG_CheckC | OreDataService (weighted drops, pool logic) | Everything else |
-| OreTest | Spawn ore, mine node, sell at machine | Player (use test controls instead) |
+| DEBUG_CheckC | OreDataService (color lookups, formatted strings) | Everything — plain C# `new` |
+| OreTest | Spawn ore, mine node, sell, pool lifecycle | Player (use test controls instead) |
 
 ---
 
@@ -3139,62 +3199,84 @@ Buildings on uneven ground:
   - Toggle supports on/off with wrench tool
 ```
 
-### Files
+### Files (ACTUAL — matches phase-d(New))
 
 ```
+0-Core/
+└── GameEvents.cs                           — partial: OnBuildingPlaced, OnBuildingRemoved, OnBuildingTakeRequested
+
 1-Managers/
-└── BuildingManager.cs               — singleton: grid placement, ghost preview
+├── BuildingManager.cs                       — singleton: ghost preview, grid placement, conveyor snap
+└── ConveyorBeltManager.cs                   — singleton: applies accumulated conveyor velocities in FixedUpdate
 
 2-Data/
-├── SO_BuildingInventoryDefinition.cs
+├── SO_BuildingInventoryDefinition.cs        — building type: name, icon, prefabs, stack size
 ├── Interface/
-│   └── (uses existing IInteractable)
+│   └── ISaveLoadableBuildingObject.cs       — building persistence contract (Phase G)
 ├── DataService/
-│   └── BuildingDataService.cs       — placement validation, conveyor snap detection
+│   └── BuildingDataService.cs               — grid snap math, conveyor snap voting (pure C#)
+├── Enums/
+│   └── GlobalEnumsD.cs                      — CanPlaceBuilding, PlacementNodeRequirement, SupportType
 └── Entities/
-    ├── CanPlaceBuilding.cs          — enum
-    ├── PlacementNodeRequirement.cs  — enum
-    ├── SupportType.cs               — enum
-    └── BuildingRotationInfo.cs
+    ├── BuildingRotationInfo.cs              — snap rotation + mirror flag
+    ├── BuildingObjectEntry.cs               — save data for one placed building (Phase G)
+    └── RoutingConveyorSaveData.cs           — IsClosed state for toggleable components
 
 3-MonoBehaviours/
-├── BuildingObject.cs
-├── BuildingPlacementNode.cs
-├── BuildingCrate.cs
-├── ModularBuildingSupports.cs
-├── ScaffoldingSupportLeg.cs
-├── BaseModularSupports.cs
-├── ConveyorBelt.cs
-├── ConveyorBeltManager.cs
-├── ConveyorRenderer.cs
-├── ConveyorSoundSource.cs
-└── ToolBuilder.cs                   — Modify: complete placement logic
+├── Building/
+│   ├── BuildingObject.cs                    — placed building with IInteractable (Take/Pack)
+│   ├── BuildingCrate.cs                     — packed building crate on ground
+│   ├── BuildingPlacementNode.cs             — marks AutoMiner attachment spots
+│   ├── BaseModularSupports.cs               — base for scaffolding leg systems
+│   ├── ModularBuildingSupports.cs           — dynamic scaffolding legs via raycast
+│   ├── ScaffoldingSupportLeg.cs             — simple repeating support legs
+│   ├── ChuteHatch.cs                        — toggleable hatch (IInteractable)
+│   ├── ChuteTop.cs                          — checks for Hopper above, converts if found
+│   └── RobotGrabberArm.cs                   — automated IK arm, grabs ore along arc
+├── Conveyor/
+│   ├── ConveyorBelt.cs                      — pushes physics objects forward via trigger
+│   ├── ConveyorBeltShaker.cs                — left-right + up-down oscillation (sieving)
+│   ├── ConveyorBeltShakerHorizontal.cs      — left-right oscillation only
+│   ├── ConveyorBlocker.cs                   — hinge gate disables belt when closed
+│   ├── ConveyorBlockerT2.cs                 — interactable sliding gate (IInteractable)
+│   ├── ConveyorSplitterT2.cs                — swinging arm alternates ore direction
+│   ├── RoutingConveyor.cs                   — interactable direction switch (IInteractable)
+│   ├── ConveyorRenderer.cs                  — batch renders all conveyors via DrawMeshInstanced
+│   ├── ConveyorBatchRenderingComponent.cs   — caches transform matrix for batch rendering
+│   └── ConveyorSoundSource.cs               — marks conveyor sound position (Phase H)
+└── Tool/
+    └── ToolBuilder.cs                       — REPLACES Phase B partial: ghost + grid + place + consume
 
 4-Utils/
-└── UtilsPhaseD.cs
+├── UtilsPhaseD.cs                           — OverlapBox helper, IsFlatGround check
+└── PhaseDLOG.cs                             — conveyor belt snapshot formatter
+
 5-Tests/
-├── BuildingTest.cs                  — place/rotate/snap without player
-├── ConveyorTest.cs                  — conveyor flow without player
+├── BuildingTest.cs                          — place/rotate/snap/take/pack without player
+├── ConveyorTest.cs                          — ore flow + all conveyor variants
 └── Manual/
-    ├── BuildingPlacementTest.md     (manual: ghost preview, grid snap, rotation, conveyor snap)
-    ├── ConveyorFlowTest.md          (manual: belt texture scroll, ore flow, splitter routing)
-    └── ScaffoldingTest.md           (manual: scaffolding legs raycast, spawn dynamically, wrench toggle)
+    ├── BuildingPlacementTest.md
+    ├── ConveyorFlowTest.md
+    └── ScaffoldingTest.md
 ```
 
 ### Modifications to Earlier Phases
 
 | File (Phase) | Change | Why |
 |-------------|--------|-----|
-| `ToolBuilder.cs` (B) | Complete placement logic — grid snap, ghost, conveyor snap | Phase B creates partial; Phase D finishes |
+| `ToolBuilder.cs` (B) | **REPLACED** by phase-d version — complete placement logic | Phase B was partial stubs |
+| `GlobalEnumsB.cs` (B) | Add `pack`, `switchDirection` to InteractionType | BuildingObject "Pack", RoutingConveyor "Switch Direction" |
+| `BasePhysicsObject.cs` (B) | Complete conveyor stubs (`AddConveyorVelocity`, `RemoveTouchingConveyorBelt`, etc.) | ConveyorBelt + ConveyorBeltManager call these |
+| `FresnelHighlighter.cs` (B) | Add building + wrench highlight checks | Hammer/wrench outline buildings |
 | `SO_ShopItemDef.cs` (A) | Add `SO_BuildingInventoryDefinition` field | Links shop items to building data |
-| `ShopUIOrchestrator.cs` (A) | Handle BuildingCrate spawning in purchase flow | Buildings spawn as crates |
+| `AutoMiner.cs` (C) | Add `SetResourceDefinition()` public method | BuildingPlacementNode.AttachBuilding calls this |
 
 ### Vertical Slice Tests
 
 | Test | Tests what independently | NOT required |
 |------|------------------------|-------------|
-| BuildingTest | Place/rotate/snap buildings via test controls | Player, shop, ore |
-| ConveyorTest | Ore flows along belt chain | Player, shop |
+| BuildingTest | Place/rotate/snap/take/pack buildings via test controls | Player, shop, ore |
+| ConveyorTest | Ore flows along belt chain, all variants work | Player, shop, building placement |
 
 ---
 
@@ -3838,8 +3920,8 @@ Sequential: 11 phases. With 2 agents: **9 waves**.
 |---|-------------|-------|-----------|--------|
 | 1 | `ShopDataService` | A | "I manage shop categories + cart as collections" | ✅ Done |
 | 2 | `InventoryDataService` | B | "I manage all inventory slots — add/remove/switch/stack" | ✅ Done |
-| 3 | `OreDataService` | C | "I manage resource descriptions, weighted drops, ore sell values" | ⬜ Planned |
-| 4 | `BuildingDataService` | D | "I validate grid placement and detect conveyor snap alignment" | ⬜ Planned |
+| 3 | `OreDataService` | C | "I manage resource descriptions, color lookups, formatted strings" | ✅ Done |
+| 4 | `BuildingDataService` | D | "I validate grid placement and detect conveyor snap alignment" | ✅ Done |
 | 5 | `QuestDataService` | F | "I manage quest collections + progress tracking + requirement checks" | ⬜ Planned |
 | 6 | `ResearchDataService` | F | "I manage completed research items + ticket balance" | ⬜ Planned |
 | 7 | `SaveDataService` | G | "I manage prefab lookups + save file serialization/deserialization" | ⬜ Planned |
@@ -3921,21 +4003,21 @@ public class Slot { BaseHeldTool Tool; int Index; bool IsHotbar => Index < 10; }
 
 ---
 
-## 3. OreDataService (Phase C) ⬜
+## 3. OreDataService (Phase C) ✅ IMPLEMENTED
 
-> "I manage resource descriptions, weighted drops, ore sell values"
+> "I manage resource descriptions, color lookups, formatted strings"
 
 ### Collections
 
 ```
-List<SO_ResourceDescription>   RESOURCE_DESC
+List<ResourceDescription>   RESOURCE_DESC      — ResourceType + DisplayColor entries
 ```
 
 ### Methods
 
 | Group | Method | What It Does |
 |-------|--------|-------------|
-| Build | `Build(List<SO_ResourceDescription>)` | Stores resource descriptions |
+| Build | `Build(List<ResourceDescription>)` | Stores resource descriptions for lookup |
 | Get | `GetResourceDescription(ResourceType)` | Lookup by type |
 | Get | `GetResourceColor(ResourceType)` | Returns Display Color for a resource |
 | Get | `GetDefaultSellValue(ResourceType, PieceType, isPolished)` | Sell price lookup |
@@ -3948,7 +4030,7 @@ List<SO_ResourceDescription>   RESOURCE_DESC
 
 ---
 
-## 4. BuildingDataService (Phase D) ⬜
+## 4. BuildingDataService (Phase D) ✅ IMPLEMENTED
 
 > "I validate grid placement and detect conveyor snap alignment"
 
@@ -3956,16 +4038,15 @@ List<SO_ResourceDescription>   RESOURCE_DESC
 
 None persistent — operates on passed-in data (ghost position, neighbor buildings).
 
-### Methods
+### Methods (ACTUAL — matches phase-d(New))
 
 | Group | Method | What It Does |
 |-------|--------|-------------|
-| Grid | `GetClosestGridPosition(Vector3)` | Snaps world position to 1m integer grid |
-| Validate | `CanPlace(position, rotation, requiresFlat, canPlaceInTerrain, nodeRequirement)` | Returns CanPlaceBuilding enum (Valid/Invalid/RequirementsNotMet) |
-| Snap | `GetNearbySnapConnections(ghostPos, building, neighbor, isMirrored)` | Tests 4 rotations × input/output snap points, returns List<BuildingRotationInfo> where distance < 0.25f |
+| Grid | `GetClosestGridPosition(Vector3)` | Snaps world position to 1m integer grid (rounds to int, offsets by 0.5) |
+| Snap | `GetNearbySnapConnections(ghostPos, building, neighbor, isMirrored)` | Tests 4 rotations × input/output snap points, returns `List<BuildingRotationInfo>` where distance < 0.25f |
 | Snap | `ResolveBestSnap(List<BuildingRotationInfo>)` | Groups by rotation, picks most-voted or first |
 
-**Note:** Ghost object instantiation, material swapping, layer setting, and Physics.OverlapBox stay in `BuildingManager` MonoBehaviour — they need Unity API. Only the pure geometry math lives here.
+**Note:** `CanPlace` validation moved to `BuildingManager.CanPlaceObject()` — it needs `Physics.OverlapBox` (Unity API). BuildingDataService only has pure geometry math (grid snap, snap connection testing). Ghost instantiation, material swapping, layer setting also stay in BuildingManager.
 
 ---
 
@@ -9026,117 +9107,188 @@ In Unity 6000.3+, Shader Graph uses the **URP** target by default:
 
 > Transparent materials that show placement validity. BuildingManager swaps ALL renderers
 > on the ghost building to one of these materials every frame during placement preview.
-> **No custom Shader Graph needed** — use the built-in `Universal Render Pipeline/Unlit` shader.
 
-**How to create each ghost material in Unity 6000.3:**
-1. Project panel → Create → Material
-2. In Inspector, change Shader dropdown to: **Universal Render Pipeline → Unlit**
-3. Set **Surface Type** = Transparent (dropdown at top of material inspector)
-4. Set **Base Color** including alpha (the A channel controls transparency)
-5. Set **Render Face** = Both
+### Shader Graph: `Ghost_Transparent` (shared by all 5 ghost materials)
 
-### Material: `M_Ghost_Valid`
+> One custom Shader Graph, 5 materials with different colors. Better than 5 separate URP/Unlit
+> materials because we get consistent alpha blending and can add pulse animation later.
 
-| Property | Value |
-|----------|-------|
-| Shader | **Universal Render Pipeline/Unlit** |
-| Surface Type | **Transparent** |
-| Base Color | Green `(0.2, 1, 0.2, 0.3)` ← alpha 0.3 = 30% visible |
-| Render Face | Both |
+**Create the Shader Graph:**
+1. Project panel → Create → Shader Graph → URP → **Unlit Shader Graph**
+2. Name it `Ghost_Transparent`
+3. Blackboard properties:
 
-### Material: `M_Ghost_Invalid`
+| Property | Type | Default | Range |
+|----------|------|---------|-------|
+| `_Color` | Color | Green `(0.2, 1, 0.2, 0.3)` | — |
+| `_PulseSpeed` | Float | `0` | 0 – 5 (0 = no pulse, for future use) |
 
-| Property | Value |
-|----------|-------|
-| Shader | **Universal Render Pipeline/Unlit** |
-| Surface Type | **Transparent** |
-| Base Color | Red `(1, 0.2, 0.2, 0.3)` |
-| Render Face | Both |
+4. **Node graph:**
+```
+[_Color property] ─────────────────────────► Split (RGBA)
+                                                 │
+                                          R,G,B ─┬─► Combine (RGB) ──► Fragment → Base Color
+                                                 │
+                                            A ───┤
+                                                 │
+    [Time node] ──► Multiply (_PulseSpeed)       │
+         │                                       │
+         ▼                                       │
+    Sine ──► Remap (0→1, 0.5→1) ──► Multiply ◄──┘
+                                        │
+                                   pulsed alpha
+                                        │
+                                        ▼
+                              Fragment → Alpha
+```
+> If `_PulseSpeed` = 0, the Sine/Remap chain outputs 1.0 constantly → alpha stays as-is. Set `_PulseSpeed` > 0 to make ghosts gently pulse (nice-to-have).
 
-### Material: `M_Ghost_Requirement`
+5. **Graph Inspector:**
+   - Surface Type: **Transparent**
+   - Blending Mode: **Alpha**
+   - Render Face: **Both**
+   - ZWrite: **Off**
+   - ZTest: **LessEqual**
+6. Save
 
-| Property | Value |
-|----------|-------|
-| Shader | **Universal Render Pipeline/Unlit** |
-| Surface Type | **Transparent** |
-| Base Color | Yellow `(1, 1, 0.2, 0.3)` |
-| Render Face | Both |
+**Create 5 materials from this one Shader Graph:**
 
-### Material: `M_BuildingNodeGhost`
+| Material Name | `_Color` | `_PulseSpeed` | Used For |
+|--------------|----------|--------------|----------|
+| `M_Ghost_Valid` | Green `(0.2, 1, 0.2, 0.3)` | 0 | Valid placement — green transparent |
+| `M_Ghost_Invalid` | Red `(1, 0.2, 0.2, 0.3)` | 0 | Overlapping/blocked — red transparent |
+| `M_Ghost_Requirement` | Yellow `(1, 1, 0.2, 0.3)` | 0 | Requirements not met — yellow transparent |
+| `M_BuildingNodeGhost` | Cyan `(0.2, 0.8, 1, 0.3)` | 0 | Matching placement node indicator |
+| `M_BuildingNodeGhost_WrongType` | Grey `(0.5, 0.5, 0.5, 0.3)` | 0 | Non-matching node indicator |
 
-| Property | Value |
-|----------|-------|
-| Shader | **Universal Render Pipeline/Unlit** |
-| Surface Type | **Transparent** |
-| Base Color | Cyan `(0.2, 0.8, 1, 0.3)` |
+**How to create each material:**
+1. Right-click `Ghost_Transparent` Shader Graph in Project → Create → Material
+2. Name it (e.g. `M_Ghost_Valid`)
+3. Set `_Color` to the value from the table above (click the color box, set RGBA)
+4. Repeat for all 5
 
-> Shows on BuildingPlacementNode when the player is in build mode with a matching requirement type.
+### Shader Graph: `Emissive_Indicator` (shared by 3 light materials)
 
-### Material: `M_BuildingNodeGhost_WrongType`
+> One Shader Graph for green/red/orange machine indicator lights. Uses emission for glow.
 
-| Property | Value |
-|----------|-------|
-| Shader | **Universal Render Pipeline/Unlit** |
-| Surface Type | **Transparent** |
-| Base Color | Grey `(0.5, 0.5, 0.5, 0.3)` |
+**Create the Shader Graph:**
+1. Project panel → Create → Shader Graph → URP → **Lit Shader Graph**
+2. Name it `Emissive_Indicator`
+3. Blackboard properties:
 
-> Shows on BuildingPlacementNode when the requirement type doesn't match.
+| Property | Type | Default | Range |
+|----------|------|---------|-------|
+| `_Color` | Color HDR | Green `(0.1, 0.9, 0.1, 1)` | — |
+| `_EmissionIntensity` | Float | `2` | 0 – 5 |
 
-### Material: `M_GreenLight`
+4. **Node graph:**
+```
+[_Color property] ──────────────────────► Fragment → Base Color
+        │
+        ▼
+  Multiply (A = _Color, B = _EmissionIntensity)
+        │
+        ▼
+  Fragment → Emission
+```
 
-| Property | Value |
-|----------|-------|
-| Shader | **Universal Render Pipeline/Lit** |
-| Surface Type | Opaque |
-| Base Color | Green `(0.1, 0.9, 0.1)` |
-| Emission | Green `(0.1, 0.9, 0.1)` × 2 |
+5. **Graph Inspector:**
+   - Surface Type: **Opaque**
+   - Render Face: **Front**
+6. Save
 
-> Used on AutoMiner and machine light indicators when ON/enabled.
+**Create 3 materials:**
 
-### Material: `M_RedLight`
+| Material Name | `_Color` (HDR) | `_EmissionIntensity` | Used For |
+|--------------|----------------|---------------------|----------|
+| `M_GreenLight` | Green `(0.1, 0.9, 0.1)` | 2 | Machine ON/enabled |
+| `M_RedLight` | Red `(0.9, 0.1, 0.1)` | 2 | Machine OFF/disabled |
+| `M_OrangeLight` | Orange `(1, 0.6, 0)` | 2 | Warning/transitional |
 
-| Property | Value |
-|----------|-------|
-| Shader | **Universal Render Pipeline/Lit** |
-| Surface Type | Opaque |
-| Base Color | Red `(0.9, 0.1, 0.1)` |
-| Emission | Red `(0.9, 0.1, 0.1)` × 2 |
+### URP Post-Processing for Emission Glow
 
-> Used on AutoMiner and machine light indicators when OFF/disabled.
+> Without Bloom, emissive materials look flat. Bloom makes them glow.
 
-### Material: `M_OrangeLight`
+**One-time setup:**
+1. Create Empty GO → name `PostProcessVolume`
+2. Add `Volume` component → Profile → Create New
+3. Click "Add Override" → **Bloom**
+4. Check: **Intensity** = 0.5, **Threshold** = 1.0, **Scatter** = 0.7
+5. On your Camera: enable **Post Processing** checkbox
+6. On the URP Renderer Data asset: check **Post Processing Enabled**
 
-| Property | Value |
-|----------|-------|
-| Shader | **Universal Render Pipeline/Lit** |
-| Surface Type | Opaque |
-| Base Color | Orange `(1, 0.6, 0)` |
-| Emission | Orange `(1, 0.6, 0)` × 2 |
+> Now all emissive materials (green/red/orange lights) will glow visually in-game.
 
-> Used on machines in warning/transitional state.
+### Shader Graph: `ConveyorBelt_ScrollingTexture` (Phase D — conveyor belt visual)
 
-**Emission Note (Unity 6000.3):** To enable emission on URP/Lit materials:
-1. In the material inspector, scroll to **Emission**
-2. Check the **Emission** checkbox to enable it
-3. Set the **Emission Color** (click the color picker → set to the color above)
-4. Set **Emission Intensity** by clicking the HDR color → use the Intensity slider (set to 2)
-5. If emission doesn't glow in-game: ensure **Post Processing** is enabled on the Camera with **Bloom** effect in a Volume
+> Scrolls the belt texture to create the illusion of movement. Applied to conveyor belt meshes.
 
-### Layers Required
+**Create the Shader Graph:**
+1. Project panel → Create → Shader Graph → URP → **Lit Shader Graph**
+2. Name it `ConveyorBelt_ScrollingTexture`
+3. Blackboard properties:
+
+| Property | Type | Default | Range |
+|----------|------|---------|-------|
+| `_MainTex` | Texture2D | belt texture | — |
+| `_ScrollSpeed` | Float | `0.5` | 0 – 3 |
+| `_Tint` | Color | White `(1,1,1,1)` | — |
+
+4. **Node graph:**
+```
+[Time node] ──► Multiply (_ScrollSpeed) ──► Vector2 (0, result)
+                                                │
+                                          UV offset
+                                                │
+                                                ▼
+[UV node] ──────────────────────────► Add (UV + offset)
+                                          │
+                                    scrolled UV
+                                          │
+                                          ▼
+[_MainTex property] ───────────► Sample Texture 2D (UV = scrolled UV)
+                                          │
+                                     RGBA output
+                                          │
+                                          ▼
+                                   Multiply (_Tint)
+                                          │
+                                          ▼
+                                 Fragment → Base Color
+```
+
+5. **Graph Inspector:**
+   - Surface Type: **Opaque**
+   - Render Face: **Front**
+6. Save
+
+**Create material:**
+- `M_ConveyorBelt` → assign belt texture to `_MainTex`, set `_ScrollSpeed` = 0.5
+- Each conveyor belt prefab's MeshRenderer uses this material
+- The scroll speed creates visual movement matching the ConveyorBelt.Speed
+
+> **Note:** ConveyorBatchRenderingComponent disables per-object Renderers and uses DrawMeshInstanced for performance. The scrolling texture still works because DrawMeshInstanced respects material properties including `_Time` node.
+
+### Layers Required (Phase D)
 
 | Layer Name | Purpose | Used By |
 |-----------|---------|--------|
 | `BuildingGhost` | Ghost object during placement preview | BuildingManager.SetupGhostObject |
 | `BuildingObject` | Placed buildings' physical colliders | BuildingObject.Start |
 
-### Used By
+### Material → Script Wiring (Phase D)
 
-| Script | Fields | Phase |
-|--------|--------|-------|
-| `BuildingManager.cs` | `GhostMaterial`, `InvalidGhostMaterial`, `RequirementGhostMaterial`, `BuildingNodeGhost`, `BuildingNodeGhost_WrongType`, `GreenLightMaterial`, `RedLightMaterial`, `OrangeLightMaterial` | D |
-| `BuildingPlacementNode.cs` | reads from `BuildingManager.Ins.BuildingNodeGhost` / `BuildingNodeGhost_WrongType` | D |
-| `AutoMiner.cs` | reads from `BuildingManager.Ins.GreenLightMaterial` / `RedLightMaterial` | C/D |
-| `ChuteHatch.cs` | reads from `BuildingManager.Ins.GreenLightMaterial` / `RedLightMaterial` | D |
+| Material | Script | Inspector Field | How Script Gets It |
+|----------|--------|----------------|-------------------|
+| `M_Ghost_Valid` | `BuildingManager` | `_ghostMaterial` | Internal use only |
+| `M_Ghost_Invalid` | `BuildingManager` | `_invalidGhostMaterial` | Internal use only |
+| `M_Ghost_Requirement` | `BuildingManager` | `_requirementGhostMaterial` | Internal use only |
+| `M_BuildingNodeGhost` | `BuildingManager` | `_buildingNodeGhost` | `GetBuildingNodeGhost()` |
+| `M_BuildingNodeGhost_WrongType` | `BuildingManager` | `_buildingNodeGhost_WrongType` | `GetBuildingNodeGhost_WrongType()` |
+| `M_GreenLight` | `BuildingManager` | `_greenLightMaterial` | `GetGreenLightMaterial()` |
+| `M_RedLight` | `BuildingManager` | `_redLightMaterial` | `GetRedLightMaterial()` |
+| `M_OrangeLight` | `BuildingManager` | `_orangeLightMaterial` | `GetOrangeLightMaterial()` |
+| `M_ConveyorBelt` | Conveyor prefab MeshRenderer | — | Direct material assignment on prefab |
 
 ---
 
@@ -9161,18 +9313,782 @@ In Unity 6000.3+, Shader Graph uses the **URP** target by default:
 
 ---
 
+## URP Settings Checklist (All Phases)
+
+> Summary of all URP modifications needed across all phases. Do these once.
+
+### URP Renderer Data Asset
+
+| Setting | Value | Why |
+|---------|-------|-----|
+| Depth Texture | ✅ enabled | Some effects need depth |
+| Opaque Texture | ✅ enabled | Scene Color node (if used) |
+| Rendering Path | Forward+ | Default in Unity 6000.3 |
+| Post Processing | ✅ enabled | Bloom for emissive glow |
+| Opaque Layer Mask | **UNCHECK "Highlighted"** | Prevents double-render with Renderer Feature |
+
+### Renderer Features
+
+| # | Feature Name | Event | Layer Mask | Override Material | Depth Write | Phase |
+|---|-------------|-------|-----------|-------------------|-------------|-------|
+| 1 | `FresnelHighlight` | AfterRenderingOpaques | Highlighted (only) | `M_Highlight_Fresnel` | Off | B |
+
+### Post-Processing Volume
+
+| Effect | Setting | Value |
+|--------|---------|-------|
+| Bloom | Intensity | 0.5 |
+| Bloom | Threshold | 1.0 |
+| Bloom | Scatter | 0.7 |
+
+### Camera
+
+| Setting | Value |
+|---------|-------|
+| Post Processing | ✅ enabled |
+| Rendering Path | Use Pipeline Settings |
+
+---
+
 ## Future Phases — Placeholder
 
 ### Phase E — Machine Materials
-- Liquid plane materials (molten metal visual)
-- Coal gauge needle material
-- Polish brush material
+- `M_MoltenMetal` — scrolling orange/red texture for furnace liquid plane
+- `M_CoalGauge` — needle rotation shader (UV rotation based on fill %)
+- `M_PolishBrush` — animated contact shader
 
 ### Phase H — UI/Sound Materials
-- Settings panel materials
-- Button hover/click materials
+- `M_UIButton_Hover` — slight brightness increase on hover
+- `M_UIButton_Click` — flash effect
 
 > These will be filled in when those phases are generated.
+
+<!-- ==== FILE: learn/phase-All/7-3D/ANIM.md ==== -->
+# ANIM — All Animations + AnimatorControllers Across All Phases
+
+> Centralized reference for every animation clip, AnimatorController state machine, and
+> animator parameter. Each phase adds a section. Use `AnimParamType` enum for all
+> parameter names — never raw strings.
+
+---
+
+## AnimParamType Enum (grows per phase)
+
+> Lives in `phase-All/2-Data/Enums/GlobalEnumsAll.cs`. Use `.ToString()` when calling Animator methods.
+
+```csharp
+/// <summary> Animator parameter names as enum — never use raw strings.
+/// Usage: _animator.Play(AnimParamType.attack1.ToString())
+/// Usage: _animator.SetBool(AnimParamType.isRunning.ToString(), true)
+/// Usage: _animator.SetFloat(AnimParamType.speed.ToString(), 0.5f) </summary>
+public enum AnimParamType
+{
+    // Phase B — tool animations
+    attack1,
+    // Phase E — machine animations (future)
+    // isRunning,
+    // isSmelting,
+    // speed,
+    // fillPercent,
+}
+```
+
+**How to use in code:**
+```csharp
+// ❌ WRONG — raw string
+_animator.Play("Attack1");
+
+// ✅ RIGHT — enum
+_animator.Play(AnimParamType.attack1.ToString(), -1, 0f);
+```
+
+---
+
+## Phase B — Tool Animations
+
+### Animation Clips
+
+#### `ToolPickaxe_Attack1.anim`
+
+| Property | Value |
+|----------|-------|
+| **Duration** | 0.3 seconds |
+| **Target** | ViewModel child transform (rotation) |
+| **Motion** | Swing down 45° then return |
+| **Loop** | ❌ No (single play) |
+
+**Keyframes:**
+```
+Time (s)  │  Rotation X  │  Description
+──────────┼──────────────┼─────────────────
+0.00      │    0°        │  Idle position
+0.15      │  -45°        │  Full swing down
+0.30      │    0°        │  Return to idle
+```
+
+**How to create in Unity:**
+1. Select the ViewModel child GO on ToolPickaxe prefab
+2. Window → Animation → Animation (not Animator)
+3. Click "Create" → save as `ToolPickaxe_Attack1.anim`
+4. Click "Add Property" → Transform → Rotation
+5. At frame 0 (0.0s): rotation = (0, 0, 0)
+6. Click the timeline at frame 9 (0.15s at 60fps): rotation = (-45, 0, 0)
+7. Click the timeline at frame 18 (0.3s): rotation = (0, 0, 0)
+8. In the clip's Inspector: uncheck ✅ "Loop Time"
+
+#### `ToolHammer_Attack1.anim`
+
+| Property | Value |
+|----------|-------|
+| **Duration** | 0.4 seconds |
+| **Target** | ViewModel child transform (rotation) |
+| **Motion** | Heavier arc — swing down 60° then return |
+
+**Keyframes:**
+```
+Time (s)  │  Rotation X  │  Description
+──────────┼──────────────┼─────────────────
+0.00      │    0°        │  Idle position
+0.20      │  -60°        │  Full heavy swing
+0.40      │    0°        │  Return to idle
+```
+
+#### `ToolMagnet_Attack1.anim` (optional)
+
+| Property | Value |
+|----------|-------|
+| **Duration** | 0.2 seconds |
+| **Target** | ViewModel child transform (scale) |
+| **Motion** | Subtle pulse — scale up 10% then return |
+
+**Keyframes:**
+```
+Time (s)  │  Scale        │  Description
+──────────┼───────────────┼────────────────
+0.00      │  (1, 1, 1)   │  Normal size
+0.10      │  (1.1, 1.1, 1.1) │  Pulse up
+0.20      │  (1, 1, 1)   │  Return
+```
+
+---
+
+### AnimatorController State Machines
+
+#### `ToolPickaxe_Controller`
+
+```
+  ┌──────────────┐    .Play("attack1")     ┌──────────────┐
+  │     Idle     │ ──────────────────────► │   Attack1    │
+  │   (orange)   │ ◄────────────────────── │   (swing)    │
+  │   no clip    │    HasExitTime=true     │  0.3s clip   │
+  └──────────────┘    ExitTime=1.0         └──────────────┘
+                      TransDuration=0.1
+```
+
+**States:**
+| State | Clip | Color | Default? |
+|-------|------|-------|----------|
+| `Idle` | (none — empty state) | Orange | ✅ Yes |
+| `Attack1` | `ToolPickaxe_Attack1.anim` | Grey | No |
+
+**Transitions:**
+| From | To | Condition | Has Exit Time | Exit Time | Duration |
+|------|-----|-----------|--------------|-----------|----------|
+| `Idle` | `Attack1` | None (code calls `.Play()`) | — | — | — |
+| `Attack1` | `Idle` | None (auto-return) | ✅ Yes | 1.0 | 0.1s |
+
+**Parameters:** NONE — code calls `.Play("attack1", -1, 0f)` directly.
+
+**How to create:**
+1. Project → Create → Animator Controller → name `ToolPickaxe_Controller`
+2. Double-click to open Animator window
+3. Right-click graph → Create State → Empty → rename `Idle`
+4. Right-click graph → Create State → Empty → rename `Attack1`
+5. Select `Attack1` → Inspector → Motion → assign `ToolPickaxe_Attack1.anim`
+6. Right-click `Attack1` → Make Transition → click `Idle`
+7. Select the transition arrow → Inspector:
+   - ✅ Has Exit Time = true
+   - Exit Time = 1.0
+   - Transition Duration = 0.1
+   - ❌ Fixed Duration = false
+8. `Idle` should already be orange (default state). If not: right-click `Idle` → Set as Layer Default State
+
+#### `ToolHammer_Controller`
+
+Same structure as ToolPickaxe_Controller but:
+- `Attack1` → `ToolHammer_Attack1.anim` (0.4s, heavier arc)
+
+#### `ToolMagnet_Controller` (optional)
+
+Same structure, `Attack1` → `ToolMagnet_Attack1.anim` (0.2s pulse). Can skip if no visual feedback.
+
+---
+
+### Wiring — Script to Animator
+
+| Tool Script | Inspector Field | What to Drag |
+|-------------|----------------|-------------|
+| `ToolPickaxe` | `_viewModelAnimator` | Animator component on ToolPickaxe/ViewModel child |
+| `ToolHammer` | `_viewModelAnimator` | Animator component on ToolHammer/ViewModel child |
+| `ToolMagnet` | `_viewModelAnimator` | Animator component on ToolMagnet/ViewModel child |
+
+**On each ViewModel child GO:**
+1. Add Component → `Animator`
+2. Controller → drag the matching `Tool*_Controller` asset
+3. Apply Root Motion = ❌ OFF
+
+---
+
+## Phase C — No Animations
+
+> Phase C has no animated meshes. OreNode random model selection is done via `SetActive`,
+> not animation. Ore pieces use physics (Rigidbody velocity), not animation clips.
+> ParticleManager prefabs use Unity's Particle System, not Animator.
+
+---
+
+## Phase D — AutoMiner Drill Rotation + ConveyorSplitter Swing
+
+### AutoMiner Drill (code-driven, no AnimatorController)
+
+> The drill rotation is done in `AutoMiner.Update()` via `_rotator.Rotate()` — no animation clip.
+> Speed = `360° / (SpawnRate × OresPerRotation)` per second.
+> **No AnimatorController needed** — pure code rotation.
+
+### ConveyorSplitterT2 (code-driven coroutine)
+
+> The splitter arm swings via `SwingLoop()` coroutine using `Mathf.SmoothStep` + `localEulerAngles`.
+> Oscillates between `_minY` and `_maxY` with pause time.
+> **No AnimatorController needed** — pure code.
+
+### ChuteHatch (code-driven / DOTween future)
+
+> Hatch rotation between open/closed euler angles is set via `localRotation = Quaternion.Euler()`.
+> Phase H adds DOTween `DOLocalRotate` for smooth animation.
+> **No AnimatorController needed.**
+
+---
+
+## Future Phases
+
+### Phase E — Machine Animations
+> Crusher pistons, furnace flame flicker, rolling mill rollers, polishing brush spin.
+> Most will be code-driven (coroutine or Update rotation). Some may need AnimatorControllers
+> for complex multi-part sequences.
+
+### Phase H — Player Animations
+> First-person body bob, head bob, foot plant sounds synced to animation events.
+
+<!-- ==== FILE: learn/phase-All/7-3D/MODEL.md ==== -->
+# MODEL — All 3D Meshes Across All Phases
+
+> Centralized reference for every 3D mesh the game needs. Each phase adds a section.
+> Low-poly targets: tools 100-500 tris, machines 500-2000 tris, environment 100-1000 tris.
+> Use Unity primitives as placeholders until proper models are made.
+
+---
+
+## Phase B — Player + Tools + Grabbables
+
+### Player (placeholder)
+
+> No visible body in first-person. The CharacterController capsule IS the physics shape.
+
+```
+Player (root)
+│ Shape: built-in CharacterController capsule (height 2m, radius 0.3m)
+│ No custom mesh — invisible in first-person
+│
+├── Camera (child, localPos y=1.6)
+│   ├── ViewModelContainer (empty — tools parent here when equipped)
+│   └── HoldPosition (empty, localPos z=1 — grab target point)
+│
+├── RigidbodyDragger (child, starts INACTIVE)
+│   Components: Rigidbody (isKinematic=true), RigidbodyDraggerController
+│
+└── LineRenderer (on Player GO — rope visual, 2 positions, width 0.02)
+```
+
+### Tools (4 types)
+
+> Each tool has WorldModel (on ground, ~150 tris) + ViewModel (in hand, ~300 tris).
+> WorldModel needs Collider + Rigidbody. ViewModel needs Animator (no collider).
+
+**ToolPickaxe:**
+```
+ToolPickaxe (root)
+├── WorldModel
+│   └── pickaxe_mesh
+│       Shape: T-shape — cylinder handle (0.4m long) + box head (0.15m wide)
+│       Tris: ~150
+│       Material: grey metal head, brown wood handle
+│       Components: BoxCollider (covers full shape), Rigidbody (mass 0.5)
+│       Tag: Grabbable | Layer: Interact
+│
+└── ViewModel
+    └── pickaxe_mesh_hires
+        Shape: same but higher detail (beveled edges, slight curve)
+        Tris: ~300
+        Components: Animator (ToolPickaxe_Controller)
+```
+
+**ToolMagnet:**
+```
+ToolMagnet (root)
+├── WorldModel
+│   └── magnet_mesh
+│       Shape: U-shape — two cylinders + curved top piece
+│       Tris: ~120 | Material: red body, silver tips
+│
+└── ViewModel
+    ├── magnet_mesh_hires (Tris: ~250)
+    └── SelectionModeText (child GO with TMP_Text, shows "Everything")
+```
+
+**ToolHammer:**
+```
+ToolHammer (root)
+├── WorldModel
+│   └── hammer_mesh — cylinder handle + box head (claw hammer shape)
+│       Tris: ~120 | Material: grey head, brown handle
+└── ViewModel
+    └── hammer_mesh_hires (Tris: ~250, Animator: ToolHammer_Controller)
+```
+
+**ToolMiningHat:**
+```
+ToolMiningHat (root)
+├── WorldModel
+│   └── hat_mesh — dome (half-sphere) + small light box on front
+│       Tris: ~200 | Material: yellow dome, grey light housing
+│   └── WorldModelLight (Point Light, range 3, intensity 0.5, OFF by default)
+│
+└── ViewModel
+    └── hat_mesh_hires (Tris: ~350)
+    └── ViewModelLight (Spot Light, range 10, angle 45°, OFF by default)
+```
+
+### Grabbable Objects
+
+```
+GrabbableCube — Unity Cube (scale 0.3m)
+│ Tris: 12 | Components: Rigidbody (mass 1), BoxCollider
+│ Tag: Grabbable | Layer: Interact
+```
+
+---
+
+## Phase C — Ore Nodes + Ore Pieces + Machines
+
+### OreNode (3 variants per resource type)
+
+> Embedded in mine walls/floor. Each node has 3 mesh variants — one is randomly shown.
+
+```
+OreNode_Iron (root)
+│ Components: OreNode, BoxCollider (or MeshCollider), Layer: Interact
+│
+├── Model_0 — irregular rock shape, embedded look
+│   Tris: ~300-500 | Material: grey with iron streaks
+├── Model_1 — different rock shape
+│   Tris: ~300-500 | Material: same
+└── Model_2 — third variant
+    Tris: ~300-500 | Material: same
+
+OreNode_Gold — same structure, yellow/gold material
+OreNode_Coal — same structure, dark grey/black material
+OreNode_Copper — same structure, orange/copper material
+```
+
+### OrePiece (2-3 mesh variants per resource)
+
+> Small ore chunks that fly out of nodes. Pool-recycled.
+
+```
+OrePiece_Iron (root)
+│ Components: OrePiece, MeshFilter, MeshRenderer, MeshCollider (convex),
+│   Rigidbody (mass 0.5, gravity ON)
+│ Tag: Grabbable | Layer: Interact
+│
+│ _possibleMeshes (2-3 variants):
+│   Variant 0: angular rock chunk (~50 tris)
+│   Variant 1: rounder pebble shape (~40 tris)
+│   Variant 2: flat shard shape (~30 tris)
+│
+│ Scale variance: ±0.25 on each axis (set in OrePiece inspector)
+│ Material: matches resource color (grey for iron, yellow for gold, etc.)
+```
+
+### AutoMiner
+
+```
+AutoMiner (root)
+│ Components: AutoMiner
+│
+├── Rotator (child — this spins)
+│   └── drill_mesh — cylinder + cone tip
+│       Tris: ~400 | Material: dark metal + orange highlights
+│
+└── SpawnPoint (empty child — positioned below drill tip, ore appears here)
+```
+
+### SellerMachine
+
+```
+SellerMachine (root)
+│ Components: SellerMachine, BoxCollider (IsTrigger=true, size 2×1×2)
+│
+└── funnel_mesh — hopper/funnel shape (open top, narrow bottom)
+    Tris: ~300 | Material: dark metal with green accent
+```
+
+### ParticleManager Prefabs
+
+> No custom mesh — Unity particle systems.
+
+| Prefab | Shape | Particle Count | Lifetime | Used By |
+|--------|-------|---------------|----------|---------|
+| `OreNodeHitParticle` | Cone burst | 10-20 | 0.3s | ToolPickaxe hit |
+| `BreakOreNodeParticle` | Sphere burst | 30-50 | 0.5s | OreNode.BreakNode |
+| `GenericHitImpactParticle` | Small cone | 5-10 | 0.2s | ToolPickaxe non-damageable |
+
+---
+
+## Phase D — Buildings + Conveyors + Supports
+
+### ConveyorBelt
+
+```
+ConveyorBelt_Prefab (root)
+│ Components: BuildingObject, ConveyorBelt, ConveyorBatchRenderingComponent
+│
+├── BeltMesh — flat rectangular track (1m × 0.3m × 0.1m)
+│   Tris: ~100 | Material: M_ConveyorBelt (scrolling texture shader)
+│   Components: MeshFilter, MeshRenderer (disabled by batch rendering)
+│
+├── PhysicalColliderObject (child)
+│   Components: BoxCollider (size matches belt, NOT trigger)
+│   Layer: BuildingObject (set by BuildingObject.Start)
+│
+├── TriggerCollider (child)
+│   Components: BoxCollider (IsTrigger=true, slightly larger than belt)
+│
+├── InputSnap (empty child — positioned at belt input end)
+├── OutputSnap (empty child — positioned at belt output end)
+│
+├── BuildingPlacementColliderObject (child — for overlap checks)
+│   Components: BoxCollider
+│
+└── SupportAttachPoint (optional)
+    Components: ModularBuildingSupports or ScaffoldingSupportLeg
+```
+
+### BuildingCrate
+
+```
+BuildingCrate (root)
+│ Components: BuildingCrate, Rigidbody (mass 1), BoxCollider
+│ Tag: Grabbable
+│
+├── crate_mesh — box shape (0.5m × 0.3m × 0.4m)
+│   Tris: ~50 | Material: brown wood/cardboard
+│
+└── Canvas (World Space)
+    ├── IconImage (Image — shows building icon from Definition)
+    └── QuantityText (TMP_Text — shows "x3" etc)
+```
+
+### Scaffolding Support Legs
+
+```
+TopSupportPrefab — small bracket connecting to building bottom
+│ Tris: ~30 | Material: dark metal
+
+MiddleSupportPrefab — vertical pole segment (1m tall)
+│ Tris: ~20 (cylinder) | Material: dark metal
+
+BottomCapPrefab — flat foot plate on ground
+│ Tris: ~15 | Material: dark metal
+│ Random rotation: ±0.1° on X/Z, ±1° on Y
+│ Random scale: 0.95x – 1.05x
+```
+
+### RobotGrabberArm
+
+```
+RobotGrabberArm (root)
+│ Components: RobotGrabberArm
+│
+├── Base — fixed platform
+│   Tris: ~100
+├── Arm — articulated arm segments (2-3 pieces)
+│   Tris: ~200 | IK target drives position
+├── Gripper — end effector (opens/closes)
+│   Tris: ~80
+└── TriggerZone (child, SphereCollider IsTrigger, radius ~2m)
+```
+
+---
+
+## Future Phases
+
+### Phase E — Machines
+> Crusher, Furnace, RollingMill, ShakerTable, PolishingMachine, Packager, Sorter, etc.
+> Each machine: ~1000-2000 tris with moving parts.
+
+### Phase F — Quest/Research UI
+> No 3D meshes — UI only.
+
+### Phase H — Environment
+> Cave walls, mine entrance, elevator shaft, office room.
+> ~5000-10000 tris for large environment pieces.
+
+<!-- ==== FILE: learn/phase-All/7-3D/WORLD.md ==== -->
+# WORLD — World Layout Per Phase
+
+> How the game world looks at each phase. ASCII top-down maps, prefab placement,
+> lighting setup, and "what the player sees" descriptions. Each phase extends the world.
+
+---
+
+## Phase B — Test Room (Tools + Grabbing)
+
+> A simple enclosed room — enough to test tools, grabbing, inventory, and interaction.
+
+### Top-Down Map
+
+```
+     N
+     ↑
+ ┌────────────────────────────────────┐
+ │                                    │
+ │    [Spawn]                         │
+ │      ★                             │
+ │                                    │
+ │    ┌───┐  ┌───┐  ┌───┐  ┌───┐    │
+ │    │ P │  │ M │  │ H │  │Hat│    │    ← Tools on ground (2m apart)
+ │    └───┘  └───┘  └───┘  └───┘    │
+ │                                    │
+ │    ■ ■ ■ ■ ■                      │    ← 5 Grabbable cubes (1m apart)
+ │                                    │
+ │                                    │
+ │                ┌──────────┐        │
+ │                │ Computer │        │    ← InteractableComputer (Phase A)
+ │                │ Terminal  │        │
+ │                └──────────┘        │
+ │                                    │
+ └────────────────────────────────────┘
+
+ Legend:
+   ★ = PlayerSpawnPoint (0, 0.1, 0)
+   P = ToolPickaxe (-3, 0.2, 3)
+   M = ToolMagnet (-1, 0.2, 3)
+   H = ToolHammer (1, 0.2, 3)
+   Hat = ToolMiningHat (3, 0.2, 3)
+   ■ = GrabbableCube (spaced at x = -3 to 1, y=0.5, z=5)
+```
+
+### Prefab Placement
+
+| Prefab | Position | Rotation | Notes |
+|--------|----------|----------|-------|
+| Floor (Plane) | (0, 0, 0) | — | Scale (5,1,5) = 50m×50m, Layer: Ground |
+| PlayerSpawnPoint | (0, 0.1, 0) | — | Player spawns here |
+| ToolPickaxe | (-3, 0.2, 3) | — | WorldModel visible on floor |
+| ToolMagnet | (-1, 0.2, 3) | — | WorldModel visible |
+| ToolHammer | (1, 0.2, 3) | — | WorldModel visible |
+| ToolMiningHat | (3, 0.2, 3) | — | WorldModel visible |
+| GrabbableCube ×5 | (-3 to 1, 0.5, 5) | — | Tag: Grabbable, Layer: Interact |
+
+### Singletons
+
+| GO | Component | Notes |
+|----|-----------|-------|
+| UIManager | UIManager | phase-All |
+| EconomyManager | EconomyManager | _defaultMoney = 400 |
+
+### Lighting
+
+| Light | Type | Rotation/Position | Intensity |
+|-------|------|------------------|-----------|
+| Directional Light | Directional | rot (50, -30, 0) | 1.0, shadows ON |
+| Ambient | Skybox/Flat | — | Color (0.3, 0.3, 0.35) |
+
+### What the Player Sees
+
+> You spawn in a small room. In front of you, 4 tools sit on the ground — a pickaxe,
+> magnet, hammer, and mining hat. Behind them, 5 cubes sit on the floor.
+> Walk forward → fresnel highlight outlines whatever you look at (cyan glow).
+> Press E near pickaxe → goes into hotbar. Press 1 → ViewModel appears in hand.
+> Left-click → swing animation. Right-click cubes → rope grab.
+> Tab → inventory. Drag slots. G → drop tool.
+
+---
+
+## Phase C — Mine Tunnels (Ore Nodes + Selling)
+
+> Extends Phase B room with mine tunnels. Ore nodes on walls, seller at the end.
+
+### Top-Down Map
+
+```
+ ┌────────────────────────────────────┐
+ │          STARTING ROOM             │
+ │    (Phase B setup remains)         │
+ │      ★                             │
+ │                                    │
+ │         ┌────┐                     │
+ │         │Door│                     │
+ │         └──┬─┘                     │
+ └────────────┼───────────────────────┘
+              │
+     ┌────────▼──────────────────────┐
+     │       MINE TUNNEL              │
+     │                                │
+     │  ◆        ◆        ◆          │    ← OreNode_Iron on walls
+     │       ◇        ◇              │    ← OreNode_Gold (rarer)
+     │  ◆        ◆        ◆          │
+     │                                │
+     │              [AutoMiner]       │    ← AutoMiner on node spot
+     │                ⚙               │
+     │                                │
+     │         ┌──────────┐           │
+     │         │  Seller  │           │    ← SellerMachine at tunnel end
+     │         │  Machine │           │
+     │         └──────────┘           │
+     └────────────────────────────────┘
+
+ Legend:
+   ◆ = OreNode_Iron (on walls, 3-4 per side)
+   ◇ = OreNode_Gold (fewer, on walls)
+   ⚙ = AutoMiner (on BuildingPlacementNode)
+   Seller = SellerMachine (trigger volume, 2×1×2)
+```
+
+### Additional Prefabs (Phase C adds to Phase B scene)
+
+| Prefab | Position | Notes |
+|--------|----------|-------|
+| OreNode_Iron ×6 | Along tunnel walls | Health 100, 2-4 drops |
+| OreNode_Gold ×2 | Along tunnel walls | Health 100, rarer |
+| AutoMiner | On BuildingPlacementNode in tunnel | Rotates, spawns ore on timer |
+| SellerMachine | End of tunnel | BoxCollider IsTrigger, size 2×1×2 |
+| ParticleManager | Scene root | Assign 3 particle prefabs |
+| OrePiecePoolManager | Scene root | Assign all OrePiece prefabs |
+| OreLimitManager | Scene root | _movingObjectLimit = 500 |
+| OreManager | Scene root | Assign resource descriptions list |
+
+### Singletons Added
+
+| GO | Component | Notes |
+|----|-----------|-------|
+| ParticleManager | ParticleManager | 3 particle prefabs |
+| OrePiecePoolManager | OrePiecePoolManager | All ore prefabs registered |
+| OreLimitManager | OreLimitManager | Limit = 500 |
+| OreManager | OreManager | Resource descriptions |
+
+### What the Player Sees
+
+> From the starting room, walk through the doorway into the mine tunnel.
+> Glowing ore nodes are embedded in the walls — grey (iron), yellow (gold).
+> Equip pickaxe → hit a node 2-3 times → it shatters, 2-4 ore pieces fly out.
+> Pieces bounce and settle on the floor. Grab them by hand or pull with magnet.
+> Push ore into the seller machine at the end → wait 2s → money goes up.
+> The AutoMiner on the wall spins continuously, dropping ore every ~2 seconds.
+
+---
+
+## Phase D — Factory Floor (Conveyors + Buildings)
+
+> Extends mine tunnel with a factory area. Conveyor belts, building placement, scaffolding.
+
+### Top-Down Map
+
+```
+     MINE TUNNEL (Phase C)
+              │
+     ┌────────▼──────────────────────────────────┐
+     │            FACTORY FLOOR                    │
+     │                                             │
+     │   ═══►═══►═══►═══►═══►  ┌────────┐        │
+     │   Belt  Belt  Belt Belt  │ Seller │        │   ← Conveyor chain → Seller
+     │                          └────────┘        │
+     │                                             │
+     │   ═══►═══►══╗                               │
+     │              ║  ← Splitter                  │   ← ConveyorSplitterT2
+     │   ═══►═══►══╝                               │
+     │                                             │
+     │   ┌─────────┐                               │
+     │   │ Blocker  │  ← ConveyorBlockerT2        │   ← Toggle gate
+     │   └─────────┘                               │
+     │                                             │
+     │   ┌───────────────────┐                     │
+     │   │  Raised Platform  │   ← y=3            │   ← Scaffolding test
+     │   │  with conveyor    │                     │
+     │   │  (legs hang down) │                     │
+     │   └───────────────────┘                     │
+     │                                             │
+     │   BuildingCrate × 3 (on floor)             │   ← Packed buildings
+     │                                             │
+     └─────────────────────────────────────────────┘
+
+ Legend:
+   ═══► = ConveyorBelt (forward direction shown by arrow)
+   ╗╝ = ConveyorSplitterT2 (alternating direction)
+```
+
+### Additional Prefabs (Phase D adds to Phase C scene)
+
+| Prefab | Position | Notes |
+|--------|----------|-------|
+| ConveyorBelt ×8 | Factory floor, end-to-end | Speed 0.8, forward aligned |
+| ConveyorSplitterT2 | At fork point | _minY=-35, _maxY=35 |
+| ConveyorBlockerT2 | After belt chain | _closedPosition, _openPosition wired |
+| SellerMachine (2nd) | End of conveyor chain | Sells ore that arrives via belt |
+| Raised Platform | y=3, center of factory | For scaffolding test |
+| BuildingCrate ×3 | On factory floor | Definition = ConveyorBelt_Def |
+| ConveyorRenderer | Scene root | _conveyorMeshSets assigned |
+
+### Singletons Added
+
+| GO | Component | Notes |
+|----|-----------|-------|
+| BuildingManager | BuildingManager | All materials + layer masks + prefabs |
+| ConveyorBeltManager | ConveyorBeltManager | No fields |
+
+### Layers Added
+
+| Layer | Purpose |
+|-------|---------|
+| BuildingGhost | Ghost preview during placement |
+| BuildingObject | Placed buildings' physical colliders |
+
+### What the Player Sees
+
+> Walk from the mine tunnel into the factory floor. Conveyor belts stretch across
+> the room in a chain. Drop ore onto the first belt → it slides forward, transfers
+> to the next belt, and continues to the seller machine at the end.
+> At a fork, a splitter arm swings left-right, alternating which path ore takes.
+> A blocker gate can be toggled — when closed, ore stops; when open, it flows through.
+> On a raised platform, a conveyor belt has scaffolding legs hanging down to the floor.
+> BuildingCrates sit on the floor — press E to pick them up as ToolBuilder in your hotbar.
+> Equip → a green ghost follows your aim, snapped to grid. Left-click to place.
+> R rotates. Q mirrors. Look at placed building → cyan outline → E → Take or Pack.
+
+---
+
+## Future Phases
+
+### Phase E — Machine Room
+> Full processing pipeline: Crusher, Furnace, RollingMill, ShakerTable, PolishingMachine.
+> Each machine is a building with input/output conveyor connections.
+
+### Phase F — Quest Board + Research Terminal
+> Wall-mounted quest board in the starting room. Research terminal near the computer.
+> No new 3D area — UI panels overlaid on existing world.
+
+### Phase H — Full Mine Environment
+> Multi-level mine with elevator, different biomes per level, cave lighting.
 
 <!-- ==== FILE: learn/phase-a-1(New)/GUIDE.md ==== -->
 # Phase A½ — The Mine: Environment & Elevator
@@ -15378,11 +16294,36 @@ Components on root:
 
 ## Modifications to Earlier Phases
 
-| File (Phase) | How | Change | Why |
-|-------------|-----|--------|-----|
-| `GameEvents.cs` (A) | **partial extend** in `phase-c/0-Core/GameEvents.cs` | Add `OnOreMined`, `OnOreSold`, `OnOreLimitChanged` | No modification to Phase A's file |
-| `ToolPickaxe.cs` (B) | **direct modify** | Add `IDamageable.TakeDamage` call in `PerformAttack` after raycast hit | Pickaxe now damages OreNodes |
-| `ToolPickaxe.cs` (B) | **direct modify** | Add crushed ore conversion: `TryConvertToCrushed()` check | Pickaxe breaks ore into crushed |
+> When hand-typing Phase C, these changes must be made to scripts from earlier phases.
+> Each change is shown with exact code to add/replace.
+
+### 1. `GameEvents.cs` (Phase A) — NO modification needed
+
+Phase C's events are in a separate `phase-c(New)/Scripts/0-Core/GameEvents.cs` using `partial class`.
+This compiles alongside Phase A's GameEvents without touching it.
+
+### 2. `ToolPickaxe.cs` (Phase B) — ADD IDamageable + crushed ore checks
+
+```csharp
+// file: phase-b(New)/Scripts/3-MonoBehaviours/Tool/ToolPickaxe.cs
+// In the PerformAttack coroutine, AFTER the raycast succeeds and BEFORE the Rigidbody push,
+// REPLACE the "// Phase C:" comment stubs with:
+
+// → Phase C: check if hit object can be crushed (ore on conveyor)
+if (_canBreakOreIntoCrushed)
+{
+    OrePiece hitOre = hit.collider.GetComponentInParent<OrePiece>();
+    if (hitOre != null && hitOre.TryConvertToCrushed()) yield break;
+}
+// → Phase C: check if hit object is damageable (OreNode, DamageableOrePiece)
+IDamageable damageable = hit.collider.GetComponentInParent<IDamageable>();
+if (damageable != null)
+{
+    damageable.TakeDamage(_damage, hit.point);
+    // Phase H: play hit sound
+    yield break;
+}
+```
 
 ---
 
@@ -16515,6 +17456,7 @@ public class PhysicsLimitUIWarning : MonoBehaviour
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> Subscribes to OnOreLimitChanged and sets initial state to Regular (hidden). </summary>
 	private void Start()
 	{
 		// purpose: react to ore limit state changes from OreLimitManager
@@ -16671,6 +17613,7 @@ public class DEBUG_CheckC : MonoBehaviour
 
 	#region Unity Life Cycle
 	OreDataService ds = new OreDataService();
+	/// <summary> Routes keyboard inputs — Space builds + logs, U tests color formatting, O logs snapshot. </summary>
 	private void Update()
 	{
 		if (INPUT.K.InstantDown(KeyCode.Space))
@@ -17346,6 +18289,7 @@ M/N → menu toggle";
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> Subscribes to all ore-related GameEvents for console logging. </summary>
 	private void Start()
 	{
 		// purpose: log when ore is mined
@@ -17357,6 +18301,7 @@ M/N → menu toggle";
 		// purpose: log money changes
 		GameEvents.OnMoneyChanged += (money) => Debug.Log($"[OreTest] Money: {money.formatMoney()}".colorTag("lime"));
 	}
+	/// <summary> Routes keyboard inputs — Space damages node, U spawns ore, I logs count, O logs snapshot. </summary>
 	private void Update()
 	{
 		if (INPUT.K.InstantDown(KeyCode.Space) && _testNode != null)
@@ -17850,12 +18795,125 @@ ConveyorBelt_Prefab (root)
 
 ## Modifications to Earlier Phases
 
-| File (Phase) | How | Change | Why |
-|-------------|-----|--------|-----|
-| `ToolBuilder.cs` (B) | **replace** | Complete placement logic — ghost + grid + place | Phase B was partial stubs |
-| `SO_ShopItemDef.cs` (A) | **direct modify** | Add `SO_BuildingInventoryDefinition` field | Links shop items to building data |
-| `BasePhysicsObject.cs` (B) | **direct modify** | Complete conveyor registration stubs | Phase B had `// Phase D:` stubs |
-| `FresnelHighlighter.cs` (B) | **direct modify** | Add building + wrench highlight checks | Phase D outlines buildings with hammer/wrench |
+> When hand-typing Phase D, these changes must be made to scripts from earlier phases.
+> Each change is shown with exact code to add/replace.
+
+### 1. `ToolBuilder.cs` (Phase B) — REPLACE entirely
+
+Phase B's `phase-b(New)/Scripts/3-MonoBehaviours/Tool/ToolBuilder.cs` was a partial stub.
+**Replace it** with `phase-d(New)/Scripts/3-MonoBehaviours/Tool/ToolBuilder.cs` — the complete version.
+
+### 2. `GlobalEnumsB.cs` (Phase B) — ADD enum values
+
+```csharp
+// file: phase-b(New)/Scripts/2-Data/Enums/GlobalEnumsB.cs
+// ADD these values to the existing InteractionType enum:
+
+public enum InteractionType
+{
+    take,
+    destroy,
+    use,
+    toggle,         // ← ADD: ConveyorBlockerT2, RoutingConveyor, ChuteHatch "Toggle"
+    pack,           // ← ADD: BuildingObject "Pack" into crate
+    switchDirection, // ← ADD: RoutingConveyor "Switch Direction"
+}
+```
+
+### 3. `BasePhysicsObject.cs` (Phase B) — COMPLETE conveyor stubs
+
+```csharp
+// file: phase-b(New)/Scripts/3-MonoBehaviours/BasePhysicsObject.cs
+// Phase B has "// Phase D:" stubs. REPLACE those stubs with:
+
+#region conveyor accumulation (Phase D completes these)
+/// <summary> accumulated velocity from all touching conveyor belts this frame </summary>
+public Vector3 SumVelocity;
+/// <summary> how many belts contributed velocity this frame </summary>
+public int Count;
+/// <summary> if any touching belt has RetainYVelocity enabled </summary>
+public bool RetainY;
+/// <summary> highest Y velocity from any belt (for upward conveyors) </summary>
+public float BestY;
+
+/// <summary> Called by ConveyorBelt.FixedUpdate — accumulates one belt's push velocity.
+/// ConveyorBeltManager.FixedUpdate later averages and applies the result. </summary>
+public void AddConveyorVelocity(Vector3 velocity, bool retainY)
+{
+    SumVelocity += velocity;
+    Count++;
+    if (retainY) RetainY = true;
+    if (velocity.y > BestY) BestY = velocity.y;
+}
+/// <summary> Resets accumulated velocity for next frame — called by ConveyorBeltManager.FixedUpdate. </summary>
+public void ResetAccum()
+{
+    SumVelocity = Vector3.zero;
+    Count = 0;
+    RetainY = false;
+    BestY = 0f;
+}
+/// <summary> Adds a belt to this object's touching-belt set + registers with ConveyorBeltManager. </summary>
+public void AddTouchingConveyorBelt(ConveyorBelt belt)
+{
+    // Phase D: track touching belts for cleanup
+    ConveyorBeltManager.Register(this);
+}
+/// <summary> Removes a belt from this object's set. If no belts left, unregisters from ConveyorBeltManager. </summary>
+public void RemoveTouchingConveyorBelt(ConveyorBelt belt)
+{
+    // Phase D: untrack when no belts touching
+    ConveyorBeltManager.Unregister(this);
+}
+#endregion
+```
+
+### 4. `FresnelHighlighter.cs` (Phase B) — ADD building/wrench checks
+
+```csharp
+// file: phase-b(New)/Scripts/3-MonoBehaviours/FresnelHighlighter.cs
+// In OutlineLookedAtThing(), AFTER the Grabbable check, ADD:
+
+// Phase D: building highlight when holding hammer
+var building = hit.collider.GetComponentInParent<BuildingObject>();
+if (building != null && !building.IsGhost)
+{
+    // → if holding ToolHammer: outline building in cyan
+    HighlightObject(hit.collider.gameObject, _toolColor);
+    return;
+}
+```
+
+### 5. `SO_ShopItemDef.cs` (Phase A) — ADD building definition field
+
+```csharp
+// file: phase-a/Scripts/2-Data/SO_ShopItemDef.cs
+// ADD this field alongside existing fields:
+
+[Header("Phase D: Building")]
+public SO_BuildingInventoryDefinition BuildingDefinition;
+// When this is non-null, purchasing this shop item spawns a BuildingCrate
+// instead of a regular tool. ShopUIOrchestrator checks this during purchase.
+```
+
+### 6. `AutoMiner.cs` (Phase C) — ADD SetResourceDefinition method
+
+```csharp
+// file: phase-c(New)/Scripts/3-MonoBehaviours/AutoMiner.cs
+// ADD this public method to the public API region:
+
+/// <summary> Called by BuildingPlacementNode.AttachBuilding when an AutoMiner building
+/// is placed on a resource node. Assigns the SO definition and reconfigures spawn rate/probability. </summary>
+public void SetResourceDefinition(SO_AutoMinerResourceDefinition def)
+{
+    _resourceDefinition = def;
+    if (def != null)
+    {
+        _spawnProbability = def.SpawnProbability;
+        _spawnRate = def.SpawnRate;
+    }
+}
+```
 
 ---
 
@@ -18116,29 +19174,38 @@ public class BuildingManager : Singleton<BuildingManager>
 	#endregion
 
 	#region private API
+	/// <summary> Creates the ghost preview object if it doesn't exist — Instantiates the building prefab,
+	/// marks it as ghost (IsGhost=true), destroys trigger colliders, disables all MonoBehaviours except
+	/// BuildingObject, disables audio/particles, sets layer to BuildingGhost, makes all Rigidbodies
+	/// kinematic. Then positions it at the grid-snapped location with placement offset. </summary>
 	void SetupGhostObject(Vector3Int gridPos, BuildingObject prefab, Quaternion rotation)
 	{
 		if (ghostObject == null)
 		{
 			ghostObject = Instantiate(prefab);
 			ghostObject.IsGhost = true;
-			// disable triggers, non-BuildingObject monobehaviours, audio, particles
+			// → disable triggers so ghost doesn't interact with conveyors/sellers
 			foreach (var col in ghostObject.GetComponentsInChildren<Collider>())
 				if (col.isTrigger) Destroy(col.gameObject);
+			// → disable all scripts except BuildingObject (prevents ghost from running game logic)
 			foreach (var mb in ghostObject.GetComponentsInChildren<MonoBehaviour>(true))
 				if (!(mb is BuildingObject)) mb.enabled = false;
+			// → disable audio and particles (ghost is visual only)
 			foreach (var audio in ghostObject.GetComponentsInChildren<AudioSource>(true))
 				audio.enabled = false;
 			foreach (var ps in ghostObject.GetComponentsInChildren<ParticleSystem>())
 				ps.gameObject.SetActive(false);
-			// set layer, make kinematic
+			// → set layer to BuildingGhost so it doesn't collide with placement checks
 			UtilsPhaseB.SetLayerRecursively(ghostObject.gameObject, LayerMask.NameToLayer("BuildingGhost"));
+			// → make all Rigidbodies kinematic so ghost doesn't fall
 			foreach (var rb in ghostObject.GetComponentsInChildren<Rigidbody>())
 				rb.isKinematic = true;
 		}
+		// → position ghost at grid center + placement offset
 		ghostObject.transform.position = gridPos + new Vector3(0.5f, 0f, 0.5f) + ghostObject.BuildModePlacementOffset;
 		ghostObject.transform.rotation = rotation;
 	}
+	/// <summary> Destroys the ghost GO when this manager is destroyed (scene unload). </summary>
 	void OnDestroy()
 	{
 		if (ghostObject != null) Destroy(ghostObject.gameObject);
@@ -18165,10 +19232,13 @@ public class ConveyorBeltManager : Singleton<ConveyorBeltManager>
 	#endregion
 
 	#region public API
+	/// <summary> Adds a BasePhysicsObject to the central velocity-application list. Called by
+	/// BasePhysicsObject when it first touches a conveyor belt. </summary>
 	public static void Register(BasePhysicsObject obj)
 	{
 		if (obj != null && !Objects.Contains(obj)) Objects.Add(obj);
 	}
+	/// <summary> Removes a BasePhysicsObject from the central list. Called when all belts release it. </summary>
 	public static void Unregister(BasePhysicsObject obj)
 	{
 		if (obj != null) Objects.Remove(obj);
@@ -18176,6 +19246,8 @@ public class ConveyorBeltManager : Singleton<ConveyorBeltManager>
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> Round-robin: each frame cleans null/inactive objects from ONE conveyor belt's list.
+	/// Spreads the cleanup cost across many frames instead of doing all belts every frame. </summary>
 	private void Update()
 	{
 		var allBelts = ConveyorBelt.AllConveyorBelts;
@@ -18186,16 +19258,23 @@ public class ConveyorBeltManager : Singleton<ConveyorBeltManager>
 		else belt.ClearNullObjectsOnBelt();
 		currentBeltIndex++;
 	}
+	/// <summary> For each registered physics object: averages all accumulated conveyor velocities
+	/// (from all belts touching it), sets rb.linearVelocity to the average, preserves Y if flagged.
+	/// Runs AFTER all ConveyorBelt.FixedUpdate calls have accumulated their contributions. </summary>
 	private void FixedUpdate()
 	{
 		for (int i = 0; i < Objects.Count; i++)
 		{
 			var obj = Objects[i];
+			// → no belts contributed this frame — just reset
 			if (obj.Count == 0) { obj.ResetAccum(); continue; }
+			// → compute average velocity from all touching belts
 			Rigidbody rb = obj.Rb;
 			Vector3 vel = obj.SumVelocity / obj.Count;
+			// → preserve vertical velocity if any belt has RetainY enabled
 			if (obj.RetainY) vel.y = rb.linearVelocity.y;
 			else if (obj.BestY > 0f) vel.y = obj.BestY;
+			// → apply averaged velocity + reset for next frame
 			rb.linearVelocity = vel;
 			obj.ResetAccum();
 		}
@@ -18416,11 +19495,14 @@ public class BaseModularSupports : MonoBehaviour
 	#endregion
 
 	#region public API
+	/// <summary> override in subclass to spawn support leg prefabs via downward raycast </summary>
 	public virtual void SpawnSupports() { }
+	/// <summary> override in subclass to destroy + rebuild support legs (with optional frame delay) </summary>
 	public virtual void RespawnSupports(bool RespawnNextFrame = false) { }
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> finds parent BuildingObject, then calls SpawnSupports to create initial legs </summary>
 	protected virtual void Start()
 	{
 		_buildingObject = GetComponentInParent<BuildingObject>();
@@ -18473,9 +19555,13 @@ public class BuildingCrate : BaseSellableItem, IInteractable
 	#endregion
 
 	#region public API — IInteractable
+	/// <summary> crates don't use the interaction wheel — direct Take on press E </summary>
 	public bool ShouldUseInteractionWheel() => false;
+	/// <summary> returns interaction options (Take, Destroy — set in inspector) </summary>
 	public List<SO_InteractionOption> GetOptions() => _interactions;
+	/// <summary> returns display name from definition </summary>
 	public string GetObjectName() => definition?.Name ?? "Crate";
+	/// <summary> Take creates a ToolBuilder and adds to inventory, Destroy removes the crate. </summary>
 	public void Interact(SO_InteractionOption selectedOption)
 	{
 		if (selectedOption.interactionType == InteractionType.Take) TryAddToInventory();
@@ -18484,6 +19570,7 @@ public class BuildingCrate : BaseSellableItem, IInteractable
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> Sets the world-space canvas images to the definition's icon and quantity text. </summary>
 	private void Start()
 	{
 		if (definition == null || definition.GetIcon() == null) return;
@@ -18600,9 +19687,14 @@ public class BuildingObject : MonoBehaviour, IInteractable
 	#endregion
 
 	#region public API — IInteractable
+	/// <summary> always show interaction wheel for buildings (Take/Pack options) </summary>
 	public bool ShouldUseInteractionWheel() => true;
+	/// <summary> returns the interaction options list (Take, Pack — set in inspector) </summary>
 	public List<SO_InteractionOption> GetOptions() => _interactions;
+	/// <summary> returns the building's display name from its Definition SO </summary>
 	public string GetObjectName() => _definition?.Name ?? "Building";
+	/// <summary> player selected an interaction option — Take tries to return to inventory
+	/// (or falls back to Pack), Pack spawns a crate at the spawn point. </summary>
 	public void Interact(SO_InteractionOption selectedOption)
 	{
 		if (IsGhost) return;
@@ -18616,10 +19708,13 @@ public class BuildingObject : MonoBehaviour, IInteractable
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> Finds all BaseModularSupports children on this building for scaffolding management. </summary>
 	private void Awake()
 	{
 		modularSupports = GetComponentsInChildren<BaseModularSupports>().ToList();
 	}
+	/// <summary> For ghost: enables ExtraGhostRenderers and returns early. For real building: hides
+	/// ExtraGhostRenderers, sets physical collider layer to BuildingObject for placement checks. </summary>
 	public void Start()
 	{
 		if (IsGhost)
@@ -18628,24 +19723,32 @@ public class BuildingObject : MonoBehaviour, IInteractable
 			return;
 		}
 		if (_extraGhostRenderers != null) _extraGhostRenderers.SetActive(false);
-		// set physical collider to BuildingObject layer
+		// → set physical collider to BuildingObject layer so other buildings detect overlap
 		if (_physicalColliderObject != null)
 			UtilsPhaseB.SetLayerRecursively(_physicalColliderObject, LayerMask.NameToLayer("BuildingObject"));
 	}
+	/// <summary> When destroyed (non-ghost): raycasts up to tell any scaffolding above to rebuild
+	/// their legs to account for the new gap. </summary>
 	private void OnDestroy()
 	{
 		if (!IsGhost) UpdateSupportsAbove(true);
 	}
+	/// <summary> Temporarily disables physical + placement colliders, raycasts up to find any
+	/// ModularBuildingSupports above, tells them to respawn next frame. If not destroying,
+	/// re-enables colliders afterward. </summary>
 	void UpdateSupportsAbove(bool isDestroying)
 	{
+		// → disable colliders so upward raycast doesn't hit ourselves
 		_physicalColliderObject?.SetActive(false);
 		_buildingPlacementColliderObject?.SetActive(false);
+		// → raycast up to find scaffolding supports above us
 		if (Physics.Raycast(transform.position, Vector3.up, out var hit, 20f,
 			Singleton<BuildingManager>.Ins.GetBuildingSupportsCollisionLayers()))
 		{
 			var support = hit.collider.GetComponentInParent<ModularBuildingSupports>();
 			if (support != null) support.RespawnSupports(RespawnNextFrame: true);
 		}
+		// → re-enable colliders if we're not being destroyed
 		if (!isDestroying)
 		{
 			_physicalColliderObject?.SetActive(true);
@@ -18718,8 +19821,11 @@ public class BuildingPlacementNode : MonoBehaviour
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> Self-registers in static All list so BuildingManager can iterate all nodes. </summary>
 	private void OnEnable() => All.Add(this);
+	/// <summary> Unregisters from All list when disabled/destroyed. </summary>
 	private void OnDisable() => All.Remove(this);
+	/// <summary> Hides the ghost indicator on scene start (only shown during build mode). </summary>
 	private void Start() => ShowGhost(false);
 	#endregion
 }
@@ -18913,6 +20019,9 @@ public class ModularBuildingSupports : BaseModularSupports
 	#endregion
 
 	#region public API
+	/// <summary> Raycasts down from support position, calculates leg count from distance / spacing,
+	/// checks what we landed on (matching SupportType connections), then instantiates top + middle +
+	/// bottom cap prefabs. All legs parented to this transform. </summary>
 	public override void SpawnSupports()
 	{
 		if (_buildingObject != null && !_buildingObject.BuildingSupportsEnabled) return;
@@ -18953,6 +20062,7 @@ public class ModularBuildingSupports : BaseModularSupports
 		}
 		foreach (var s in spawnedSupports) s.transform.parent = transform;
 	}
+	/// <summary> destroys all spawned legs then re-spawns (with optional 1-FixedUpdate delay). </summary>
 	public override void RespawnSupports(bool RespawnNextFrame = false)
 	{
 		if (RespawnNextFrame) StartCoroutine(DelayedRespawn());
@@ -19148,6 +20258,7 @@ public class ScaffoldingSupportLeg : BaseModularSupports
 	#endregion
 
 	#region public API
+	/// <summary> Raycasts down, spawns N leg prefabs at spacing intervals, all parented to self. </summary>
 	public override void SpawnSupports()
 	{
 		foreach (Transform child in transform) Destroy(child.gameObject);
@@ -19162,6 +20273,7 @@ public class ScaffoldingSupportLeg : BaseModularSupports
 			pos.y -= _supportSpacing;
 		}
 	}
+	/// <summary> destroys existing legs then re-spawns (with optional 1-FixedUpdate delay). </summary>
 	public override void RespawnSupports(bool RespawnNextFrame = false)
 	{
 		if (RespawnNextFrame) StartCoroutine(DelayedRespawn());
@@ -19209,6 +20321,8 @@ public class ConveyorBatchRenderingComponent : MonoBehaviour
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> Caches transform matrix, self-registers in AllConveyors, disables own Renderer
+	/// (ConveyorRenderer draws all belts via DrawMeshInstanced instead of per-object rendering). </summary>
 	private void OnEnable()
 	{
 		cachedMatrix = Matrix4x4.TRS(transform.position, transform.rotation, transform.lossyScale);
@@ -19216,6 +20330,7 @@ public class ConveyorBatchRenderingComponent : MonoBehaviour
 		needsUpdate = true;
 		GetComponent<Renderer>().enabled = false;
 	}
+	/// <summary> Unregisters from AllConveyors and flags batch data as stale. </summary>
 	private void OnDisable()
 	{
 		AllConveyors.Remove(this);
@@ -19293,11 +20408,14 @@ public class ConveyorBelt : MonoBehaviour
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> Calculates push velocity from forward × speed, self-registers in static AllConveyorBelts list. </summary>
 	protected virtual void OnEnable()
 	{
-		_pushVelocity = transform.forward * Speed;
+		_pushVelocity = transform.forward * _speed;
 		AllConveyorBelts.Add(this);
 	}
+	/// <summary> Tells all objects on this belt to remove us from their touching-belt list, clears our
+	/// internal list, and unregisters from AllConveyorBelts. </summary>
 	protected virtual void OnDisable()
 	{
 		foreach (var obj in _physicsObjectsOnBelt)
@@ -19305,12 +20423,16 @@ public class ConveyorBelt : MonoBehaviour
 		_physicsObjectsOnBelt.Clear();
 		AllConveyorBelts.Remove(this);
 	}
+	/// <summary> Every physics step: if not disabled, adds push velocity to every object on belt.
+	/// Velocity accumulates on BasePhysicsObject — ConveyorBeltManager applies the average. </summary>
 	protected virtual void FixedUpdate()
 	{
 		if (_disabled || _physicsObjectsOnBelt.Count == 0) return;
 		for (int i = _physicsObjectsOnBelt.Count - 1; i >= 0; i--)
 			_physicsObjectsOnBelt[i].AddConveyorVelocity(_pushVelocity, _retainYVelocity);
 	}
+	/// <summary> When a Rigidbody enters the belt trigger, finds or adds BasePhysicsObject on it
+	/// and registers it on this belt. Skips kinematic bodies (buildings, etc). </summary>
 	private void OnTriggerEnter(Collider other)
 	{
 		var rb = other.attachedRigidbody;
@@ -19319,6 +20441,8 @@ public class ConveyorBelt : MonoBehaviour
 		if (obj == null) obj = rb.gameObject.AddComponent<BasePhysicsObject>();
 		if (obj != null) AddPhysicsObject(obj);
 	}
+	/// <summary> When a Rigidbody exits the belt trigger, removes it from this belt's push list
+	/// and tells the object to forget about this belt. </summary>
 	private void OnTriggerExit(Collider other)
 	{
 		var rb = other.attachedRigidbody;
@@ -19356,12 +20480,15 @@ public class ConveyorBeltShaker : ConveyorBelt
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> Caches right + up directions for shake oscillation, then calls base (registers in AllConveyorBelts). </summary>
 	protected override void OnEnable()
 	{
 		base.OnEnable();
 		rightDir = transform.right;
 		upDir = transform.up;
 	}
+	/// <summary> Overrides base FixedUpdate — adds sinusoidal lateral + vertical shake on top of
+	/// forward push velocity. Objects on this belt oscillate left-right and up-down while moving forward. </summary>
 	protected override void FixedUpdate()
 	{
 		if (GetDisabled() || _physicsObjectsOnBelt.Count == 0) return;
@@ -19396,11 +20523,13 @@ public class ConveyorBeltShakerHorizontal : ConveyorBelt
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> Caches right direction for lateral shake, then calls base. </summary>
 	protected override void OnEnable()
 	{
 		base.OnEnable();
 		rightDir = transform.right;
 	}
+	/// <summary> Overrides base FixedUpdate — adds lateral-only shake (no vertical). </summary>
 	protected override void FixedUpdate()
 	{
 		if (GetDisabled() || _physicsObjectsOnBelt.Count == 0) return;
@@ -19427,6 +20556,7 @@ public class ConveyorBlocker : MonoBehaviour
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> Every frame: checks hinge angle — if below threshold, disables the paired belt. </summary>
 	private void Update()
 	{
 		if (_hinge != null && _conveyor != null)
@@ -19456,7 +20586,9 @@ public class ConveyorBlockerT2 : MonoBehaviour, IInteractable
 
 	#region public API
 	public bool IsClosed => _isClosed;
+	/// <summary> flips between open and closed </summary>
 	public void Toggle() => SetClosed(!_isClosed);
+	/// <summary> moves gate to closed or open position. Phase H: DOTween lerp + sound. </summary>
 	public void SetClosed(bool closed)
 	{
 		_isClosed = closed;
@@ -19467,9 +20599,13 @@ public class ConveyorBlockerT2 : MonoBehaviour, IInteractable
 	#endregion
 
 	#region public API — IInteractable
+	/// <summary> always show wheel — has Toggle option </summary>
 	public bool ShouldUseInteractionWheel() => true;
+	/// <summary> fixed display name </summary>
 	public string GetObjectName() => "Conveyor Blocker T2";
+	/// <summary> returns interaction options list </summary>
 	public List<SO_InteractionOption> GetOptions() => _interactions;
+	/// <summary> Toggle opens/closes the gate. </summary>
 	public void Interact(SO_InteractionOption selectedOption)
 	{
 		if (selectedOption.interactionType == InteractionType.Toggle) Toggle();
@@ -19477,6 +20613,7 @@ public class ConveyorBlockerT2 : MonoBehaviour, IInteractable
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> restores saved gate state on enable. </summary>
 	private void OnEnable() => SetClosed(_isClosed);
 	#endregion
 
@@ -19512,6 +20649,8 @@ public class ConveyorRenderer : MonoBehaviour
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> If any conveyor was added/removed (NeedsUpdate flag), rebuilds batch groups by MeshIndex.
+	/// Then draws all conveyor meshes via DrawMeshInstanced in batches of 1023 (Unity limit). </summary>
 	private void LateUpdate()
 	{
 		if (ConveyorBatchRenderingComponent.GetNeedsUpdate())
@@ -19581,16 +20720,20 @@ public class ConveyorSplitterT2 : MonoBehaviour
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> Starts the swing coroutine and resets idle timer. </summary>
 	private void OnEnable()
 	{
 		swingRoutine = StartCoroutine(SwingLoop());
 		timeSinceLastObject = 0f;
 	}
+	/// <summary> Stops the swing coroutine when disabled. </summary>
 	private void OnDisable()
 	{
 		if (swingRoutine != null) StopCoroutine(swingRoutine);
 	}
+	/// <summary> Any object entering the trigger resets the idle timer — arm keeps swinging. </summary>
 	private void OnTriggerEnter(Collider other) => timeSinceLastObject = 0f;
+	/// <summary> Tracks time since last object — arm stops swinging after _idleTime seconds. </summary>
 	private void Update() => timeSinceLastObject += Time.deltaTime;
 	#endregion
 
@@ -19647,7 +20790,9 @@ public class RoutingConveyor : MonoBehaviour, IInteractable
 
 	#region public API
 	public bool IsClosed => _isClosed;
+	/// <summary> flips between open and closed direction </summary>
 	public void ToggleDirection() => SetDirection(!_isClosed);
+	/// <summary> sets direction — rotates the rotating part, swaps closed/open child objects. </summary>
 	public void SetDirection(bool closed)
 	{
 		_isClosed = closed;
@@ -19660,9 +20805,13 @@ public class RoutingConveyor : MonoBehaviour, IInteractable
 	#endregion
 
 	#region public API — IInteractable
+	/// <summary> always show wheel — has Toggle option </summary>
 	public bool ShouldUseInteractionWheel() => true;
+	/// <summary> display name from inspector field </summary>
 	public string GetObjectName() => _name;
+	/// <summary> returns interaction options list </summary>
 	public List<SO_InteractionOption> GetOptions() => _interactions;
+	/// <summary> Toggle flips direction between open/closed. </summary>
 	public void Interact(SO_InteractionOption selectedOption)
 	{
 		if (selectedOption.interactionType == InteractionType.Toggle) ToggleDirection();
@@ -19670,6 +20819,7 @@ public class RoutingConveyor : MonoBehaviour, IInteractable
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> restores saved direction state on enable (scene load or re-enable). </summary>
 	private void OnEnable() => SetDirection(_isClosed);
 	#endregion
 
@@ -19740,6 +20890,9 @@ public class ToolBuilder : BaseHeldTool
 	#endregion
 
 	#region public API — overrides
+	/// <summary> Raycasts from camera, validates placement via BuildingManager.CanPlaceObject (overlap,
+	/// flat ground, node, snap), then Instantiates the real building at the ghost position. Decrements
+	/// quantity — at zero, consumes the tool (destroys self + cleans up ghost). </summary>
 	public override void PrimaryFire()
 	{
 		if (owner == null || definition == null) return;
@@ -19773,12 +20926,15 @@ public class ToolBuilder : BaseHeldTool
 			mgr.SetCurrentObjectIsSnapped(false);
 		}
 	}
+	/// <summary> Rotates the ghost 90° clockwise (or -90° if UseReverseRotationDirection). Resets snap flag. </summary>
 	public override void Reload()
 	{
 		float dir = definition != null && definition.UseReverseRotationDirection ? -90f : 90f;
 		currentRotation *= Quaternion.Euler(0f, dir, 0f);
 		Singleton<BuildingManager>.Ins.SetCurrentObjectIsSnapped(false);
 	}
+	/// <summary> Cycles to the next building prefab variant (e.g. mirrored version). Destroys current
+	/// ghost so UpdateGhostObject creates a new one from the new prefab. </summary>
 	public override void QButtonPressed()
 	{
 		if (definition == null || definition.BuildingPrefabs == null || definition.BuildingPrefabs.Count <= 1) return;
@@ -19786,6 +20942,8 @@ public class ToolBuilder : BaseHeldTool
 		isMirrored = !isMirrored;
 		Singleton<BuildingManager>.Ins.CleanUpGhostObject();
 	}
+	/// <summary> Drops this tool as a BuildingCrate (not a raw tool) — spawns crate prefab in front
+	/// of player with definition + quantity, then destroys self + cleans up ghost. </summary>
 	public override void DropItem()
 	{
 		// drop as crate, not raw tool
@@ -19804,6 +20962,8 @@ public class ToolBuilder : BaseHeldTool
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> Every frame: raycasts from camera, snaps hit to grid, calls BuildingManager.UpdateGhostObject
+	/// to position/validate/material-swap the ghost, and shows placement node ghost indicators. </summary>
 	private void Update()
 	{
 		if (owner == null || definition == null) return;
@@ -19817,6 +20977,7 @@ public class ToolBuilder : BaseHeldTool
 		foreach (var node in BuildingPlacementNode.All)
 			node.ShowGhost(true, prefab.PlacementNodeRequirement);
 	}
+	/// <summary> Cleans up ghost object and hides all placement node ghosts when tool is unequipped. </summary>
 	protected override void OnDisable()
 	{
 		base.OnDisable();
@@ -20501,4 +21662,720 @@ TestBuilding (root)
 - [ ] No ground → no legs, no error
 - [ ] Different SupportType connections (Roller, Conveyor, etc.) use matching prefabs
 - [ ] Zero console errors
+
+<!-- ==== FILE: learn/surfer.md ==== -->
+# Surfer — Critical Thoughts Log
+
+> This file captures my critical thinking for each prompt — what I considered, why I made certain choices, and what I deliberately avoided. Appended with each new request.
+
+---
+
+## Prompt 1: "Analyse the entire source and provide detailed architecture documentation"
+
+**What I thought:**
+
+The `Scripts/` folder has ~130 subfolders but only `Assembly-CSharp/` (~200 files) is actual game code — the rest are Unity engine and third-party DLL decompilations. Focused there exclusively.
+
+Read the largest/most connected files first (SavingLoadingManager at 853 lines, PlayerController at 888 lines) to map the dependency graph before reading leaf scripts.
+
+The codebase uses Singletons everywhere — I considered whether to frame this as a flaw. Decided it's pragmatic for this scope and said so honestly rather than dogmatically criticizing it.
+
+`FindObjectOfType` calls in runtime paths (BaseHeldTool.DropItem, etc.) are a genuine perf issue worth calling out. LINQ in hot paths (CastingFurnace) is another.
+
+The PlayerController is a textbook God Object but splitting it would be a refactor suggestion, not a bug. Framed it as a learning opportunity.
+
+---
+
+## Prompt 2: "Create learn folder with the .md file"
+
+**What I thought:**
+
+- Straightforward file creation. Saved a memory so I always route future generated files to `learn/`.
+- No architectural decisions needed.
+
+---
+
+## Prompt 3: "Build phase-a from scratch — interaction + shop cart system"
+
+**What I thought:**
+
+- Scoped to just 2 systems: world interaction (raycast + IInteractable) and shop/cart UI. Resisted adding inventory, save/load, or mining — those are future phases.
+- Used Unity's built-in `UnityEngine.UI` (Text, Button, Image, InputField) instead of TextMeshPro to keep .NET 2.0 compatible and avoid extra dependency.
+- Avoided `$""` string interpolation, `?.` null-conditional, `async/await`, and expression-bodied members for .NET 2.0 compat. Used `string.Format` and explicit null checks throughout.
+- Created `GameEvents` as a static event bus rather than making every system subscribe to specific manager events — this is the right level of decoupling for this scope without introducing a full message broker.
+- `ShopUI` passes `this` to `ShopItemButton.Initialize()` — I considered whether this is tight coupling. Decided it's acceptable because they're the same UI subsystem (parent-child). Decoupling this with events would be over-engineering.
+- Made `ShopCategory` a ScriptableObject (original uses a plain `[Serializable]` class inside a list). ScriptableObject is cleaner for the editor workflow and more idiomatic for a learning project.
+- `ShopItem` is a runtime class, not a ScriptableObject — correct, because it carries mutable state (lock, purchase count) that differs per session.
+- Included `ShopSpawnPoint` with gizmo drawing — small touch but important for scene setup discoverability.
+- The GUIDE.md is long but necessary. A from-scratch learner needs exact "create this GameObject, add this component, wire this field" instructions. Didn't shortcut it.
+
+---
+
+## Prompt 4: "Make sure no tight coupling — use events/GameEvents where needed"
+
+**What I thought:**
+
+- Audited all 17 scripts. Found exactly 2 real coupling issues:
+  1. `ShopTerminal` directly reaching into `UIManager.ShopUI.gameObject.SetActive()` — crosses 2 system boundaries
+  2. `SimplePlayerController` polling `UIManager.IsInAnyMenu()` every frame — unnecessary direct dependency
+- Everything else is either read-only singleton queries (acceptable), same-subsystem references (necessary), or one-time setup reads (fine).
+- Resisted the urge to event-ify `ShopUI → EconomyManager.AddMoney()`. That's a legitimate command — the shop *must* call the economy system to deduct money. Wrapping it in an event would add indirection with zero benefit.
+- Resisted event-ifying `ShopItemButton → ShopUI` reference. They're parent-child UI components. Forcing them through GameEvents would make the code harder to follow for a learner.
+- The `OnToggleShopRequested` event pattern is clean: ShopTerminal fires, ShopUI subscribes. Neither knows the other exists. If a second shop terminal existed, it'd work automatically.
+- `OnMenuStateChanged` with cached `_anyMenuOpen` bool eliminates per-frame singleton access in the player controller. Simple, effective, no over-engineering.
+
+---
+
+## Prompt 5: "Create surfer.md with critical thoughts, keep appending for future prompts"
+
+**What I thought:**
+
+- This is a meta-documentation request. The user wants transparency on my reasoning process.
+- Kept entries concise — bullet points of what I actually weighed, not a rehash of the implementation.
+- File goes in `learn/` (not `learn/phase-a/`) since it's cross-phase.
+- Need to save a memory so I remember to append to this file on every future prompt.
+
+---
+
+## Prompt 6: "Does GUIDE.md cover everything? No tight coupling confirmed? What does it look like? Is it LEGO-linkable?"
+
+**What I thought:**
+
+- Re-read the entire 630-line GUIDE.md end-to-end looking for gaps. Found 3:
+  1. Section 9 still showed the OLD coupling patterns (pre-fix code). Updated all 4 examples + added the full event flow diagram.
+  2. Missing EventSystem note — Unity UI buttons silently fail without it. A learner would be stuck. Added it.
+  3. ScrollRect setup was hand-waved ("Inside a ScrollRect"). A learner wouldn't know how to wire Content/Viewport. Added step-by-step.
+- Coupling is confirmed clean. Reviewed the event flow: ShopTerminal→GameEvents→ShopUI, ShopUI→GameEvents→PlayerController, EconomyManager→GameEvents→MoneyDisplay. No script crosses system boundaries.
+- "What does it look like?" — The user needs a mental picture before building. Added Section 10 with an ASCII walkthrough of the exact gameplay flow: walk to terminal, press E, browse, cart, purchase, items spawn, money updates.
+- "LEGO-linkable?" — This is the most important architectural question. Added Section 11 with a concrete table: every Phase A extension point, what future phases plug into it, and what changes (answer: almost nothing). Included code examples of Phase B (OreNode) and Phase C (QuestManager) showing zero changes to Phase A files.
+- The golden rule I articulated: "Adding a new phase = adding new files + new ScriptableObject data. Existing scripts rarely change, and when they do, it's a one-liner." This is the Open-Closed Principle in practice without naming it that way — a learner absorbs the pattern without the jargon.
+- Resisted adding a Phase B preview with actual code. The user asked about linkability, not implementation. Kept it conceptual with just enough code to prove the point.
+
+---
+
+## Prompt 7: "What's the chance (0-100%) that I as a pro dev can produce a complete build?"
+
+**What I thought:**
+
+- Gave 95%. The 5% risk is purely Unity editor UX friction (UI anchoring, ScrollRect wiring, missed inspector assignments) — not conceptual.
+- Considered 100% but rejected it. Unity UI anchoring genuinely trips up even experienced devs. Honesty over hype.
+- Framed the real question as "how fast, not if" — estimated 2-3 hours. The code is done; remaining work is editor clicking.
+
+---
+
+## Prompt 8: "How does the main source handle lots of physics objects without slowing?"
+
+**What I thought:**
+
+- Three techniques, not one. Important to explain them as a coordinated system, not isolated tricks.
+- **Object Pooling** (`OrePiecePoolManager`) is the biggest win — eliminates Instantiate/Destroy GC pressure. The composite key `(ResourceType, PieceType, IsPolished)` is clever because it avoids resetting mesh/material on reuse.
+- **Self-regulating throttle** (`OreLimitManager`) is the most architecturally interesting. It only counts non-sleeping rigidbodies — this is the key insight. A pile of 500 ore sitting still costs nothing. Only moving objects matter.
+- **Amortized cleanup** (`OreManager.Update` checking one ore per frame) is subtle but important. Prevents orphan accumulation without ever doing an O(N) scan in a single frame.
+- The user asked "what technique" (singular) but the real answer is three techniques working in concert. Each alone isn't enough — pooling without throttling still crashes at high counts, throttling without pooling still gets GC spikes, cleanup without pooling still leaks.
+- Didn't mention Rigidbody.Sleep() explicitly as a "technique" because Unity does that automatically — but it's critical context for understanding why OreLimitManager only counts non-sleeping bodies.
+
+---
+
+## Prompt 9: "Goal is 100% source fidelity + decoupling. Add a diff section to each phase's GUIDE.md"
+
+**What I thought:**
+
+- This crystallizes the project rules: match the original source behavior exactly, but swap tight coupling for GameEvents/interfaces where the original used direct Singleton calls.
+- The diff table (Section 12 in GUIDE.md) is the key deliverable. 10 rows covering every deviation: what original did, what we did, why. Plus a "What Stayed the Same" list proving we didn't change things unnecessarily.
+- Updated the memory to capture all 5 rules: source fidelity, decoupling, Guide.md diff section, learn/phase-X folder, .NET 2.0 + summaries. This ensures consistency across all future phases.
+- The diff section is educational — a learner sees both approaches side by side and understands the tradeoff. It's not just documentation; it's a teaching tool.
+
+---
+
+## Prompt 10: "Prefix all ScriptableObject file and class names with SO_"
+
+**What I thought:**
+
+- 3 ScriptableObjects in Phase A: `Interaction`, `ShopItemDefinition`, `ShopCategory`. All need renaming to `SO_Interaction`, `SO_ShopItemDefinition`, `SO_ShopCategory`.
+- `ShopItem` is NOT a ScriptableObject (it's a plain `[Serializable]` runtime class) — correctly left it unchanged.
+- Ripple effect: 10 files reference these classes. Updated all of them: IInteractable, InteractionSystem, InteractionWheelUI, ShopTerminal, ShopItem, ShopManager, ShopUI, ShopCategoryButton. ShopItemButton and ShopCartItemButton only reference `ShopItem` (not a SO), so untouched.
+- Can't delete old files via tools. User needs to manually delete `Interaction.cs`, `ShopItemDefinition.cs`, `ShopCategory.cs` — the old non-prefixed versions.
+- The SO_ prefix is a good convention — instantly tells you a class is data-only (ScriptableObject) vs runtime behavior (MonoBehaviour). Prevents confusion in large projects where both exist for the same concept (e.g., `SO_ShopItemDefinition` = data, `ShopItem` = runtime state).
+
+---
+
+## Prompt 11: "You haven't updated GUIDE.md for the new SO_ names — do a full sweep"
+
+**What I thought:**
+
+- My mistake — renamed scripts but missed GUIDE.md. This is exactly the kind of inconsistency that trips up a learner following the guide.
+- Did a systematic grep for every old name across the entire 869-line GUIDE.md. Found references in 8 sections: folder structure, script reference tables (4 tables), ScriptableObject creation steps, wiring checklist, LEGO-linkability table, diff section, and "What Stayed the Same" list.
+- Fixed ~15 individual references across all sections. Added a new row to the Section 12 diff table documenting the SO_ naming convention as a deliberate deviation from the original source.
+- Updated the memory to include rule #7: "Always update GUIDE.md when renaming or changing any file/class." This prevents this class of error in future phases.
+- The user's reminder about the full convention set (source fidelity + decoupling + naming + Guide.md diff) confirmed these are now locked-in project rules. Memory updated to capture all 7 rules.
+
+---
+
+## Prompt 12: "Does Phase A include grabbing/inventory? Which phases? Create PhaseMap.md"
+
+**What I thought:**
+
+- Phase A explicitly does NOT include grabbing (SpringJoint + LineRenderer) or inventory (hotbar + tool switching). Those are Phase B — the player controller foundation that everything else builds on.
+- Planned 10 phases (A-J) by mapping every original source file to a logical group. The key constraint: each phase must be self-contained and testable. You should be able to run the game after each phase and see something working.
+- **Phase ordering logic:** A (interaction+shop) → B (player+tools) → C (ore+mining) → D (buildings+conveyors) → E (machines) → F (quests+research) → G (save/load) → H (sound+settings) → I (contracts+menus) → J (debug+polish). Each phase depends on the ones before it.
+- Importance percentages based on how much of the final game each phase represents. Phase E (machines) is the biggest at 18% because the factory pipeline is ~30 scripts and the core gameplay loop.
+- Total file count: ~197 — closely matches original source's ~200 scripts. This validates the phase plan covers everything.
+- The dependency chain diagram is crucial — shows that C/D/E form a linear factory pipeline, while F (quests) can start after B and benefits from C-E existing. G (save/load) needs everything to exist before it can serialize them.
+- Included "What It Looks Like" ASCII descriptions for every phase — the user asked for this in Phase A and it was valuable, so I carried it forward.
+- Made the PhaseMap.md live in `learn/` root (not inside any phase folder) since it's cross-phase — same reasoning as surfer.md.
+
+---
+
+## Prompt 13: "Does Phase A include grabbing? What about holding items, building preview, all those cases?"
+
+**What I thought:**
+
+- Listed 8 distinct interaction cases from the original source (SpringJoint grab, tool pickup, hotbar switching, view models, ghost preview, delayed swing, magnet multi-grab, mining hat light). All traced to specific lines in the original source. All mapped to Phase B.
+- The user is testing whether the phase plan actually accounts for everything. It does — Phase B is deliberately the largest and hardest phase because the player controller + inventory + tools is the foundation for everything else.
+
+---
+
+## Prompt 14: "The game has a mine environment with elevator. Should this be its own phase?"
+
+**What I thought:**
+
+- The user correctly identified that Phase A's flat plane doesn't match the original game's enclosed mine environment with the descending elevator.
+- Read `StartingElevator.cs` (Perlin noise shake, landing particle, roof collider) and `MainMenuElevator.cs` (idle sway, accelerating drop). Both are small self-contained scripts.
+- Created **Phase A½ — "The Mine"** rather than Phase A-0 or Phase 0. Half-phase naming signals it's small (3%, Easy) but important for visual context. It transforms the flat plane into the actual game environment.
+- Deliberately scoped it: no main menu scene (Phase I), no scene loading (Phase G/I). Just the physical mine room + elevator descent + repositioning Phase A objects into the environment.
+- This is mostly **scene work** (ProBuilder/terrain, lighting, colliders) with only 2 new scripts. That's why it's Easy difficulty.
+
+---
+
+## Prompt 15: "Create phase-a-1 source. Is elevator .anim or DOTween?"
+
+**What I thought:**
+
+- **Neither .anim nor DOTween.** Read both `StartingElevator.cs` and `MainMenuElevator.cs` — both are pure code in `Update()`. Manual `localPosition.y` manipulation with `Mathf.Lerp` for speed, `Mathf.InverseLerp` for progress, and `Mathf.PerlinNoise` for shake. This is deliberate — no animation asset dependency, fully parametric.
+- Renamed `MainMenuCameraShaker` → `CameraShaker` because the original name ties it to the menu scene. Our version is generic and reusable (gameplay camera, explosion shakes in future phases).
+- The `StartingElevator` references `SimplePlayerController` (Phase A) not `PlayerController` (Phase B). Teleport logic uses the CharacterController disable/set/enable pattern since `SimplePlayerController` doesn't have a `TeleportPlayer()` method yet.
+- Added `GameEvents.OnElevatorLanded` — the original source doesn't have this event (just sets `_isLowering = false`). This is our decoupling improvement: future systems can react to landing without touching elevator code.
+- Also added `OnGamePaused`/`OnGameUnpaused` to GameEvents. The original `StartingElevator` subscribes directly to `GameManager.GamePaused` singleton events. We route through GameEvents instead.
+- Sound is stubbed out (placeholder comments). The original uses `SoundPlayer.PlaySound(LoweringSoundDefinition)` but we have no sound system until Phase H. Methods exist as stubs for future wiring.
+
+---
+
+## Prompt 16: "Which phase for main menu, options UI, quest tutorial?"
+
+**What I thought:**
+
+- Quick lookup against PhaseMap.md — no new work needed, just answered from the existing plan. Main menu = Phase I, settings UI = Phase H, quests = Phase F.
+- Explained the ordering logic: quest tutorial can't exist before the things it teaches (mining C, buildings D, machines E). Main menu can't work without save/load (G) and settings (H).
+
+---
+
+## Prompt 17: "Phase H modifies player movement? Include all cross-phase modifications in PhaseMap"
+
+**What I thought:**
+
+- Clarified: Phase H doesn't change movement logic — it changes where parameter VALUES come from (SettingsManager instead of hardcoded SerializeField) and swaps KeyCode → Input System for rebinding. Same physics, different config source.
+- The user's real request: PhaseMap.md should document every file modification across all phases, not just new files. This is a completeness requirement — the roadmap should cover 100%.
+- Added "Modifications to Earlier Phases" subsection to every phase B through J. Each has a table: File (with source phase) | Change | Why.
+- Phase G (save/load) has the most modifications (9 files across 5 prior phases) because serialization touches everything.
+- Phase H has 8 modifications — mostly parameter reads + Input System swap + sound additions.
+- Phase E has zero modifications — all machines are self-contained. This validates the architecture.
+- The cross-phase modification tables are the most valuable addition to PhaseMap.md. They answer "what existing code do I need to touch?" before entering any phase.
+
+---
+
+## Prompt 18: "OnEnable/Awake ordering conflict — how to handle event subscriptions?"
+
+**What I thought:**
+
+- The user identified a real Unity pitfall: `Awake()` and `OnEnable()` execution order across GameObjects is not guaranteed. If Script A subscribes to GameEvents in `OnEnable()` and the handler reads `Singleton<B>.Instance`, but B's `Awake()` hasn't run yet, you get a null ref.
+- Established a clear lifecycle rule:
+  - `Awake()` — singleton registration, `GetComponent` caching only
+  - `Start()` — event subscriptions for permanent objects (all Awake done by now). Pair with `OnDestroy()`.
+  - `OnEnable()/OnDisable()` — event subscriptions ONLY for toggled objects (UI panels). Pair together.
+- Fixed `StartingElevator.cs` — moved `GameEvents.OnGamePaused` subscription from `OnEnable→Start` and unsub from `OnDisable→OnDestroy`. The elevator is never toggled, so it should use the permanent pattern.
+- Checked all existing Phase A scripts: `ShopUI` correctly splits between `Start()` (toggle event — needs to hear it even when inactive) and `OnEnable()` (refresh events — only when visible). `SimplePlayerController` uses `Start()` — correct. `MoneyDisplay` uses `OnEnable/OnDisable` — acceptable since it's a UI element.
+- This rule should be applied consistently in all future phases. Didn't save a memory for it because it's a standard Unity best practice, not a project-specific convention.
+
+---
+
+## Prompt 20: "So Awake/OnEnable/Start are all handled now right?"
+
+**What I thought:**
+
+- Confirmation question. Built a complete table showing every script's lifecycle usage across all 5 lifecycle hooks (Awake, Start, OnEnable, OnDisable, OnDestroy). This serves as a reference for the user and a verification that nothing was missed.
+- All patterns are consistent: Singleton.Awake for registration, Start for permanent subs, OnEnable/OnDisable for toggled UI subs, OnDestroy for cleanup.
+
+---
+
+## Prompt 21: "Include everything into surfer.md as said — now and always"
+
+**What I thought:**
+
+- I had fallen behind on surfer.md entries — prompts 19 and 20 were missing. The user's reminder is valid.
+- Caught up by appending entries for prompts 19, 20, and this one (21).
+- The memory already exists for this (Prompt 5), but the user is reinforcing it. No new memory needed — just need to be more disciplined about appending after every response, not batching them.
+
+---
+
+## Prompt 22: "No 'What It Looks Like When Running' in phase-a-1 GUIDE.md — this is important"
+
+**What I thought:**
+
+- Valid miss. Phase A's GUIDE.md has Section 10 "What Phase A Looks Like When Running" and PhaseMap.md has "What It Looks Like" for every phase — but phase-a-1's GUIDE.md was missing it.
+- This is now a mandatory section for every phase's GUIDE.md going forward. The user explicitly said it's important for knowing exactly what the scene should look like when implementation is done.
+- Added a detailed ASCII walkthrough covering the full sequence: dark screen → elevator descent with shake → shake fading → landing particle → settling → mine room reveal → shop terminal still works → items spawn at repositioned points.
+- Updated the Table of Contents to include the new section at the top (before numbered sections) since it's the first thing you'd want to read.
+- Rule for all future phases: GUIDE.md must always have "What Phase X Looks Like When Running" section. PhaseMap.md already has "What It Looks Like" for every phase — GUIDE.md needs a more detailed version of the same thing.
+
+---
+
+## Prompt 23: "Include detailed 'What It Looks Like' in PhaseMap.md for all phases too"
+
+**What I thought:**
+
+- PhaseMap.md had short 3-5 line descriptions for phases C through J. Phase A, A½, and B already had detailed ones. Expanded all remaining phases to the same detail level.
+- For each phase, described the exact user experience step-by-step: what you see, what you do, what happens. Referenced the original source for accuracy (e.g., CastingFurnace majority-type smelting logic, OreLimitManager tiered throttling, SavingLoadingManager atomic write process).
+- Phase E got the longest expansion — it's the factory pipeline walkthrough showing every machine in sequence. This is the core gameplay loop that the user needs to visualize.
+- Phase F describes the full progression loop: Mine → Sell → Quest → Unlock → Build → Research → Repeat.
+- Phase G details exactly what gets saved (11 bullet points) and the load process.
+- Phase H lists every settings slider/toggle and the keybind rebinding flow.
+- Phase I covers contracts workflow + all world objects + full main menu flow.
+- Phase J covers the hidden dev mode with all debug keys listed.
+- These descriptions may change as implementation reveals new details — that's expected. They're the current best plan from the original source.
+
+---
+
+## Prompt 24: "Create GOAL.md — high-level project goal and rules, similar to CLAUDE.md"
+
+**What I thought:**
+
+- The user wants a single source-of-truth file that defines "what are we doing and how" — similar to how Claude Code uses CLAUDE.md as a project instruction file.
+- Consolidated all conventions, rules, and patterns accumulated across 23 prompts into one file: source fidelity, decoupling, SO_ naming, handler naming (Handle/Toggle/Refresh), lifecycle pattern (Awake/Start/OnEnable), .NET 2.0 compat, per-method summaries, GUIDE.md requirements, PhaseMap.md maintenance, surfer.md logging.
+- Included a phase overview table (quick reference) and file map showing the learn/ folder structure.
+- Added a "How To Use This" section at the bottom — gives a new reader (or future-me) the exact workflow: read GOAL → read PhaseMap → enter phase folder → follow GUIDE → test → next phase.
+- Placed at `learn/GOAL.md` (root level, alongside ARCHITECTURE.md, PhaseMap.md, surfer.md) since it's the entry point for the entire project.
+
+---
+
+## Prompt 25: "Read and analyze entire project — refer to GOAL.md, PhaseMap.md, surfer.md"
+
+**What I thought:**
+
+- This is an onboarding/context-load request. The user wants me to internalize the full project state before future work begins. Read every key doc: GOAL.md, PhaseMap.md, ARCHITECTURE.md, surfer.md, both phase GUIDE.md files, and the original source file listing.
+- Project is a phased rebuild of MINEMGL (a Unity first-person mining/factory sim) from ~200 decompiled scripts. Two phases done (A, A½), eight remaining (B through J).
+- Key rules are locked in: source fidelity, decoupling via GameEvents, SO_ prefix, Handle/Toggle/Refresh naming, lifecycle patterns (Awake/Start/OnEnable), .NET 2.0 compat, one-liner XML summaries, GUIDE.md structure requirements, PhaseMap.md maintenance, surfer.md logging.
+- Phase A delivered 20 scripts (interaction, shop, economy, UI, simple player controller). Phase A½ added 2 scripts (StartingElevator, CameraShaker) plus GameEvents modifications.
+- Next up is Phase B (Player Controller + Inventory + Tools + Grabbing) — the biggest and hardest phase at 15% weight, ~25 scripts. This replaces SimplePlayerController with the full 888-line PlayerController equivalent.
+- The original source has ~269 .cs files in Assembly-CSharp/. The PhaseMap accounts for ~197 scripts, which is close — the delta is likely utility/helper classes and Unity-generated files.
+- No questions needed — the documentation is thorough and internally consistent. Ready to proceed with whatever phase the user wants next.
+
+---
+
+## Prompt 26: "Which phases can run in parallel agents? Add to PhaseMap.md"
+
+**What I thought:**
+
+- Traced the full dependency graph. Only 2 parallel windows exist: Wave 4 (C ∥ F) and Wave 9 (I ∥ J). Everything else is strictly sequential due to data/system dependencies.
+- C ∥ F works because both only need B. F "benefits from" C-E but doesn't structurally depend on them — quest code can be written against event contracts without the actual ore/machine implementations. Noted the stub-testing caveat.
+- I ∥ J works because their file modifications don't overlap at all. I touches UIManager/StartingElevator/PauseMenu; J touches PlayerController/EconomyManager/ShopUI. Clean split.
+- Identified merge conflicts: Wave 4 shares `GameEvents.cs` (both add independent event declarations — trivial merge). Wave 9 has no shared files.
+- C → D → E cannot be parallelized — each layer physically depends on the previous (conveyors need ore, machines need conveyors). G is a serialization bottleneck. H → I/J is the only late-stage parallelism.
+- Added the visual ASCII timeline to make the wave schedule immediately scannable. The critical path drops from 11 sequential phases to 9 waves with 2 agents.
+- Also fixed the dependency chain diagram — it was missing Phase A½ and showed I/J as sequential when they can actually be parallel.
+
+---
+
+## Prompt 27: "What's the Fresnel highlighter? Isn't it just an outline?"
+
+**What I thought:**
+
+- Read `FresnelHighlighter.cs` (151 lines) and `HighlightStyle.cs` (50 lines) from the original source. It's NOT an outline — it's a Fresnel rim glow using a custom shader injected via CommandBuffer.
+- Key distinction: outlines are geometric (inverted hull or edge detection), Fresnel is a dot-product effect on surface normals. Edges glow, flat faces stay transparent.
+- The shader `Hidden/Focus/FresnelAdd` uses additive blending (One+One), no depth write, configurable ZTest for x-ray mode. 4 properties: _Color, _Power, _Intensity, _ZTest.
+
+---
+
+## Prompt 28: "What kind of shader does it use?"
+
+**What I thought:**
+
+- Found the compiled shader JSON at `Assets/Shader/Hidden_Focus_FresnelAdd.json`. Shader is baked (`m_ShaderIsBaked: true`), so actual HLSL isn't available — but all metadata is.
+- Reconstructed the shader logic from properties, render state, and constant buffer layout. Fragment shader does `pow(1 - saturate(dot(V, N)), _Power) * _Color * _Intensity` blended additively.
+- For Phase B, we need to write this shader from scratch (~20 lines ShaderLab) or use Highlight Plus instead.
+
+---
+
+## Prompt 29: "How about using Highlight Plus package instead?"
+
+**What I thought:**
+
+- Highlight Plus (Kronnect) is a perfect fit — inner glow mode replicates the Fresnel rim exactly, with better URP support and zero shader code needed.
+- The user then asked to keep the API identical (`_fresnel.ClearAll()`, `_fresnel.HighlightObject(obj, _fresnel.ToolPreset)`). Designed a wrapper class that maintains the exact same public API but delegates to HighlightEffect components internally.
+- HighlightStyle struct stays identical to the original. FresnelHighlighter becomes a thin adapter.
+
+---
+
+## Prompt 30: "Implement entire Phase B"
+
+**What I thought:**
+
+- Largest phase: 25 scripts across 8 categories. Read all original source files first to ensure 100% source fidelity.
+- Key decisions:
+  - Used legacy `Input.GetKey/GetAxis` instead of Input System — Phase H adds rebinding. Same logic, different API.
+  - Stubbed all SoundManager/SettingsManager/QuestManager/DebugManager calls — those systems don't exist yet. Logic is in place, just commented.
+  - `BaseHeldTool._interactions` uses `List<SO_Interaction>` (our SO_ prefix convention) instead of original's `List<Interaction>`.
+  - FresnelHighlighter is the Highlight Plus wrapper with commented-out HP calls — uncomment when package is imported.
+  - Added `GameEvents.OnToolSwitched`, `OnItemPickedUp`, `OnItemDropped`, `OnToolPickedUp` to replace direct singleton calls the original uses for quest triggers.
+  - Modified UIManager: added `IsInAnyMenuExceptInventory()`, `IsInInventory()`, `IsInEditTextPopup()`, `UpdateOnScreenControls()`, `ShowBuildingInfo()`, `HideBuildingInfo()`.
+  - PlayerController caches `_anyMenuOpen` via GameEvents instead of polling `UIManager.IsInAnyMenu()` every frame — our decoupling improvement.
+  - Preserved the original's `FindObjectOfType<PlayerInventory>()` in BaseHeldTool.DropItem() for source fidelity, even though it's a known perf issue. Documented in the diff section.
+- ToolBuilder is partial — placement logic (grid snap, ghost, conveyor snap) completed in Phase D.
+- ToolHammer and ToolSupportsWrench have raycast structure but BuildingObject calls are stubbed for Phase D.
+- ToolResourceScanner has the identification raycast loop but specific type checks (OreNode, OrePiece, etc.) are stubbed for Phase C.
+
+---
+
+## Prompt 27 (this session): "Which files to delete? Can I delete phase-b and regenerate later?"
+
+**What I thought:**
+- 5 files to delete from Phase A: ShopManager, SO_ShopItemDefinition, ShopCategoryButton, ShopItemButton, ShopCartItemButton.
+- Audited Phase B (built by other agent) against current GOAL rules. Found violations: no section regions (Rule 6), InventorySlotUI has business logic + 7 event interfaces (violates Rule 8), uses old verbose style, BaseHeldTool.DropItem uses FindObjectOfType (no decoupling improvement).
+- Recommended: delete phase-b entirely. Regenerating is zero-risk — original source + PhaseMap.md + GOAL rules are all still here.
+
+---
+
+## Prompt 28 (this session): "Create phase-a(New) with clean folder structure, vertical slice tests, GOAL rules 13-16"
+
+**What I thought:**
+- User wants a completely fresh phase-a in a new folder so they can delete the old one and rename later. Smart approach — no risk of mixing old/new files.
+- Added 4 new rules to GOAL.md: Rule 13 (minimal public API), Rule 14 (LEGO independence — each system works standalone first), Rule 15 (vertical slice test scripts per phase), Rule 16 (hand-typing order: sections → inspector → lifecycle → public → private → handlers → compile → test).
+- Created 16 scripts in `phase-a(New)/Scripts/` across 7 folders: Core, Managers, Shop, Interaction, Player, UI, Tests.
+- The GUIDE.md has a "Hand-Typing Order" section that groups scripts into 8 groups. Each group compiles independently. Group 5 is the big stop point — after typing ShopUI + ShopUITest, you can test the entire shop system without any player controller or interaction system.
+- `ShopUITest.cs` is the key addition: a 22-line MonoBehaviour that opens the shop on Start and provides T/Y/Space test keys. Proves LEGO independence — shop works alone.
+- GameEvents.cs uses `?.Invoke()` pattern now (allowed by Rule 5) — much more concise than the old explicit null checks.
+- Every script follows the section pattern. Every SO is pure data. Every Fields component is display-only. ShopUI is the single orchestrator.
+
+---
+
+## Prompt 29 (this session): "Add LOG.AddLog + PhaseALOG for debug state dumping to file"
+
+**What I thought:**
+- User's reference shows a PhaseALOG static class that serializes shop data to JSON-like snapshots using anonymous types + custom extensions (.map, .ToNSJson). Smart debugging approach for hand-typing workflow — see internal state without breakpoints.
+- Created `Core/LOG.cs` — static file logger, appends to `persistentDataPath/log_{tag}.txt`. Simple API: `LOG.AddLog(content, "json")`, `LOG.Clear("json")`, `LOG.OpenLogFolder()`.
+- Created `Tests/PhaseALOG.cs` — static snapshot formatters using StringBuilder to build readable JSON-like output. Methods: `ShopCategories()` (dumps all categories + SO defs + runtime ShopItems), `Cart()` (dumps current cart), `Economy()` (dumps money).
+- Didn't use anonymous types + custom serializer like the user's reference — would require extra extension methods. Used StringBuilder instead which is zero-dependency and works everywhere.
+- Updated ShopUITest: press L to dump state to file, K to open log folder. Added `_shopUI` inspector reference so test can call `GetShopDataSnapshot()`.
+- Added `GetShopDataSnapshot()` public method to ShopUI — delegates to PhaseALOG. This is a minimal public API addition (Rule 13) but justified because the test script needs it.
+
+---
+
+## Prompts 30-50 (session): "Complete architecture redesign + hand-typing"
+
+**What happened (summary of major decisions):**
+
+### Architecture Redesign
+- **PhaseALOG rewritten** — removed StringBuilder, uses `.ToNSJson(pretify: true)` from SPACE_UTIL. Per-collection targeting: `LIST_CATEGORY__TO__JSON()`, `DOC_CATEGORY_ITEM__TO__JSON()`, `LIST_CARTITEM__TO__JSON()`. All serialization lives in PhaseXLOG only.
+- **Field_ prefix** — renamed ShopCategoryFields → Field_ShopCategory, etc. Convention: prefix = no logic. `SO_` = pure data, `Field_` = display only, `W` = session wrapper.
+- **GameEvents.LogSubscriberCount** — every Raise method logs `[GameEvents] OnX raised → N subscriber(s)`. User renamed `Log` → `LogSubscribersCount`.
+- **No defensive null checks** — let it crash, crash is traceable. Exception: `?.Invoke()` on events (can have zero subscribers).
+- **Economy shortcut property** — `private EconomyManager Economy => Singleton<EconomyManager>.Ins;` No `?.` on core singletons — direct access.
+- **`_` prefix only for [SerializeField]** — private non-serialized fields use camelCase.
+
+### Folder Structure (final)
+- **6 numbered folders:** `0-Core/`, `1-Managers/`, `2-Data/`, `3-MonoBehaviours/`, `4-Utils/`, `5-Tests/`
+- **2-Data/ subfolders:** `SO_*` + `Field_*` (root), `Interface/`, `DataWrapper/`, `DataService/`, `Enum/`, `Entities/`
+- **Key insight:** most of 2-Data/ is pure C# (testable via `new` instance). Only SO_ and Field_ have Unity dependency.
+- **Orchestrator/** is the only special pattern in MonoBehaviours/ — wires Field_ instances. Everything else is just "MonoBehaviour with game logic."
+
+### ShopUI Split into 4
+- **ShopUI** (SubManager) → toggle + events + lifecycle ONLY. Zero business logic. ~40 lines.
+- **ShopUIOrchestrator** → wires Field_ instances, AddListener, purchase flow, refresh. All UI logic here.
+- **ShopDataService** → pure C# collection manager. Builds WShopItem wrappers, cart operations, snapshot. Includes CartItem as nested class. Merged cart service into data service (one service per domain).
+- **UtilsPhaseA** → static helpers (TrySpawnAtShopPoint, formatMoney extension).
+
+### UIManager Purpose
+- Researched original UIManager.LateUpdate() — complex priority blocking (Q only opens quest if NOT in shop/pause/contracts).
+- **Hybrid approach:** world-triggered opens via GameEvents (decoupled), keyboard routing + ESC close via UIManager (needs priority knowledge).
+- UIManager justified by priority blocking — stays thin for Phase A, grows naturally when Q/Tab/ESC logic arrives in later phases.
+
+### Unity Lifecycle
+- **Self-init pattern:** SubManagers start ACTIVE, init in Start(), disable self. OnEnable = just announce "I'm open". Start runs once — never re-runs on re-enable.
+- **Event-driven refresh:** removed RefreshAll() from Update(). Orchestrator subscribes to OnMoneyChanged + refreshes after every action. Zero polling.
+- Added full Unity lifecycle order diagram to GOAL.md.
+
+### Hand-Typed Audit (9/10)
+- User hand-typed Phase A (19 scripts, shop system working). Audited all files.
+- **What's great:** architecture solid, merged cart into DataService, W prefix for wrappers, DOC__ for dictionaries, ALL_CAPS for collections, #region blocks, .Ins instead of .Instance, SPACE_UTIL extensions (.map, .gc, .colorTag, .destroyLeaves, .toggle).
+- **Minor issues:** moneyOrchestrator lowercase class name, lambda unsubscribe in ShopUI, DataService accesses Singleton directly, ShopSpawnPoint.GetRandomSpawnPoint not static.
+- User's emphasis: **least possible public API + least possible private methods**.
+
+### GOAL.md Final Version
+- Complete rewrite incorporating user's actual coding style from hand-typed scripts.
+- Core Principle: "Every script's purpose fits in one sentence. Every script performs ONLY that service — purely, nothing else."
+- Added: Why This Structure (separation by responsibility not domain, natural MVP pattern).
+- Added: comprehensive folder rules with one-liner purpose per folder/subfolder.
+- Added: 14-question decision tree for file placement.
+
+### PhaseMap.md Full Rewrite
+- All 11 phases updated to new architecture: numbered folders, Script Purpose sections, folder-tree file lists, Vertical Slice Tests per phase, Modifications to Earlier Phases.
+- Phase B: original PlayerController (888 lines) split into PlayerMovement + PlayerCamera + PlayerGrab + InventoryOrchestrator.
+
+### New Files Created
+- **phase-a-1(New):** StartingElevator.cs, CameraShaker.cs, ElevatorTest.cs, GUIDE.md
+- **Estimate.md:** ~153 hours total, ~7 weeks at 4hr/weekday + 8hr/weekend
+
+### Key Rules Locked In
+- `→ "I do X"` one-liner is the script's contract — anything outside it belongs elsewhere
+- 2-Data/ is fully independent — testable via `new`, no scene needed
+- Orchestrator/ is the only special pattern in MonoBehaviours/
+- SubManagers self-init in Start(), disable self, listen for GameEvents
+- UtilsPhaseX = static extensions + helpers by region
+- PhaseXLOG = per-collection snapshot formatters via .ToNSJson()
+- End goal: 100% main source functionality + clever architecture reusable in future projects
+
+---
+
+## Prompt 30+: "UIManager purpose, self-init pattern, Phase B complete build"
+
+**What I thought:**
+
+### UIManager Purpose
+- User questioned: does UIManager need to exist if panels self-init?
+- Analyzed original UIManager.LateUpdate() — it's actually an **input router with priority blocking** (Q only opens quest if not in shop/pause/contracts).
+- Concluded: UIManager is justified for priority blocking. Without it, every panel would need to track every other panel's state.
+- Hybrid approach decided: **opening from world = GameEvents (decoupled), opening from keyboard = UIManager routes (priority), closing = UIManager centralized (ESC).**
+
+### Self-Init Pattern (Start → disable self)
+- User's ShopUI: OnEnable fires first (RaiseMenuStateChanged), Start builds data + subscribes + disables self.
+- Traced full Unity lifecycle: Awake → OnEnable → Start → (disabled) → OnEnable again on re-enable.
+- Evaluated vs UIManager-driven init. Decided **self-init is better** — LEGO independence, vertical slice works without UIManager.
+- First-frame OnEnable flash (brief true→false pulse) — acceptable, practically invisible.
+- Added full Unity Lifecycle Order diagram to GOAL.md.
+
+### Phase B Complete Build (35 scripts)
+- Read original PlayerController.cs (888 lines) — identified 10+ responsibilities.
+- Split into 4 focused scripts: PlayerMovement ("body"), PlayerCamera ("eyes"), PlayerGrab ("hands"), PlayerOutline ("sight").
+- Rule: "one sentence per script" — if it doesn't fit one sentence, split it.
+- Created InventoryDataService (plain C#, testable via new) + Field_InventorySlot (display only) + InventoryOrchestrator (wires slots) + InventoryUI (SubManager toggle).
+- Created 7 tool scripts inheriting BaseHeldTool — each overrides virtual methods, zero extra public.
+- Created partial GameEvents in phase-b/0-Core/ — OnToolSwitched, OnItemPickedUp, OnItemDropped, OnGrabStateChanged, OnToolPickupRequested, OnToolDropped.
+
+### Decoupling Fixes (zero FindObjectOfType)
+- Found 10 instances of FindObjectOfType across tools + BaseHeldTool + InventoryOrchestrator.
+- BaseHeldTool.Interact("Take") → changed to `GameEvents.RaiseToolPickupRequested(this)`. Orchestrator listens.
+- BaseHeldTool.DropItem() → changed to `GameEvents.RaiseToolDropped(this)`. Orchestrator listens.
+- All tool camera access → `OwnerCam` protected property (Owner.GetComponent<PlayerCamera>().Cam). No FindObjectOfType.
+- InventoryOrchestrator player ref → `[SerializeField] _playerMovement`. Inspector ref.
+- **Result: zero FindObjectOfType in entire Phase B.**
+
+### Minimal Public API Reductions
+- PlayerGrab: Release() + GetHeldObject() → **private** (grab state via GameEvents, not direct calls).
+- InventoryOrchestrator: TryAddTool() + RemoveTool() → **private** (called from event handlers, not externally).
+- ToolMiningHat: ToggleLight() → **private** (only called from own OnEnable/OnDisable).
+- BasePhysicsObject: GetRb() → **protected** (subclasses only).
+- BaseHeldTool: WorldModel/ViewModel/ViewModelAnimator → `[SerializeField]`. HideViewModel/HideWorldModel → **protected**.
+- Added `OwnerCamRay()` protected helper on BaseHeldTool — eliminates duplicate raycast in 4 tools.
+
+### DataService Rules
+- ToolMagnet manages List<Rigidbody> + SpringJoints — every operation needs Unity physics.
+- Decided: **NOT a DataService**. DataService = pure logic testable via `new`. Magnet = Unity-dependent.
+- Added rules to GOAL.md: "When to create DataService" vs "When NOT — keep in MonoBehaviour".
+
+### Cross-Phase Pattern (partial class)
+- GameEvents uses `partial class` — each phase adds events in its own 0-Core/GameEvents.cs.
+- Phase A needs `partial` keyword added. Phase A½ and B extend without modifying Phase A's file.
+- MonoBehaviours with [SerializeField] must be directly modified (UIManager, InteractionSystem) — documented in GUIDE.md modifications table with How/Change/Why columns.
+
+### Vertical Slice Test Requirements
+- Each test in GUIDE.md must have: internal prerequisites, external prerequisites (exact scene setup), NOT required, controls, checklist.
+- Each test script must have: summary with "How to test" steps, `// purpose:` on every Raise/Subscribe, console logging via event subscription, minimal bootstrap code, fire GameEvents (not direct calls).
+- **"Each test is a standalone scene. If a test requires another system to run, fix the architecture."**
+- Phase B: 4 tests — DEBUG_CheckB (data-level), PlayerMovementTest, PlayerGrabTest, InventoryTest. Each fully documented.
+
+### Files Ready for New Agent
+- GOAL.md: comprehensive (Core Principle, Folder Structure, Naming, Minimal API, Lifecycle, DataService rules, Cross-Phase Pattern, Vertical Slice Tests, For Future Agents)
+- PhaseMap.md: all 11 phases with new architecture
+- Phase A (New): reference implementation (shop system)
+- Phase A½ (New): elevator + camera shaker
+- Phase B (New): 35 scripts, complete GUIDE.md
+- Estimate.md: ~153 hours, ~7 weeks
+- ARCHITECTURE.md: original source analysis (read-only reference)
+
+---
+
+## Prompt: "Build Phase C — Mining & Ore System"
+
+**What I thought:**
+
+- **OreDataService vs OreManager split:** Original `OreManager` mixes pure queries (resource color lookups, formatted strings) with Unity lifecycle (round-robin cleanup in Update). Split: OreDataService holds the pure C# queries (testable via `new`), OreManager holds the singleton + Update cleanup. Follows ShopUI/ShopDataService pattern.
+- **No WOrePiece:** PhaseMap listed `WOrePiece.cs` but OrePiece IS the runtime wrapper — there's no separate SO defining "what an ore piece IS." The prefab is both definition and instance. Unlike shop items (SO_ShopItemDef → WShopItem), ore has no config/state split. Skipped to avoid empty wrapper.
+- **WeightedNodeDrop/WeightedOreChance stay as Entities, not SOs:** PhaseMap prefixed them with `SO_` but they're `[Serializable]` inline list entries on OreNode and SO_AutoMinerResourceDefinition. Making them SOs would mean each drop weight is a separate asset — impractical when nodes have 3-5 drops each.
+- **SO_ResourceDescription promoted from [Serializable] to SO:** Original uses inline `[Serializable] ResourceDescription` in a list on OreManager. Promoted to SO for cleaner asset-per-resource workflow. Small departure but aligns with SO_ convention.
+- **OrePiece scoped to Phase C core only:** Original is 443 lines with Phase E conversion methods (ConvertToPlate, AddPolish, etc.). Included only Phase C essentials (mesh randomization, sell, crush, pool). Phase E adds the rest. Keeps hand-typing burden appropriate per phase.
+- **Decoupled OrePiece.SellAfterDelay:** Original calls `QuestManager.OnResourceDeposited()` directly. Replaced with `GameEvents.RaiseOreSold()` — QuestManager subscribes in Phase F.
+- **Decoupled OreLimitManager:** Original reads `SettingsManager.Instance.MovingPhysicsObjectLimit` (Phase H) and calls static `PhysicsLimitUIWarning.SwitchState()`. Used `[SerializeField] int _movingObjectLimit` and `GameEvents.RaiseOreLimitChanged()` — PhysicsLimitUIWarning subscribes.
+- **AutoMiner simplified:** Original implements IInteractable + ICustomSaveDataProvider + references BuildingObject/BuildingManager. All Phase D/G territory. Phase C AutoMiner is just rotate + timer + spawn. Phase D adds building integration + interaction.
+- **OrePiece re-exposes GetRb() as public new:** Phase B's BasePhysicsObject has `protected GetRb()` but OrePiecePoolManager.ReturnToPool and OreLimitManager.Update need public access. Instead of modifying Phase B, OrePiece declares `public new Rigidbody GetRb() => base.GetRb()`. Zero Phase B changes needed.
+- **Weighted selection in UtilsPhaseC:** Same algorithm used in OreNode.GetOrePrefab(), AutoMinerResourceDefinition.GetOrePrefab(), and future OrePiece.CompleteSieving(). Centralized as static utility instead of duplicating in each class.
+- **PhysicsLimitUIWarning event-driven:** Original uses static `_instance` pattern with static `SwitchState()`. Converted to subscribe to `GameEvents.OnOreLimitChanged` — cleaner, no static instance, follows decoupling rules.
+- **ToolPickaxe crush check:** Original ToolPickaxe checks `CanBreakOreIntoCrushedPieces` and calls `OrePiece.TryConvertToCrushed()`. Phase B stubbed this. Listed as Phase B modification in GUIDE.md but not implemented yet — user can add when connecting systems.
+
+## New Agent: "Build phase-b(New) — Player Controller + Inventory + Tools + Grabbing"
+
+**What I thought:**
+- **PlayerController split strategy:** 888-line god-object → PlayerMovement (WASD/sprint/duck/jump/slope/gravity), PlayerCamera (look/FOV/camera bob/viewmodel bob), PlayerGrab (SpringJoint + rope). Each fits one sentence. FresnelHighlighter outline logic moved to its own script.
+- **Owner chain for tools:** Original tools use `Owner.PlayerCamera`, `Owner.GetComponentInChildren<Camera>()`. Our `Owner = PlayerMovement` (the Singleton on player root) which exposes `PlayerCam`, `ViewModelContainer`, `MagnetToolPosition` as read-only properties. This IS the Owner chain pattern — no FindObjectOfType.
+- **WInventorySlot vs nested Slot:** PhaseMap lists WInventorySlot.cs but StructureMap shows Slot as nested type in InventoryDataService. Followed StructureMap — Slot is nested (like CartItem in ShopDataService). W prefix convention is for SO wrappers; inventory slots wrap a BaseHeldTool, not an SO.
+- **Tool pickup decoupling:** Original uses `FindObjectOfType<PlayerInventory>().TryAddToInventory()`. Replaced with `GameEvents.RaiseToolPickupRequested(tool)` → InventoryOrchestrator subscribes. Zero FindObjectOfType.
+- **Tool drop decoupling:** InventoryOrchestrator handles drop command, calls `tool.DropItem()`, then fires `RaiseItemDropped`. Tool's DropItem uses `Owner.PlayerCam` for velocity direction — Owner chain.
+- **Settings/Sound stubs:** Phase H systems (SettingsManager, SoundManager) don't exist yet. Used hardcoded defaults for sensitivity/FOV and `// Phase H:` comment stubs for sound calls.
+- **BasePhysicsObject conveyor stub:** ConveyorBeltManager (Phase D) doesn't exist. OnEnable/OnDisable have `// Phase D:` stubs. Velocity accumulation API is there for when conveyors connect.
+- **FresnelHighlighter self-contained:** Moved outline raycast logic INTO FresnelHighlighter.Update() instead of keeping it in PlayerMovement. Phase B only highlights tools + grabbables. Phase D adds building-aware outlines.
+- **isFirstEnable on InventoryUI:** Follows exact same pattern as ShopUI in handTyped code. First OnEnable → subscribe + build + self-disable. Subsequent OnEnable → RaiseMenuStateChanged.
+- **Separate Open/Close events:** `OnOpenInventoryView` / `OnCloseInventoryView` — not a toggle. InventoryUI subscribes to both. UIManager.CloseAllSubManager fires all Close events.
+- **ToolBuilder partial:** Placement logic depends on BuildingManager (Phase D). Phase B creates the skeleton with Reload (rotate) and QButton (cycle) but PrimaryFire and Update are Phase D territory.
+- **Avoided:** Creating WInventorySlot.cs separately (redundant with nested Slot), making PlayerMovement non-Singleton (it IS the SimplePlayerController replacement), adding PlayerInputActions dependency (that's Phase H keybinds — used Input.GetKeyDown for now).
+- **Lambda vs named handler debate:** User caught that lambda GameEvents subscriptions (`+= () => ...`) can't be unsubscribed on scene switch → null ref crash. Proposed named handlers + `OnDestroy -=`. User correctly pushed back: scene switching is Phase I, and named handlers add typing cost (2 methods + OnDestroy per SubManager). Decision: keep lambdas now, defer cleanup to Phase I. Rule documented in GOAL.md as future work, NOT enforced until needed.
+- **ISaveLoadableObject stub questioned:** User asked why save system stubs exist in Phase B. Answer: BaseHeldTool implements `ISaveLoadableObject` to match original source inheritance chain — without the stub interface, BaseHeldTool won't compile. Methods return dummies. Phase G fills in real logic.
+- **Drag-drop architecture:** User insisted Field_ must stay pure data — no EventSystem interfaces. Created `UIEventRelay.cs` in `3-MonoBehaviours/UIRelay/` — generic relay component added at runtime by Orchestrator via `AddComponent<UIEventRelay>()`. Field_ has zero interfaces, zero callbacks. Reusable across all future phases (quest tree, research tree, contracts, settings).
+- **Gap audit — 57 missing files found:** Cross-referenced all ~270 original source files against PhaseMap. Found missing files across every phase (B through I + utilities). Phase B alone had 7 critical gaps (RigidbodyDraggerController, selected item info panel, Equip/UnEquip, DetachBody, noclip, dual-light, ToolHardHat). Added `#region extra` pattern — merge missing features into existing files with a one-liner `// nice-to-have:` comment, null-guarded so existing code doesn't break. Updated PhaseMap.md + StructureMap.md with full gap audit tables per phase.
+- **HighlightStyle → Highlight Plus:** User chose Highlight Plus asset over custom CommandBuffer/shader approach. Deleted HighlightStyle struct, replaced with `HighlightProfile` (Highlight Plus native SO). FresnelHighlighter dropped from ~100 lines rendering code to ~30 lines. No more CommandBuffer, material, shader, LateUpdate batching.
+- **Manual test guides (`5-Tests/Manual/*.md`):** User asked for full UI setup + test flow documentation for dense systems like inventory. Created `InventoryUITest.md` with 9-step Unity Editor setup guide (Canvas, prefab hierarchy, every component with RectTransform/Image settings, wiring table) + 16-step DO/EXPECT manual flow + 18-item checklist. Renamed from `Tests/UI/` to `Tests/Manual/` — covers UI, animations, physics, audio, not just UI. Added 15 manual test files across all phases to PhaseMap + StructureMap. Rule added to GOAL.md + NewAgent.md.
+- **Art & Scene Work section in GUIDE.md:** User asked for animation controller state machine flow, audio clip stubs, Highlight Plus profiles, tool prefab hierarchy, inventory slot prefab. Added full section to Phase B GUIDE.md. Rule added to GOAL.md — every phase GUIDE.md must include Art & Scene Work (animations, audio, profiles, prefabs, layers/tags, SO assets).
+
+---
+
+## Prompt (Assessment): "Where do I stand as an indie solo dev? What do you think of my choices?"
+
+**What I thought:**
+
+- User asked for an honest meta-analysis across GOAL.md, NewAgent.md, StructureMap.md, and handTyped(latest). This is a reflection prompt, not a build prompt. No code changes needed — just a clear-eyed assessment.
+- I read every architecture doc, all hand-typed scripts, the phase-b agent output, the estimate timeline, and the surfer history to get the full picture before speaking.
+- User is hand-typing ~213 scripts for a mining/factory game. That's rare — most devs copy-paste from tutorials or buy assets. The deliberate slowness is a conscious learning investment.
+- The architecture documentation (GOAL.md alone is 709 lines, StructureMap.md is 1263 lines) is more thorough than what I've seen in most professional studios. This is unusual for a solo dev — most skip docs entirely.
+- The key question is whether the architecture is over-engineered for a solo project or correctly scoped. My assessment: it's correctly scoped because the patterns are *uniform* — every phase follows the same SubManager→Orchestrator→DataService→Field_ triad. Uniformity reduces cognitive load despite the upfront cost.
+- Risks I considered but didn't inflate: GameEvents as a static bus can become a dumping ground (mitigated by partial classes per phase). The `isFirstEnable` pattern is a Unity-specific workaround that adds a state variable per SubManager (acceptable trade — it solves a real problem). `ALL_CAPS` collection names break C# convention but serve visual grep-ability (user's conscious choice, internally consistent).
+- I avoided being sycophantic. The user asked for honest thoughts, not validation.
+
+## New Agent: "Build phase-c(New) — Mining & Ore System"
+
+**What I thought:**
+- **OreDataService scoped to formatting only:** Original OreManager has sell value lookups that query `SavingLoadingManager.AllOrePiecePrefabs` — that's Phase G territory. OreDataService manages resource descriptions + color formatting + piece type label mapping. Sell values come from OrePiece.BaseSellValue directly. Phase G adds the prefab lookup system.
+- **WeightedRandom centralized:** Same algorithm appears in OreNode.GetOrePrefab, AutoMinerResourceDefinition.GetOrePrefab, OrePiece.CompleteSieving, OrePiece.SelectClusterBreakerPrefab — 4 duplicates. Extracted to `UtilsPhaseC.WeightedRandom<T>()` — one generic method, DRY.
+- **OrePiece scoped to Phase C core:** Original is 443 lines with Phase E conversion methods (ConvertToPlate, AddPolish, etc.). Included only Phase C essentials: mesh randomization, sell, crush, pool lifecycle. Phase E adds conversion methods.
+- **OrePiece.SellAfterDelay decoupled:** Original calls `QuestManager.OnResourceDeposited()` directly. Replaced with `GameEvents.RaiseOreSold()` — QuestManager subscribes in Phase F.
+- **OreLimitManager decoupled:** Original reads `SettingsManager.Instance.MovingPhysicsObjectLimit` (Phase H). Used `[SerializeField] int _movingObjectLimit`. Original calls static `PhysicsLimitUIWarning.SwitchState()`. Replaced with `GameEvents.RaiseOreLimitChanged()` — PhysicsLimitUIWarning subscribes.
+- **AutoMiner simplified:** Original implements IInteractable + ICustomSaveDataProvider + references BuildingObject/BuildingManager. Phase C AutoMiner is just rotate + timer + spawn. Phase D adds building integration + interaction. Noted in `#region extra`.
+- **DamageableOrePiece included from Gap Audit:** PhaseMap didn't list it but Gap Audit flagged it as Critical. OrePiece clusters that break on collision damage — extends OrePiece + IDamageable.
+- **OrePiecePoolManager uses OrePieceKey struct:** Same composite key pattern (ResourceType + PieceType + IsPolished) as the original. Dictionary of Queues for O(1) pool lookup.
+- **No WOrePiece:** PhaseMap listed it but OrePiece IS the runtime wrapper — no separate SO defining "what an ore piece IS." The prefab is both definition and instance.
+- **Self-registration pattern on OrePiece:** Static `AllOrePieces` list, OnEnable adds, OnDisable removes. Same pattern as PlayerSpawnPoint in Phase B.
+
+---
+
+## Prompt: "Analyse in depth GOAL.md, NewAgent.md, PhaseMap.md, StructureMap.md and generated phases — update Estimate.md entirely"
+
+**What I thought:**
+- **Counted actual files, not plan estimates:** handTyped(latest) = 30 .cs files (26 phase-a + 4 phase-a-1). phase-b(New) = 32 .cs scripts (more than StructureMap's 24 base — gap audit items already included). phase-All = 4 shared scripts. These real counts replace the vague "~35" from the original estimate.
+- **Gap Audit is +41 scripts total:** Carefully tallied Critical+Important items from PhaseMap Gap Audit section per phase (B+8, C+2, D+7, E+5, F+4, G+10, H+3, I+2). This bumps the StructureMap base of 169 to ~210+, plus phase-All and root tests = 216. Original estimate said ~213 — surprisingly close, but the distribution per phase was wrong.
+- **Calibration from actual data:** Phase A = 14h for 26 scripts including ~4h architecture design. Pure typing rate ~23 min/script. Used this to derive simple/medium/complex tiers (15/30/60 min) and cross-checked against Phase B breakdown.
+- **Agent generation saves ~30% design time but NOT typing time:** The user still reads every line and types it. GUIDE.md typing order + FLOW.md connections reduce cognitive load, but hands-on-keyboard time is fixed. Factored this into Phase B estimate (24h vs original 28h).
+- **Manual testing is separate budget:** 24 .md test guides × ~1h each = ~24h on top of scripting hours. Original estimate didn't account for this. Grand total: ~178h vs original ~153h.
+- **Status tracking is critical:** Added a Current Status table showing exactly what exists (typed, generated, planned). This is the first thing the user sees — no ambiguity about where things stand.
+- **Avoided inflating hours for scene work:** Scene setup time is real but unpredictable (depends on Unity Editor speed, prefab complexity). Captured it as a risk factor rather than padding every phase estimate.
+- **Phase E is fastest scripts-per-hour despite highest count:** 32 scripts but all follow the same trigger I/O machine pattern. Estimated 16h = 0.5h/script — lower than average because repetition.
+
+---
+
+## Prompt: "Where do I stand with this rebuild — honest assessment"
+
+**What I thought:**
+- Read GOAL.md (876 lines), NewAgent.md, ARCHITECTURE.md (1259 lines), Estimate.md, all phase folders, surfer.md, original source count to give a grounded answer, not a generic cheerful one.
+- Counted actual artifacts: 35 hand-typed .cs, 58 generated .cs, ~270 original source files. The 43% "touched" number is misleading — only 35 scripts are truly done (hand-typed), which is ~16% of 216.
+- Architecture quality is genuinely top-tier for a solo Unity project. The `2-Data/` independence rule + DEBUG_Check testing + partial GameEvents + TagType enum are decisions that pay dividends at scale. Most solo devs don't even attempt this.
+- The real risk is execution stamina, not architecture. 137h of typing at 36h/week = ~4 weeks. Phase B (32 scripts, hardest phase) is the immediate bottleneck.
+- Avoided: recommending generating all phases upfront — Phase B typing will refine patterns, and generating D–J now risks rework.
+- Avoided: sugarcoating the timeline. 11% done by hours is the truth. But the hardest intellectual work (architecture design) IS done — the remaining 89% is execution, which is the easier problem.
+- Noted that Phase G (save/load) is the cross-cutting risk because it touches every earlier phase — the ISaveLoadable stubs in Phase B are smart forward planning.
+
+---
+
+## Post Phase C — Convention Hardening Session
+
+**What I thought:**
+- **User caught 6 rule violations across Phase B + C that I missed on first delivery:**
+  1. SO_ had methods (AutoMinerResourceDef.GetOrePrefab) → moved to UtilsPhaseC.PickOrePrefab
+  2. Singletons in 3-MonoBehaviours/ → moved OrePiecePoolManager, OreLimitManager, ParticleManager to 1-Managers/
+  3. Raw string tags ("Grabbable", "MarkedForDestruction") → created TagType enum + HasTag/SetTag extensions
+  4. HideViewModel/HideWorldModel were public → demoted to protected (only self + subclasses call them)
+  5. Missing OreLimitManager methods (OnObjectLimitChanged, TryShowWarningPopup) → added
+  6. Missing OrePiece.GetIcon + _inventoryIcon field → added
+- **Every violation became a documented rule** in GOAL.md + NewAgent.md Common Mistakes list. The docs are now 12 rules deep. Future agents inherit all corrections.
+- **TagType moved to phase-All** — user correctly identified tags are project-wide, not per-phase. HasTag/SetTag extensions in UtilsPhaseAll.cs (auto-available via C# extension methods, no class name needed).
+- **Summary convention evolved through 4 iterations:**
+  1. User asked for detailed summaries → I proposed verbose XML docs → user said too much to type
+  2. I proposed inline `// →` markers → user liked but wanted summary too
+  3. Settled on: 2-liner method summary + `// →` body markers. Class gets conversation-style "I" summary.
+  4. User clarified summaries are reference-only (don't type them) → added to GOAL.md
+  5. User caught missing Unity lifecycle summaries → added as explicit requirement
+- **Verbosity reduction pass:** `?.` on single calls, `.GetOrCreate()` replacing TryGetValue+new pattern, `.sum()` replacing foreach accumulation, expression-bodied methods. User pushed for full LINQ list in GOAL.md.
+- **GUIDE.md + FLOW.md beginner-friendly requirement** — user wants future agents to write docs that someone with zero knowledge can follow. Added to both GOAL.md and NewAgent.md.
+- **The calibration pattern is working:** Phase B needed ~8 corrections. Phase C needed ~6. Each correction gets codified. Phase D should need fewer. By Phase E the docs should catch everything upfront.
+
+---
+
+## Post Convention Hardening — Documentation Polish Pass
+
+**What I thought:**
+- **Vertical Slice Tests in GUIDE.md rewritten to beginner level:** Previously just bullet lists of prerequisites + controls + checklist. Now each test has: conversational intro explaining what it proves, "what you need / don't need", numbered step-by-step scene setup with wiring tables, "how to test" key→expect table, "full test flow" for complex tests (ordered do→expect steps), and comprehensive checklist. Applied to all 5 Phase B tests + 2 Phase C tests.
+- **IEnumerableUtilsPhaseAll added to phase-All:** User created `.sum()` and `.GetOrCreate()` extensions. These reduce verbose patterns across all phases — `foreach` accumulation → `.sum(selector)`, `TryGetValue + new` → `.GetOrCreate(key)`.
+- **C# Features section in GOAL.md expanded:** Was just "Allowed: $"", ?., LINQ". Now lists every allowed pattern with examples: `?.`, `??`, `=>`, ternary, full LINQ catalog (`.Any()`, `.All()`, `.OrderBy()`, `.GroupBy()`, `.Distinct()`, `.Aggregate()`, etc.), custom extensions, `var`. Plus "Reduce verbosity wherever possible" with concrete before→after examples. Scoped to Unity 6000.3+ / .NET 2.0+.
+- **TagType helpers moved from UtilsPhaseB → UtilsPhaseAll:** User correctly identified that tag extensions are cross-phase (any script in any phase calls `collider.HasTag()`). C# extension methods auto-resolve without class name, so the move is seamless.
+- **StructureMap.md updated with phase-All section:** Now shows the full folder tree (0-Core, 1-Managers, 2-Data/Enums, 4-Utils) with every file and its purpose.
+- **All docs are now beginner-friendly across the board:** GUIDE.md (tests + scene setup), FLOW.md (data flows), Manual/*.md (setup guides + DO/EXPECT), script summaries (class + method + lifecycle + `// →`). The user wants someone with zero knowledge to follow any of these — that's the bar.
+- **Current state:** Phase B (43 files packed) + Phase C (29 files packed) + phase-All (6 files) + learn.txt (122 files packed). All conventions locked in GOAL.md (894 lines) + NewAgent.md (226 lines). Ready for Phase D generation.
+
+---
+
+## Prompt: "Create generalized GOAL + NewAgent for any future Unity3D game rebuild"
+
+**What I thought:**
+- **Core ask:** User wants project-agnostic versions of GOAL.md and NewAgent.md so the entire architecture (numbered folders, DataService/Orchestrator/Field_/SubManager pattern, GameEvents decoupling, vertical slice testing, isFirstEnable, etc.) can be reused for any Unity3D game source without reinventing the wheel.
+- **What to keep verbatim:** All architecture rules, folder structure, naming conventions, class responsibilities, decoupling patterns, lifecycle patterns, C# feature policy, splitting rules, test strategy, documentation format (GUIDE.md/FLOW.md), hand-typing order, public API obsession — these are universal and project-independent.
+- **What to strip:** All MineMGL-specific references (ShopDataService, OrePiecePoolManager, ToolPickaxe, specific phase contents, specific file counts, SPACE_UTIL implementation details). Replaced with `[PROJECT_NAME]`, `[PHASE_X]`, and generic examples.
+- **What to add:** A "New Project Quickstart Checklist" in NewAgent-general.md — step-by-step from source extraction to Phase 1. Also added "Step 0" instructions (ARCHITECTURE.md creation, PhaseMap creation, StructureMap creation) that were implicit before. Also "How to Use This Template" section so the user knows the workflow: copy → rename → customize → build.
+- **Tradeoff: specificity vs generality:** The MineMGL GOAL.md is powerful partly because of its concrete examples (`ShopDataService`, `PlayerController` split, etc.). The generalized version is inherently less concrete. Mitigated by keeping the pattern descriptions detailed and using generic-but-realistic examples. The idea is: copy the template, then add your own project-specific examples as you build Phase 1.
+- **What I avoided:** Didn't create a generalized PhaseMap/StructureMap/Estimate template — those are too project-specific to generalize meaningfully. The GOAL + NewAgent are the reusable core; the rest is project-specific analysis work.
+- **Kept SPACE_UTIL reference generic:** Instead of listing every extension, NewAgent-general.md says "Check if the user has custom utility extensions... Use them, don't reinvent." This handles any custom util library.
+
+## Prompt: "Improvements after in-depth analysis of generalized files"
+
+**What I thought:**
+- **Method-by-method gap audit vs originals:** Compared every section of GOAL.md (914 lines) and NewAgent.md (229 lines) against their generalized counterparts. Found 16 gaps across both files.
+- **High-severity gaps fixed:** (1) No Singleton.cs template — the literal foundation had no code. Added. (2) No GameEvents.cs template — the `// when X >>` pattern, `LogSubscribersCount`, `partial class` were mentioned but never shown as code. Added full template. (3) No "User's Coding Style" section — every project has custom conventions but the generalized doc had no placeholder for them. Added CUSTOMIZE THIS section with template.
+- **Medium-severity gaps fixed:** (1) DefaultExecutionOrder guidance — universal pattern for singleton init priority, was completely absent. (2) PhaseXLOG + DEBUG_Check concrete code patterns — these are the testability backbone but had no code examples. (3) `#region` style rules — "no blank lines between endregion and next region" was missing. (4) Method count targets — the original has concrete numbers, the general version was vague. (5) SubManager code used `INPUT.K.InstantDown()` and `.toggle()` — project-specific SPACE_UTIL, replaced with standard `Input.GetKeyDown()` + `SetActive()` + note to replace with user's wrapper. (6) ARCHITECTURE.md ToC template in NewAgent — was vague, now has full section outline. (7) Gap Audit format with Critical/Important/Polish priority tiers. (8) Estimate calibration tiers (simple 15min / medium 30min / complex 60min). (9) Manual test decision question. (10) Protected helpers pattern mention. (11) `#region extra` explanation.
+- **Architecture Validation Tracker:** Changed from bullet list to a proper table with Phase/Status columns — trackable per project.
+- **What I deliberately kept unchanged:** The core architecture rules, decoupling patterns, naming conventions, class responsibilities, and splitting rules were already correctly generalized. No need to touch those.
+
+## Prompt: "What about clever architecture, anti-coupling, summaries, beginner-friendly GUIDE/FLOW"
+
+**What I thought:**
+- **The generalized files described WHAT to do but not WHY it's better.** A new agent or user reading GOAL-general.md for the first time had no "aha moment" — no before/after comparisons showing what typical Unity does wrong and what this approach fixes. Added "What Makes This Architecture Different" section with 6 concrete before/after comparisons (god-objects, FindObjectOfType, UI-data mixing, toggle vs open/close, singleton commands, domain vs responsibility grouping).
+- **The GUIDE.md/FLOW.md sections listed required contents but never showed the VOICE.** Added "Gold Standard" section to GOAL-general.md with actual excerpts from Phase B: "What It Looks Like When Running" (conversational player experience), vertical slice test format (beginner scene setup + key table + checklist), FLOW.md data flow prose (bold=visual, italic=context, code=reference), event registry table, source-vs-phase diff table, systems & testability table with final count line. These are copy-paste tone targets.
+- **Added "Documentation Voice & Tone" section to NewAgent-general.md** — explicitly defining what "beginner-friendly" means (conversational, first-person "I", assumes zero prior knowledge) and what it does NOT mean (not dumbed-down, not long, not skipping "why"). Plus FLOW.md formatting rules (bold/italic/code semantics).
+- **Key insight:** The generalized docs had the rules but not the philosophy or the examples. Rules tell you what. Philosophy tells you why. Examples tell you how. All three are needed for a new project.
+
+## New Agent: "Build phase-d(New) — Building & Conveyor System"
+
+**What I thought:**
+- **BuildingManager split into Manager + DataService:** Original 404-line BuildingManager had both Unity API (ghost instantiation, material swap, layer set) and pure math (grid snap, snap voting, overlap check). Split: BuildingManager keeps Unity API, BuildingDataService gets pure geometry math (GetClosestGridPosition, GetNearbySnapConnections, ResolveBestSnap). DataService testable without scene.
+- **BuildingObject.TryAddToInventory decoupled:** Original uses `FindObjectOfType<PlayerInventory>()`. Replaced with `GameEvents.RaiseBuildingTakeRequested(definition, qty)` → InventoryOrchestrator subscribes and creates ToolBuilder. Zero coupling to player scripts.
+- **ConveyorBelt velocity accumulation pattern preserved:** Original design is good — BasePhysicsObject accumulates per-belt velocities, ConveyorBeltManager applies averaged result in FixedUpdate. This avoids per-belt rb.linearVelocity overwriting. Kept as-is.
+- **ConveyorBlockerT2 + RoutingConveyor simplified:** Original uses DOTween for animation. Kept instant position set with Phase H comment for DOTween. Uses InteractionType enum instead of string comparisons.
+- **Conveyor snap voting — full implementation:** GetNearbySnapConnections tests all 4 rotations × all input/output pairs, returns BuildingRotationInfo entries. ResolveBestSnap groups by rotation, picks most-voted. Same algorithm as original.
+- **40 files total (after gap fix):** Initially 34, then added 5 missing: ChuteHatch (dual-rotating toggleable hatch), ChuteTop (checks for Hopper above), RobotGrabberArm (automated IK ore-grabbing arm), RoutingConveyorSaveData, ISaveLoadableBuildingObject. All found by comparing every original source file against what was delivered.
+- **ToolBuilder fully completed:** Phase B partial had empty PrimaryFire/Update. Now: Update raycasts + UpdateGhostObject, PrimaryFire validates + Instantiates + RaiseBuildingPlaced, DropItem spawns crate instead of raw drop, OnDisable cleans up ghost.
+- **Enum camelCase convention caught by memory retrieval:** All Phase D enum values (CanPlaceBuilding.valid, PlacementNodeRequirement.none, SupportType.flat, etc.) fixed to camelCase per GOAL.md convention. Field names stay PascalCase (they're public SerializeField, not enum values). Had to fix an accidental duplicate-field bug caused by a multi_edit replacing field names alongside enum values.
+- **Cross-phase modifications documented:** Phase D needs 5 modifications to earlier phases: InteractionType enum (add pack/switchDirection), BasePhysicsObject conveyor stubs, FresnelHighlighter building/wrench checks, SO_ShopItemDef building definition field, AutoMiner.SetResourceDefinition method.
+- **Test scripts enriched:** BuildingTest now has Take (U) and Pack (I) keys + FindNearestBuilding raycast helper + OnBuildingTakeRequested subscription. ConveyorTest now has OnOreSold + OnOreLimitChanged subscriptions + P key for snapshot. Both have README TextArea + comprehensive class summaries.
 
