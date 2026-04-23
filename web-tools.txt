@@ -6038,24 +6038,36 @@ if (savedSidebarW) {
 btnToggleSidebar.addEventListener('click', () => setSidebarCollapsed(!state.sidebarCollapsed));
 btnSidebarReveal.addEventListener('click', () => setSidebarCollapsed(false));
 
-// ── Fullscreen ─────────────────────────────────────────────────
+// ── Fullscreen (native browser API) ────────────────────────────
 function enterFullscreen() {
     if (state.isFullscreen) return;
+    const el = document.documentElement;
+    const rfs = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
+    if (rfs) rfs.call(el);
     state.isFullscreen = true;
     document.body.classList.add('fullscreen-mode');
 }
 
 function exitFullscreen() {
     if (!state.isFullscreen) return;
+    const efs = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
+    if (efs && document.fullscreenElement) efs.call(document);
     state.isFullscreen = false;
     document.body.classList.remove('fullscreen-mode');
 }
+
+// Sync state when browser exits fullscreen natively (e.g. Esc key)
+document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement && state.isFullscreen) {
+        state.isFullscreen = false;
+        document.body.classList.remove('fullscreen-mode');
+    }
+});
 
 $('btn-fullscreen').addEventListener('click', enterFullscreen);
 $('fullscreen-exit-btn').addEventListener('click', exitFullscreen);
 
 document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && state.isFullscreen) exitFullscreen();
     if (e.key === 'F11' && viewer.classList.contains('active')) {
         e.preventDefault();
         state.isFullscreen ? exitFullscreen() : enterFullscreen();
