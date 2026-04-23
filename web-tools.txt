@@ -54,7 +54,7 @@ WHAT CHANGED SINCE LAST GENERATION:
 - **New dependency patterns** (e.g. a phase-e script now reads from phase-b's InventoryDataService)
 - **Architecture refactor** (e.g. DataService split into two)
 
-## Color palette for new phases
+## Color palette for new phases (remeber background color in mind and make sure all assigned colors are visible too)
 
 | Phase | Assigned Color |
 |-------|---------------|
@@ -3039,24 +3039,30 @@ svg.call(zoom.transform, d3.zoomIdentity.translate(W*0.1, H*0.1).scale(0.8));
 }
 body{font-family:'JetBrains Mono','Courier New',monospace;background:var(--bg);color:var(--text);overflow:hidden;height:100vh;width:100vw;}
 
-/* Header */
-#header{position:fixed;top:0;left:0;right:0;z-index:200;background:var(--bg2);border-bottom:1px solid var(--border);padding:8px 16px;display:flex;align-items:center;gap:16px;height:40px;}
-#header h1{font-size:13px;font-weight:600;color:var(--accent);white-space:nowrap;}
-#header .sub{font-size:10px;color:var(--muted);white-space:nowrap;}
-#search{font-family:inherit;font-size:10px;padding:3px 8px;width:160px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--text);outline:none;margin-left:auto;}
-#search:focus{border-color:var(--accent);}
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar{width:5px;height:5px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
+::-webkit-scrollbar-thumb:hover{background:var(--muted);}
+
+/* ── HEADER ── */
+#header{position:fixed;top:0;left:0;right:0;z-index:200;background:var(--bg2);backdrop-filter:blur(10px);border-bottom:1px solid var(--border);padding:6px 12px;display:flex;align-items:center;gap:8px;height:38px;flex-wrap:wrap;}
+#header h1{font-size:12px;font-weight:600;color:var(--accent);white-space:nowrap;}
+#header .sub{font-size:9px;color:var(--muted);white-space:nowrap;display:none;}
+#search{font-family:inherit;font-size:10px;padding:4px 10px;width:140px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);outline:none;margin-left:auto;-webkit-tap-highlight-color:transparent;}
+#search:focus{border-color:var(--accent);width:180px;transition:width .2s;}
 #search::placeholder{color:#555;}
 
-/* Edge toggle bar */
-#edge-bar{position:fixed;top:40px;left:0;right:0;z-index:190;background:var(--bg2);border-bottom:1px solid var(--border);padding:4px 16px;display:flex;gap:4px;flex-wrap:wrap;height:28px;align-items:center;}
-.edge-btn{font-family:inherit;font-size:9px;padding:2px 6px;border:1px solid var(--border);border-radius:3px;background:var(--bg);color:var(--text);cursor:pointer;transition:all .12s;display:flex;align-items:center;gap:4px;}
+/* ── EDGE TOGGLE BAR ── */
+#edge-bar{position:fixed;top:38px;left:0;right:0;z-index:190;background:var(--bg2);backdrop-filter:blur(10px);border-bottom:1px solid var(--border);padding:4px 8px;display:flex;gap:3px;flex-wrap:wrap;min-height:28px;align-items:center;align-content:flex-start;}
+.edge-btn{font-family:inherit;font-size:9px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);cursor:pointer;transition:all .12s;display:flex;align-items:center;gap:4px;-webkit-tap-highlight-color:transparent;touch-action:manipulation;}
 .edge-btn:hover{background:var(--bg3);}
 .edge-btn.active{background:var(--bg3);border-color:var(--muted);}
 .edge-btn.off{opacity:0.35;}
-.edge-swatch{width:16px;height:2px;display:inline-block;}
+.edge-swatch{width:14px;height:2px;display:inline-block;}
 
-/* Canvas area */
-#canvas-wrap{position:fixed;top:68px;left:0;right:0;bottom:0;overflow:hidden;}
+/* ── CANVAS ── */
+#canvas-wrap{position:fixed;top:66px;left:0;right:0;bottom:0;overflow:hidden;touch-action:pan-x pan-y pinch-zoom;}
 svg{width:100%;height:100%;}
 
 /* Grid: phase column headers */
@@ -3089,17 +3095,27 @@ svg{width:100%;height:100%;}
 .edge.creates{stroke:var(--edge-creates);stroke-dasharray:3,3;opacity:0.6;}
 .edge.uses-util{stroke:var(--edge-util);stroke-width:1.2;stroke-dasharray:3,2;opacity:0.6;}
 
-/* Info panel */
-#info{position:fixed;top:72px;right:12px;z-index:180;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-size:9px;width:280px;max-height:calc(100vh - 84px);overflow-y:auto;display:none;}
-#info h3{font-size:12px;color:var(--accent);margin-bottom:2px;font-weight:600;}
-#info .meta{color:var(--muted);margin-bottom:6px;}
-#info .section-title{font-size:9px;color:var(--accent2);font-weight:600;margin-top:6px;margin-bottom:2px;text-transform:uppercase;letter-spacing:0.5px;}
-#info .dep{padding:1px 0;color:#a3a3a3;}
+/* ── INFO PANEL ── */
+#info{position:fixed;z-index:180;background:var(--bg2);backdrop-filter:blur(12px);border:1px solid var(--border);border-radius:8px;padding:12px 14px;font-size:10px;overflow-y:auto;display:none;box-shadow:0 4px 24px rgba(0,0,0,0.4);}
+#info .close-btn{position:absolute;top:8px;right:10px;background:none;border:none;color:var(--muted);font-size:16px;cursor:pointer;font-family:inherit;padding:4px;-webkit-tap-highlight-color:transparent;}
+#info .close-btn:hover{color:var(--text);}
+#info h3{font-size:13px;color:var(--accent);margin-bottom:3px;font-weight:600;}
+#info .meta{color:var(--muted);margin-bottom:8px;font-size:9px;}
+#info .section-title{font-size:9px;color:var(--accent2);font-weight:600;margin-top:8px;margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;}
+#info .dep{padding:2px 0;color:#b0b0b0;font-size:9px;}
 #info .dep .dir{color:var(--accent);font-weight:700;}
 #info .dep .etype{color:var(--muted);font-size:8px;}
+/* Desktop: right sidebar */
+@media (min-width:768px){
+  #info{top:70px;right:12px;width:280px;max-height:calc(100vh - 82px);border-radius:8px;}
+}
+/* Mobile: bottom sheet */
+@media (max-width:767px){
+  #info{bottom:0;left:0;right:0;top:auto;max-height:55vh;border-radius:12px 12px 0 0;width:100%;box-shadow:0 -4px 24px rgba(0,0,0,0.5);}
+}
 
-/* Legend */
-#legend{position:fixed;bottom:10px;left:12px;z-index:180;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:8px;display:flex;gap:12px;opacity:0.8;}
+/* ── LEGEND ── */
+#legend{position:fixed;bottom:10px;left:12px;z-index:180;background:var(--bg2);backdrop-filter:blur(10px);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:8px;display:flex;gap:12px;opacity:0.7;transition:opacity .2s;}
 #legend:hover{opacity:1;}
 .leg-col h4{font-size:8px;color:var(--accent);margin-bottom:3px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;}
 .leg-item{display:flex;align-items:center;gap:5px;margin-bottom:1px;}
@@ -3107,6 +3123,27 @@ svg{width:100%;height:100%;}
 .leg-line{width:18px;height:0;border-top-width:2px;border-top-style:solid;flex-shrink:0;}
 .leg-line.dashed{border-top-style:dashed;}
 .leg-line.dotted{border-top-style:dotted;}
+
+/* ── RESPONSIVE ── */
+@media (min-width:768px){
+  #header .sub{display:inline;}
+  #header{height:40px;padding:8px 16px;gap:12px;}
+  #edge-bar{top:40px;padding:4px 12px;}
+  #canvas-wrap{top:68px;}
+  #search{width:160px;}
+  #search:focus{width:200px;}
+}
+@media (max-width:480px){
+  #header h1{font-size:10px;}
+  #search{width:100px;font-size:9px;padding:3px 6px;}
+  #search:focus{width:130px;}
+  .edge-btn{font-size:8px;padding:3px 5px;}
+  .edge-swatch{width:10px;}
+  #legend{display:none;}
+  #edge-bar{gap:2px;padding:3px 6px;}
+  .node text{font-size:7px!important;}
+  .node .type-label{font-size:6px!important;}
+}
 </style>
 </head>
 <body>
@@ -3120,6 +3157,7 @@ svg{width:100%;height:100%;}
 <div id="canvas-wrap"><svg id="svg"></svg></div>
 
 <div id="info">
+  <button class="close-btn" id="info-close" title="Close">✕</button>
   <h3 id="i-name"></h3>
   <div class="meta" id="i-meta"></div>
   <div id="i-deps"></div>
@@ -3676,8 +3714,12 @@ document.getElementById('search').addEventListener('input', e => {
   edgeEls.classed('highlighted', l => matchIds.has(l.s) || matchIds.has(l.t));
 });
 
-// Initial fit
-svg.call(zoom.transform, d3.zoomIdentity.translate(10, 0).scale(0.7));
+// Close info panel button
+document.getElementById('info-close').onclick = () => clearHL();
+
+// Initial fit — smaller scale on mobile
+const initScale = window.innerWidth < 768 ? 0.45 : 0.7;
+svg.call(zoom.transform, d3.zoomIdentity.translate(10, 0).scale(initScale));
 </script>
 </body>
 </html>
