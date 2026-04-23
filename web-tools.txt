@@ -4412,18 +4412,18 @@ body{font-family:'JetBrains Mono','Courier New',monospace;background:var(--bg);c
 ::-webkit-scrollbar-corner{background:var(--bg);}
 
 /* ── HEADER ── */
-#header{background:var(--bg2);border-bottom:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;position:sticky;top:0;z-index:100;backdrop-filter:blur(10px);}
+#header{background:var(--bg2);border-bottom:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;position:sticky;top:0;z-index:100;backdrop-filter:blur(10px);}
 #header h1{font-size:13px;font-weight:600;color:var(--accent);white-space:nowrap;}
 #header .sub{font-size:9px;color:var(--muted);display:none;}
-.btn-row{display:flex;gap:6px;margin-left:auto;}
+.btn-row{display:flex;gap:6px;}
 .mode-btn{font-family:inherit;font-size:10px;padding:6px 14px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer;transition:all .15s;-webkit-tap-highlight-color:transparent;touch-action:manipulation;}
 .mode-btn:hover{background:var(--bg3);border-color:var(--muted);}
 .mode-btn.active{background:var(--accent);color:#000;border-color:var(--accent);font-weight:600;}
 
 /* ── LAYOUT ── */
-#main{display:flex;flex-direction:column;min-height:calc(100vh - 52px);}
+#main{display:flex;flex-direction:column;min-height:calc(100vh - 52px);position:relative;}
 #matrix-area{flex:1;overflow:auto;padding:16px;}
-#detail-panel{background:var(--bg2);border-top:1px solid var(--border);padding:16px;overflow-y:auto;display:none;max-height:50vh;}
+#detail-panel{background:var(--bg2);border-top:1px solid var(--border);padding:16px 16px 16px 16px;overflow-y:auto;display:none;position:fixed;bottom:0;left:0;right:0;max-height:55vh;z-index:90;box-shadow:0 -4px 24px rgba(0,0,0,0.5);border-radius:12px 12px 0 0;}
 
 /* ── MATRIX ── */
 .matrix-wrap{display:inline-block;margin:0 auto;}
@@ -4466,16 +4466,24 @@ table.matrix th.phase-sep,table.matrix td.phase-sep{border-left:2px solid rgba(2
 
 /* ── DETAIL PANEL ── */
 #detail-panel h3{font-size:13px;color:var(--accent);margin-bottom:4px;font-weight:600;}
-#detail-panel .meta{font-size:10px;color:var(--muted);margin-bottom:10px;}
+#detail-panel .meta{font-size:10px;color:var(--muted);margin-bottom:6px;}
+#detail-panel .close-btn{position:absolute;top:10px;right:12px;background:none;border:none;color:var(--muted);font-size:16px;cursor:pointer;font-family:inherit;padding:4px;}
+#detail-panel .close-btn:hover{color:var(--text);}
+.d-summary{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--border);}
+.d-stat{background:var(--bg);border-radius:4px;padding:6px 8px;}
+.d-stat .d-stat-label{font-size:7px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;}
+.d-stat .d-stat-val{font-size:14px;font-weight:700;}
+.d-type-bar{display:flex;height:6px;border-radius:3px;overflow:hidden;margin-bottom:10px;gap:1px;}
+.d-type-seg{height:100%;}
 .edge-list{font-size:10px;}
-.edge-item{padding:5px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;}
+.edge-item{padding:5px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
 .edge-item:last-child{border-bottom:none;}
 .edge-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
 .edge-from{color:#c0c0c0;font-weight:500;}
 .edge-arrow{color:var(--accent);font-weight:700;}
 .edge-to{color:#c0c0c0;}
 .edge-type{color:var(--muted);font-size:9px;}
-.edge-label{color:#666;font-size:9px;}
+.edge-label{color:#666;font-size:9px;font-style:italic;}
 
 /* ── VERDICT ── */
 #verdict{margin-top:16px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:16px 18px;margin-bottom:24px;}
@@ -4491,7 +4499,7 @@ table.matrix th.phase-sep,table.matrix td.phase-sep{border-left:2px solid rgba(2
 @media (min-width:768px){
   #header .sub{display:inline;}
   #main{flex-direction:row;}
-  #detail-panel{width:320px;min-width:320px;max-height:none;border-top:none;border-left:1px solid var(--border);}
+  #detail-panel{position:sticky;top:52px;bottom:auto;left:auto;right:auto;width:330px;min-width:330px;max-height:calc(100vh - 52px);border-top:none;border-left:1px solid var(--border);border-radius:0;box-shadow:none;align-self:flex-start;z-index:auto;}
   :root{--cell:32px;}
 }
 /* ── RESPONSIVE: desktop ── */
@@ -4533,8 +4541,11 @@ table.matrix th.phase-sep,table.matrix td.phase-sep{border-left:2px solid rgba(2
     <div id="verdict"></div>
   </div>
   <div id="detail-panel">
+    <button class="close-btn" id="detail-close" title="Close">✕</button>
     <h3 id="d-title"></h3>
     <div class="meta" id="d-meta"></div>
+    <div id="d-summary-area"></div>
+    <div class="d-type-bar" id="d-type-bar"></div>
     <div class="edge-list" id="d-edges"></div>
   </div>
 </div>
@@ -4949,14 +4960,36 @@ function renderVerdict(matrix) {
 function showDetail(srcKey, tgtKey, data) {
   const panel = document.getElementById('detail-panel');
   panel.style.display = 'block';
+  const [sp] = srcKey.split('|'), [tp] = tgtKey.split('|');
+  const isCross = sp !== tp;
   document.getElementById('d-title').textContent = `${cellLabel(srcKey)} → ${cellLabel(tgtKey)}`;
-  document.getElementById('d-meta').textContent = `${data.edges.length} dependency edges`;
+  const crossBadge = isCross ? ' · <span style="color:#ff8080">cross-phase</span>' : ' · <span style="color:#45eaad">intra-phase</span>';
+  document.getElementById('d-meta').innerHTML = `${data.edges.length} dependency edge${data.edges.length>1?'s':''}${crossBadge}`;
+
+  // Mini summary: counts per type
+  const sumArea = document.getElementById('d-summary-area');
+  const sorted = Object.entries(data.byType).sort((a,b) => b[1].length - a[1].length);
+  let sumHTML = '<div class="d-summary">';
+  sorted.forEach(([type, edges]) => {
+    sumHTML += `<div class="d-stat"><div class="d-stat-label">${EDGE_LABELS[type]}</div><div class="d-stat-val" style="color:${EDGE_COLORS[type]}">${edges.length}</div></div>`;
+  });
+  sumHTML += '</div>';
+  sumArea.innerHTML = sumHTML;
+
+  // Type distribution bar
+  const barEl = document.getElementById('d-type-bar');
+  let barHTML = '';
+  sorted.forEach(([type, edges]) => {
+    const pct = (edges.length / data.edges.length * 100);
+    barHTML += `<div class="d-type-seg" style="width:${pct}%;background:${EDGE_COLORS[type]}" title="${EDGE_LABELS[type]}: ${edges.length}"></div>`;
+  });
+  barEl.innerHTML = barHTML;
+
+  // Edge list grouped by type
   const el = document.getElementById('d-edges');
   el.innerHTML = '';
-
-  // Group by type
-  Object.entries(data.byType).sort((a,b) => b[1].length - a[1].length).forEach(([type, edges]) => {
-    el.innerHTML += `<div style="margin-top:6px;font-size:8px;color:${EDGE_COLORS[type]};font-weight:600;text-transform:uppercase;">${EDGE_LABELS[type]} (${edges.length})</div>`;
+  sorted.forEach(([type, edges]) => {
+    el.innerHTML += `<div style="margin-top:8px;font-size:9px;color:${EDGE_COLORS[type]};font-weight:600;text-transform:uppercase;letter-spacing:.5px;">${EDGE_LABELS[type]} (${edges.length})</div>`;
     edges.forEach(e => {
       el.innerHTML += `<div class="edge-item">
         <div class="edge-dot" style="background:${EDGE_COLORS[e.type]}"></div>
@@ -4968,6 +5001,12 @@ function showDetail(srcKey, tgtKey, data) {
     });
   });
 }
+
+// Close detail panel
+document.getElementById('detail-close').onclick = () => {
+  document.getElementById('detail-panel').style.display = 'none';
+  document.querySelectorAll('td.selected').forEach(el => el.classList.remove('selected'));
+};
 
 // ═══════════════════════════════════════════════════════════════
 // MODE TOGGLE
