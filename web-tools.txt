@@ -8,7 +8,12 @@
 ## The Prompt
 
 ```
-Regenerate minemgl-grid.html and minemgl-heatmap.html in web-tools/.
+Regenerate ALL THREE visualization files in web-tools/:
+
+FILES TO UPDATE:
+1. minemgl-grid.html — hierarchical grid (X=Phase columns, Y=Layer rows, nodes as rects, bezier edges, D3.js)
+2. minemgl-heatmap.html — flat Phase×Layer coupling matrix (HTML table, cell drill-down, summary cards, coupling verdict)
+3. minemgl-heatmap-3d.html — 3D extruded bar heatmap (Three.js, orbit controls, hover glow, click inspect, shadows+fog+rim lighting, ACES tone mapping)
 
 WHAT TO DO:
 1. Read every *.cs file inside learn/ (all phase folders: phase-All, phase-a-1(New), phase-b(New), phase-c(New), phase-d(New), and any NEW phase-X folders, plus handTyped(latest)/Scripts/phase-a for phase-a scripts).
@@ -17,17 +22,19 @@ WHAT TO DO:
    - Layer (0-Core, 1-Managers, 2-Data, 3-MonoBehaviours, 4-Utils, 5-Tests)
    - All dependency edges by scanning for: class inheritance (:), interface implementation, Singleton<T>.Ins reads, GameEvents.OnX += subscriptions, GameEvents.RaiseX() calls, Get...() method calls on other scripts, Set...() method calls, new DataService() creates, UtilsPhaseX.Method() calls
 3. Classify each edge as one of: inherit | interface | get | set | event-sub | event-raise | singleton | creates | uses-util
-4. Update BOTH files:
-   - minemgl-grid.html — hierarchical grid (X=Phase columns, Y=Layer rows, nodes as rects, bezier edges)
-   - minemgl-heatmap.html — Phase×Layer coupling matrix with cell drill-down, summary cards, and coupling verdict
+4. Rebuild the hardcoded JS node/edge arrays in ALL THREE files with fresh data from the scan.
 
 RULES:
-- Keep the existing dark theme (--bg:#101014 blue-black, JetBrains Mono, all bright edge colors)
-- Keep all existing interactivity (search, edge toggles, click-to-inspect, zoom/pan on grid, cross-phase-only toggle on heatmap)
+- Keep the existing dark theme (--bg:#101014 blue-black, JetBrains Mono, all bright edge colors — see color palette below)
+- Keep all existing interactivity per file:
+  - grid: search, edge type toggles, click-to-inspect panel, zoom/pan
+  - heatmap: cross-phase-only toggle, cell click drill-down, summary cards, coupling verdict
+  - heatmap-3d: Three.js OrbitControls, hover glow+scale, click inspect panel, tooltip, reset camera, cross-phase-only toggle, stats bar, legend, shadows, fog, ACES filmic tone mapping
 - If a GameEvents partial was moved from phase-a to phase-All, update the node's phase accordingly
-- Add any new phases as new columns (grid) and new rows/columns (heatmap) — assign a new color
-- The node data and edge data are hardcoded JS arrays — replace them entirely with fresh data from the scan
+- Add any new phases as new columns (grid), new rows/columns (heatmap), and new axis labels + bars (3D) — assign color from palette
+- The node data and edge data are hardcoded JS arrays in each file — replace them entirely with fresh data from the scan
 - Every edge must correspond to a real code reference you verified by reading the file
+- THREE.js is loaded via importmap from CDN (three@0.164.1), D3.js from CDN (d3.v7)
 
 WHAT CHANGED SINCE LAST GENERATION:
 [DESCRIBE YOUR CHANGES HERE — e.g.:]
@@ -3671,6 +3678,615 @@ document.getElementById('search').addEventListener('input', e => {
 
 // Initial fit
 svg.call(zoom.transform, d3.zoomIdentity.translate(10, 0).scale(0.7));
+</script>
+</body>
+</html>
+
+<!-- ==== FILE: web-tools/minemgl-heatmap-3d.html ==== -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MineMGL — 3D Coupling Heatmap</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
+*{margin:0;padding:0;box-sizing:border-box;}
+:root{
+  --bg:#101014;--bg2:#16161bdd;--bg3:#1e1e24;--border:#2a2a33;--text:#d4d4d4;
+  --muted:#808090;--accent:#e5a210;--accent2:#c48a0e;
+}
+body{font-family:'JetBrains Mono','Courier New',monospace;background:var(--bg);color:var(--text);overflow:hidden;height:100vh;width:100vw;cursor:grab;}
+body:active{cursor:grabbing;}
+canvas{display:block;}
+
+/* Floating header */
+#header{position:fixed;top:0;left:0;right:0;z-index:100;background:var(--bg2);backdrop-filter:blur(12px);border-bottom:1px solid var(--border);padding:8px 20px;display:flex;align-items:center;gap:14px;height:40px;}
+#header h1{font-size:13px;font-weight:600;color:var(--accent);white-space:nowrap;}
+#header .sub{font-size:10px;color:var(--muted);}
+.mode-btn{font-family:inherit;font-size:9px;padding:3px 10px;border:1px solid var(--border);border-radius:4px;background:rgba(16,16,20,0.8);color:var(--text);cursor:pointer;margin-left:auto;transition:all .15s;}
+.mode-btn:hover{background:var(--bg3);border-color:var(--muted);}
+.mode-btn.active{background:var(--accent);color:#000;border-color:var(--accent);font-weight:600;}
+
+/* Tooltip */
+#tooltip{position:fixed;z-index:200;background:#16161bee;backdrop-filter:blur(8px);border:1px solid var(--border);border-radius:6px;padding:8px 12px;font-size:10px;pointer-events:none;display:none;max-width:300px;box-shadow:0 4px 20px rgba(0,0,0,0.5);}
+#tooltip .tt-title{font-size:11px;font-weight:600;color:var(--accent);margin-bottom:3px;}
+#tooltip .tt-count{font-size:18px;font-weight:700;margin-bottom:3px;}
+#tooltip .tt-detail{color:var(--muted);font-size:9px;}
+
+/* Detail panel */
+#detail{position:fixed;top:48px;right:12px;z-index:100;background:var(--bg2);backdrop-filter:blur(12px);border:1px solid var(--border);border-radius:8px;padding:14px 16px;width:290px;max-height:calc(100vh - 60px);overflow-y:auto;display:none;box-shadow:0 8px 32px rgba(0,0,0,0.4);}
+#detail::-webkit-scrollbar{width:4px;}
+#detail::-webkit-scrollbar-track{background:transparent;}
+#detail::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+#detail::-webkit-scrollbar-thumb:hover{background:var(--muted);}
+#detail h3{font-size:12px;color:var(--accent);margin-bottom:2px;font-weight:600;}
+#detail .meta{font-size:9px;color:var(--muted);margin-bottom:10px;}
+.d-section{font-size:8px;color:var(--accent2);font-weight:600;margin-top:8px;margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px;}
+.d-edge{padding:2px 0;font-size:9px;color:#a3a3a3;display:flex;gap:4px;align-items:center;}
+.d-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0;}
+.d-arrow{color:var(--accent);font-weight:700;}
+
+/* Stats bar */
+#stats{position:fixed;bottom:12px;left:12px;right:12px;z-index:100;display:flex;gap:8px;pointer-events:none;}
+.stat-card{pointer-events:auto;background:var(--bg2);backdrop-filter:blur(12px);border:1px solid var(--border);border-radius:6px;padding:8px 12px;min-width:140px;box-shadow:0 4px 16px rgba(0,0,0,0.3);}
+.stat-card h4{font-size:8px;color:var(--accent);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px;}
+.stat-card .val{font-size:20px;font-weight:700;line-height:1;}
+.stat-card .sub{font-size:8px;color:var(--muted);margin-top:2px;}
+.stat-card.good .val{color:#45eaad;}
+.stat-card.warn .val{color:#ffd04a;}
+.stat-card.bad .val{color:#ff8080;}
+
+/* Legend */
+#legend{position:fixed;top:48px;left:12px;z-index:100;background:var(--bg2);backdrop-filter:blur(12px);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:8px;box-shadow:0 4px 16px rgba(0,0,0,0.3);}
+#legend h4{font-size:8px;color:var(--accent);margin-bottom:4px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;}
+.leg-row{display:flex;align-items:center;gap:5px;margin-bottom:1px;}
+.leg-sq{width:8px;height:8px;border-radius:2px;flex-shrink:0;}
+
+/* Axis labels in 3D are rendered as sprites, but we show a small key */
+#axis-key{position:fixed;bottom:12px;right:12px;z-index:100;background:var(--bg2);backdrop-filter:blur(12px);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:8px;box-shadow:0 4px 16px rgba(0,0,0,0.3);}
+#axis-key h4{font-size:8px;color:var(--accent);margin-bottom:3px;font-weight:600;text-transform:uppercase;}
+.ak-row{color:var(--muted);margin-bottom:1px;}
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>MineMGL — 3D Coupling Heatmap</h1>
+  <span class="sub">orbit: drag · zoom: scroll · click bar to inspect</span>
+  <button class="mode-btn active" id="btn-all">All Edges</button>
+  <button class="mode-btn" id="btn-cross">Cross-Phase Only</button>
+  <button class="mode-btn" id="btn-reset">Reset Camera</button>
+</div>
+
+<div id="tooltip">
+  <div class="tt-title" id="tt-title"></div>
+  <div class="tt-count" id="tt-count"></div>
+  <div class="tt-detail" id="tt-detail"></div>
+</div>
+
+<div id="detail">
+  <h3 id="det-title"></h3>
+  <div class="meta" id="det-meta"></div>
+  <div id="det-edges"></div>
+</div>
+
+<div id="legend">
+  <h4>Bar Color = Edge Type</h4>
+</div>
+
+<div id="stats"></div>
+
+<div id="axis-key">
+  <h4>Controls</h4>
+  <div class="ak-row">Left drag — orbit</div>
+  <div class="ak-row">Right drag — pan</div>
+  <div class="ak-row">Scroll — zoom</div>
+  <div class="ak-row">Click bar — inspect</div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ═══════════════════════════════════════════════════════════════
+// DATA — identical to flat heatmap
+// ═══════════════════════════════════════════════════════════════
+const PHASES=['all','a','a1','b','c','d'];
+const PL={all:'All',a:'A',a1:'A1',b:'B',c:'C',d:'D'};
+const PC={all:0xb89eff,a:0x6cb4ff,a1:0x7af0ff,b:0x45eaad,c:0xffd04a,d:0xff8080};
+const LAYERS=['0-Core','1-Managers','2-Data','3-MonoBehaviours','4-Utils','5-Tests'];
+const LL={'0-Core':'Core','1-Managers':'Mgrs','2-Data':'Data','3-MonoBehaviours':'Mono','4-Utils':'Utils','5-Tests':'Tests'};
+
+const ET=['inherit','interface','get','set','event-sub','event-raise','singleton','creates','uses-util'];
+const EC={inherit:0xb89eff,interface:0x7af0ff,get:0x5aeaad,set:0xff8080,'event-sub':0xffe066,'event-raise':0xffab57,singleton:0xd4a0ff,creates:0xff85c8,'uses-util':0x62bfff};
+const EL={inherit:'Inherits',interface:'Interface',get:'Get()',set:'Set()','event-sub':'Event +=','event-raise':'Raise()','singleton':'Singleton.Ins','creates':'Creates','uses-util':'Utils call'};
+
+const NM={
+  GameEvents_All:{p:'all',l:'0-Core',n:'GameEvents(All)'},Singleton:{p:'all',l:'0-Core',n:'Singleton<T>'},
+  EconomyManager:{p:'all',l:'1-Managers',n:'EconomyManager'},UIManager:{p:'all',l:'1-Managers',n:'UIManager'},
+  GlobalEnumsAll:{p:'all',l:'2-Data',n:'GlobalEnumsAll'},IEnumUtils:{p:'all',l:'4-Utils',n:'IEnumerableUtils'},UtilsAll:{p:'all',l:'4-Utils',n:'UtilsPhaseAll'},
+  GE_A:{p:'a',l:'0-Core',n:'GameEvents(A)'},InteractionWheelUI:{p:'a',l:'1-Managers',n:'InteractionWheelUI'},
+  ShopUI:{p:'a',l:'1-Managers',n:'ShopUI'},bgUI:{p:'a',l:'1-Managers',n:'bgUI'},moneyUI:{p:'a',l:'1-Managers',n:'moneyUI'},
+  ShopDataService:{p:'a',l:'2-Data',n:'ShopDataService'},WShopItem:{p:'a',l:'2-Data',n:'WShopItem'},
+  F_InteractionOpt:{p:'a',l:'2-Data',n:'Field_InteractionOpt'},F_ShopCartItem:{p:'a',l:'2-Data',n:'Field_ShopCartItem'},
+  F_ShopCategory:{p:'a',l:'2-Data',n:'Field_ShopCategory'},F_ShopItem:{p:'a',l:'2-Data',n:'Field_ShopItem'},
+  IInteractable:{p:'a',l:'2-Data',n:'IInteractable'},SO_InteractionOpt:{p:'a',l:'2-Data',n:'SO_InteractionOption'},
+  SO_ShopCategory:{p:'a',l:'2-Data',n:'SO_ShopCategory'},SO_ShopItemDef:{p:'a',l:'2-Data',n:'SO_ShopItemDef'},
+  InteractableComputer:{p:'a',l:'3-MonoBehaviours',n:'InteractableComputer'},ShopUIOrch:{p:'a',l:'3-MonoBehaviours',n:'ShopUIOrchestrator'},
+  ShopSpawnPoint:{p:'a',l:'3-MonoBehaviours',n:'ShopSpawnPoint'},SimplePlayerCtrl:{p:'a',l:'3-MonoBehaviours',n:'SimplePlayerCtrl'},
+  SimplePlayerIntr:{p:'a',l:'3-MonoBehaviours',n:'SimplePlayerInteraction'},PhaseALOG:{p:'a',l:'4-Utils',n:'PhaseALOG'},
+  UtilsA:{p:'a',l:'4-Utils',n:'UtilsPhaseA'},ShopUITest:{p:'a',l:'5-Tests',n:'ShopUITest'},
+  GE_A1:{p:'a1',l:'0-Core',n:'GameEvents(A1)'},CameraShaker:{p:'a1',l:'3-MonoBehaviours',n:'CameraShaker'},
+  StartingElevator:{p:'a1',l:'3-MonoBehaviours',n:'StartingElevator'},ElevatorTest:{p:'a1',l:'5-Tests',n:'ElevatorTest'},
+  GE_B:{p:'b',l:'0-Core',n:'GameEvents(B)'},InventoryUI:{p:'b',l:'1-Managers',n:'InventoryUI'},
+  InvDataService:{p:'b',l:'2-Data',n:'InventoryDataService'},GlobalEnumsB:{p:'b',l:'2-Data',n:'GlobalEnumsB'},
+  F_InvSlot:{p:'b',l:'2-Data',n:'Field_InvSlot'},IIconItem:{p:'b',l:'2-Data',n:'IIconItem'},
+  ISaveLoadObj:{p:'b',l:'2-Data',n:'ISaveLoadableObj'},SO_FootstepDef:{p:'b',l:'2-Data',n:'SO_FootstepDef'},
+  FresnelHL:{p:'b',l:'3-MonoBehaviours',n:'FresnelHighlighter'},InvOrch:{p:'b',l:'3-MonoBehaviours',n:'InventoryOrchestrator'},
+  BasePhysObj:{p:'b',l:'3-MonoBehaviours',n:'BasePhysicsObject'},BaseSellable:{p:'b',l:'3-MonoBehaviours',n:'BaseSellableItem'},
+  PhysicsGib:{p:'b',l:'3-MonoBehaviours',n:'PhysicsGib'},PhysSoundPlayer:{p:'b',l:'3-MonoBehaviours',n:'PhysicsSoundPlayer'},
+  PlayerCam:{p:'b',l:'3-MonoBehaviours',n:'PlayerCamera'},PlayerFoot:{p:'b',l:'3-MonoBehaviours',n:'PlayerFootsteps'},
+  PlayerGrab:{p:'b',l:'3-MonoBehaviours',n:'PlayerGrab'},PlayerMov:{p:'b',l:'3-MonoBehaviours',n:'PlayerMovement'},
+  PlayerSpawn:{p:'b',l:'3-MonoBehaviours',n:'PlayerSpawnPoint'},RbDragger:{p:'b',l:'3-MonoBehaviours',n:'RbDraggerCtrl'},
+  BaseHeldTool:{p:'b',l:'3-MonoBehaviours',n:'BaseHeldTool'},ToolBuilder:{p:'b',l:'3-MonoBehaviours',n:'ToolBuilder'},
+  ToolHammer:{p:'b',l:'3-MonoBehaviours',n:'ToolHammer'},ToolPickaxe:{p:'b',l:'3-MonoBehaviours',n:'ToolPickaxe'},
+  ToolMagnet:{p:'b',l:'3-MonoBehaviours',n:'ToolMagnet'},ToolMiningHat:{p:'b',l:'3-MonoBehaviours',n:'ToolMiningHat'},
+  ToolResScanner:{p:'b',l:'3-MonoBehaviours',n:'ToolResScanner'},ToolWrench:{p:'b',l:'3-MonoBehaviours',n:'ToolSupportsWrench'},
+  UIEventRelay:{p:'b',l:'3-MonoBehaviours',n:'UIEventRelay'},UtilsB:{p:'b',l:'4-Utils',n:'UtilsPhaseB'},PhaseBLOG:{p:'b',l:'4-Utils',n:'PhaseBLOG'},
+  GE_C:{p:'c',l:'0-Core',n:'GameEvents(C)'},OreLimitMgr:{p:'c',l:'1-Managers',n:'OreLimitManager'},
+  OreMgr:{p:'c',l:'1-Managers',n:'OreManager'},OrePoolMgr:{p:'c',l:'1-Managers',n:'OrePiecePoolMgr'},
+  ParticleMgr:{p:'c',l:'1-Managers',n:'ParticleManager'},OreDataService:{p:'c',l:'2-Data',n:'OreDataService'},
+  GlobalEnumsC:{p:'c',l:'2-Data',n:'GlobalEnumsC'},IDamageable:{p:'c',l:'2-Data',n:'IDamageable'},
+  SO_AutoMinerDef:{p:'c',l:'2-Data',n:'SO_AutoMinerDef'},OrePieceKey:{p:'c',l:'2-Data',n:'OrePieceKey'},
+  ResourceDesc:{p:'c',l:'2-Data',n:'ResourceDescription'},WNodeDrop:{p:'c',l:'2-Data',n:'WeightedNodeDrop'},WOreChance:{p:'c',l:'2-Data',n:'WeightedOreChance'},
+  AutoMiner:{p:'c',l:'3-MonoBehaviours',n:'AutoMiner'},DmgOrePiece:{p:'c',l:'3-MonoBehaviours',n:'DamageableOrePiece'},
+  OreNode:{p:'c',l:'3-MonoBehaviours',n:'OreNode'},OrePiece:{p:'c',l:'3-MonoBehaviours',n:'OrePiece'},
+  PhysLimitWarn:{p:'c',l:'3-MonoBehaviours',n:'PhysLimitUIWarning'},SellerMachine:{p:'c',l:'3-MonoBehaviours',n:'SellerMachine'},
+  UtilsC:{p:'c',l:'4-Utils',n:'UtilsPhaseC'},PhaseCLOG:{p:'c',l:'4-Utils',n:'PhaseCLOG'},
+  GE_D:{p:'d',l:'0-Core',n:'GameEvents(D)'},BuildingMgr:{p:'d',l:'1-Managers',n:'BuildingManager'},
+  ConveyorMgr:{p:'d',l:'1-Managers',n:'ConveyorBeltMgr'},BuildDataSvc:{p:'d',l:'2-Data',n:'BuildingDataService'},
+  GlobalEnumsD:{p:'d',l:'2-Data',n:'GlobalEnumsD'},SO_BuildInvDef:{p:'d',l:'2-Data',n:'SO_BuildingInvDef'},
+  BuildRotInfo:{p:'d',l:'2-Data',n:'BuildingRotInfo'},BuildingObj:{p:'d',l:'3-MonoBehaviours',n:'BuildingObject'},
+  BuildingCrate:{p:'d',l:'3-MonoBehaviours',n:'BuildingCrate'},BuildPlaceNode:{p:'d',l:'3-MonoBehaviours',n:'BuildPlaceNode'},
+  BaseModSupp:{p:'d',l:'3-MonoBehaviours',n:'BaseModularSupports'},ModBuildSupp:{p:'d',l:'3-MonoBehaviours',n:'ModBuildSupports'},
+  ConveyorBelt:{p:'d',l:'3-MonoBehaviours',n:'ConveyorBelt'},ConvShaker:{p:'d',l:'3-MonoBehaviours',n:'ConveyorShaker'},
+  ConvShakerH:{p:'d',l:'3-MonoBehaviours',n:'ConveyorShakerH'},ConvBlocker:{p:'d',l:'3-MonoBehaviours',n:'ConveyorBlocker'},
+  ConvSplitter:{p:'d',l:'3-MonoBehaviours',n:'ConvSplitterT2'},RoutConveyor:{p:'d',l:'3-MonoBehaviours',n:'RoutingConveyor'},
+  UtilsD:{p:'d',l:'4-Utils',n:'UtilsPhaseD'},
+};
+
+const ALL_EDGES=[
+  {s:'EconomyManager',t:'Singleton',type:'inherit'},{s:'UIManager',t:'Singleton',type:'inherit'},
+  {s:'InteractionWheelUI',t:'Singleton',type:'inherit'},{s:'SimplePlayerCtrl',t:'Singleton',type:'inherit'},
+  {s:'PlayerMov',t:'Singleton',type:'inherit'},{s:'OreLimitMgr',t:'Singleton',type:'inherit'},
+  {s:'OreMgr',t:'Singleton',type:'inherit'},{s:'OrePoolMgr',t:'Singleton',type:'inherit'},
+  {s:'ParticleMgr',t:'Singleton',type:'inherit'},{s:'BuildingMgr',t:'Singleton',type:'inherit'},
+  {s:'ConveyorMgr',t:'Singleton',type:'inherit'},
+  {s:'BaseSellable',t:'BasePhysObj',type:'inherit'},{s:'PhysicsGib',t:'BaseSellable',type:'inherit'},
+  {s:'BaseHeldTool',t:'BaseSellable',type:'inherit'},{s:'OrePiece',t:'BaseSellable',type:'inherit'},
+  {s:'DmgOrePiece',t:'OrePiece',type:'inherit'},{s:'BuildingCrate',t:'BaseSellable',type:'inherit'},
+  {s:'ToolBuilder',t:'BaseHeldTool',type:'inherit'},{s:'ToolHammer',t:'BaseHeldTool',type:'inherit'},
+  {s:'ToolPickaxe',t:'BaseHeldTool',type:'inherit'},{s:'ToolMagnet',t:'BaseHeldTool',type:'inherit'},
+  {s:'ToolMiningHat',t:'BaseHeldTool',type:'inherit'},{s:'ToolResScanner',t:'BaseHeldTool',type:'inherit'},
+  {s:'ToolWrench',t:'BaseHeldTool',type:'inherit'},
+  {s:'ConvShaker',t:'ConveyorBelt',type:'inherit'},{s:'ConvShakerH',t:'ConveyorBelt',type:'inherit'},
+  {s:'ModBuildSupp',t:'BaseModSupp',type:'inherit'},
+  {s:'InteractableComputer',t:'IInteractable',type:'interface'},{s:'BaseHeldTool',t:'IInteractable',type:'interface'},
+  {s:'BaseHeldTool',t:'IIconItem',type:'interface'},{s:'BaseHeldTool',t:'ISaveLoadObj',type:'interface'},
+  {s:'BuildingObj',t:'IInteractable',type:'interface'},{s:'BuildingCrate',t:'IInteractable',type:'interface'},
+  {s:'OreNode',t:'IDamageable',type:'interface'},{s:'DmgOrePiece',t:'IDamageable',type:'interface'},
+  {s:'ShopUI',t:'UIManager',type:'singleton',lbl:'CloseAll'},{s:'InteractionWheelUI',t:'UIManager',type:'singleton',lbl:'CloseAll'},
+  {s:'moneyUI',t:'EconomyManager',type:'singleton',lbl:'GetMoney'},{s:'ShopDataService',t:'EconomyManager',type:'singleton',lbl:'GetMoney'},
+  {s:'ShopUIOrch',t:'EconomyManager',type:'singleton',lbl:'Get/AddMoney'},
+  {s:'SimplePlayerIntr',t:'UIManager',type:'singleton',lbl:'isAnyMenuOpen'},{s:'InvOrch',t:'UIManager',type:'singleton',lbl:'isAnyMenuOpen'},
+  {s:'AutoMiner',t:'OreLimitMgr',type:'singleton',lbl:'ShouldBlock'},{s:'AutoMiner',t:'OrePoolMgr',type:'singleton',lbl:'SpawnPooledOre'},
+  {s:'OreNode',t:'OrePoolMgr',type:'singleton',lbl:'SpawnPooledOre'},{s:'OreNode',t:'ParticleMgr',type:'singleton',lbl:'CreateParticle'},
+  {s:'DmgOrePiece',t:'ParticleMgr',type:'singleton',lbl:'CreateParticle'},
+  {s:'OrePiece',t:'OrePoolMgr',type:'singleton',lbl:'ReturnToPool'},{s:'OrePiece',t:'EconomyManager',type:'singleton',lbl:'AddMoney'},
+  {s:'SellerMachine',t:'EconomyManager',type:'singleton',lbl:'AddMoney'},
+  {s:'BuildingObj',t:'BuildingMgr',type:'singleton',lbl:'GetCratePrefab'},{s:'BuildingCrate',t:'EconomyManager',type:'singleton',lbl:'GetMoney'},
+  {s:'ShopUITest',t:'EconomyManager',type:'singleton',lbl:'AddMoney'},
+  {s:'UIManager',t:'GE_A',type:'event-sub'},{s:'UIManager',t:'GE_B',type:'event-sub'},
+  {s:'InteractionWheelUI',t:'GE_A',type:'event-sub'},{s:'ShopUI',t:'GE_A',type:'event-sub'},
+  {s:'bgUI',t:'GE_A',type:'event-sub'},{s:'moneyUI',t:'GE_A',type:'event-sub'},
+  {s:'ShopUIOrch',t:'GE_A',type:'event-sub'},{s:'SimplePlayerCtrl',t:'GE_A',type:'event-sub'},
+  {s:'InventoryUI',t:'GE_B',type:'event-sub'},{s:'InvOrch',t:'GE_B',type:'event-sub'},{s:'InvOrch',t:'GE_A',type:'event-sub'},
+  {s:'PlayerMov',t:'GE_A',type:'event-sub'},{s:'PlayerCam',t:'GE_A',type:'event-sub'},
+  {s:'PlayerGrab',t:'GE_A',type:'event-sub'},{s:'PlayerGrab',t:'GE_B',type:'event-sub'},
+  {s:'StartingElevator',t:'GE_A1',type:'event-sub'},{s:'ElevatorTest',t:'GE_A1',type:'event-sub'},
+  {s:'PhysLimitWarn',t:'GE_C',type:'event-sub'},
+  {s:'EconomyManager',t:'GE_A',type:'event-raise'},{s:'InteractionWheelUI',t:'GE_A',type:'event-raise'},
+  {s:'ShopUI',t:'GE_A',type:'event-raise'},{s:'InventoryUI',t:'GE_A',type:'event-raise'},{s:'InventoryUI',t:'GE_B',type:'event-raise'},
+  {s:'InteractableComputer',t:'GE_A',type:'event-raise'},{s:'SimplePlayerIntr',t:'GE_A',type:'event-raise'},
+  {s:'ShopUIOrch',t:'GE_A',type:'event-raise'},{s:'BaseHeldTool',t:'GE_B',type:'event-raise'},
+  {s:'InvOrch',t:'GE_B',type:'event-raise'},{s:'StartingElevator',t:'GE_A1',type:'event-raise'},
+  {s:'OreNode',t:'GE_C',type:'event-raise'},{s:'OrePiece',t:'GE_C',type:'event-raise'},
+  {s:'OreLimitMgr',t:'GE_C',type:'event-raise'},{s:'SellerMachine',t:'GE_C',type:'event-raise'},
+  {s:'BuildingObj',t:'GE_D',type:'event-raise'},{s:'BuildingCrate',t:'GE_D',type:'event-raise'},
+  {s:'ShopUIOrch',t:'ShopDataService',type:'get'},{s:'ShopUI',t:'ShopDataService',type:'creates'},
+  {s:'ShopUI',t:'ShopUIOrch',type:'get'},{s:'InventoryUI',t:'InvDataService',type:'creates'},
+  {s:'InventoryUI',t:'InvOrch',type:'get'},{s:'InvOrch',t:'InvDataService',type:'get'},
+  {s:'InvOrch',t:'F_InvSlot',type:'get'},{s:'InvOrch',t:'UIEventRelay',type:'creates'},
+  {s:'InvOrch',t:'BaseHeldTool',type:'get'},{s:'InvOrch',t:'IIconItem',type:'get'},
+  {s:'InteractionWheelUI',t:'IInteractable',type:'get'},{s:'InteractionWheelUI',t:'F_InteractionOpt',type:'set'},
+  {s:'ShopUIOrch',t:'F_ShopItem',type:'set'},{s:'ShopUIOrch',t:'F_ShopCartItem',type:'set'},
+  {s:'ShopUIOrch',t:'F_ShopCategory',type:'set'},{s:'ShopUIOrch',t:'WShopItem',type:'get'},
+  {s:'PlayerCam',t:'PlayerMov',type:'get'},{s:'PlayerFoot',t:'PlayerMov',type:'get'},
+  {s:'PlayerGrab',t:'PlayerMov',type:'get'},{s:'RbDragger',t:'PlayerGrab',type:'get'},
+  {s:'PlayerMov',t:'PlayerSpawn',type:'get'},{s:'FresnelHL',t:'BaseHeldTool',type:'get'},
+  {s:'FresnelHL',t:'UtilsB',type:'uses-util'},{s:'FresnelHL',t:'UtilsAll',type:'uses-util'},
+  {s:'ToolPickaxe',t:'PhysSoundPlayer',type:'get'},{s:'ToolMagnet',t:'UtilsB',type:'uses-util'},
+  {s:'ToolMagnet',t:'BasePhysObj',type:'get'},{s:'BaseHeldTool',t:'PlayerMov',type:'get'},
+  {s:'BaseHeldTool',t:'GlobalEnumsB',type:'get'},{s:'BaseHeldTool',t:'SO_InteractionOpt',type:'get'},
+  {s:'OreMgr',t:'OreDataService',type:'creates'},{s:'OreMgr',t:'OrePiece',type:'get'},
+  {s:'OreLimitMgr',t:'OrePiece',type:'get'},{s:'OrePoolMgr',t:'OrePieceKey',type:'get'},
+  {s:'OrePoolMgr',t:'BasePhysObj',type:'get'},{s:'OrePoolMgr',t:'UtilsAll',type:'uses-util'},
+  {s:'OrePoolMgr',t:'IEnumUtils',type:'uses-util'},{s:'OreNode',t:'UtilsC',type:'uses-util'},
+  {s:'OreNode',t:'WNodeDrop',type:'get'},{s:'AutoMiner',t:'SO_AutoMinerDef',type:'get'},
+  {s:'AutoMiner',t:'UtilsC',type:'uses-util'},{s:'SellerMachine',t:'OrePiece',type:'get'},
+  {s:'SellerMachine',t:'BaseSellable',type:'get'},{s:'SellerMachine',t:'UtilsAll',type:'uses-util'},
+  {s:'UtilsC',t:'IEnumUtils',type:'uses-util'},{s:'UtilsC',t:'WOreChance',type:'get'},
+  {s:'OreDataService',t:'ResourceDesc',type:'get'},{s:'OreDataService',t:'GlobalEnumsC',type:'get'},
+  {s:'PhaseALOG',t:'ShopDataService',type:'get'},{s:'UtilsA',t:'ShopSpawnPoint',type:'get'},
+  {s:'UtilsA',t:'SO_ShopItemDef',type:'get'},{s:'ShopDataService',t:'SO_ShopCategory',type:'get'},
+  {s:'ShopDataService',t:'SO_ShopItemDef',type:'get'},{s:'ShopUITest',t:'ShopUI',type:'get'},
+  {s:'ElevatorTest',t:'StartingElevator',type:'get'},{s:'ElevatorTest',t:'CameraShaker',type:'get'},
+  {s:'StartingElevator',t:'SimplePlayerCtrl',type:'get'},
+  {s:'BuildingMgr',t:'BuildDataSvc',type:'creates'},{s:'BuildingMgr',t:'BuildingObj',type:'get'},
+  {s:'BuildingMgr',t:'BuildPlaceNode',type:'get'},{s:'BuildingMgr',t:'UtilsD',type:'uses-util'},
+  {s:'BuildingMgr',t:'UtilsB',type:'uses-util'},{s:'BuildDataSvc',t:'BuildingObj',type:'get'},
+  {s:'BuildDataSvc',t:'BuildRotInfo',type:'get'},{s:'ConveyorMgr',t:'BasePhysObj',type:'get'},
+  {s:'ConveyorMgr',t:'ConveyorBelt',type:'get'},{s:'ConveyorBelt',t:'BasePhysObj',type:'set'},
+  {s:'BuildingObj',t:'SO_BuildInvDef',type:'get'},{s:'BuildingObj',t:'BaseModSupp',type:'get'},
+  {s:'BuildingObj',t:'GlobalEnumsB',type:'get'},{s:'BuildingCrate',t:'SO_BuildInvDef',type:'get'},
+  {s:'BuildingCrate',t:'GlobalEnumsB',type:'get'},
+  {s:'PlayerGrab',t:'BaseHeldTool',type:'set'},{s:'DmgOrePiece',t:'UtilsB',type:'uses-util'},
+  {s:'PlayerGrab',t:'UtilsB',type:'uses-util'},{s:'BuildingObj',t:'UtilsB',type:'uses-util'},
+  {s:'OrePiece',t:'UtilsAll',type:'uses-util'},
+];
+
+// ═══════════════════════════════════════════════════════════════
+// BUILD AGGREGATED MATRIX
+// ═══════════════════════════════════════════════════════════════
+const cellKeys = [];
+PHASES.forEach(p => LAYERS.forEach(l => cellKeys.push(p+'|'+l)));
+const activeCells = new Set();
+ALL_EDGES.forEach(e => { const s=NM[e.s],t=NM[e.t]; if(s)activeCells.add(s.p+'|'+s.l); if(t)activeCells.add(t.p+'|'+t.l); });
+const usedKeys = cellKeys.filter(k => activeCells.has(k));
+const keyIndex = {}; usedKeys.forEach((k,i) => keyIndex[k]=i);
+
+function cellLabel(k){ const[p,l]=k.split('|'); return PL[p]+'/'+LL[l]; }
+
+let crossOnly = false;
+
+function buildMatrix(){
+  const mat = {};
+  ALL_EDGES.forEach(e => {
+    const sn=NM[e.s],tn=NM[e.t]; if(!sn||!tn) return;
+    if(crossOnly && sn.p===tn.p) return;
+    const sk=sn.p+'|'+sn.l, tk=tn.p+'|'+tn.l;
+    const mk=sk+'>'+tk;
+    if(!mat[mk]) mat[mk]={edges:[],byType:{}};
+    mat[mk].edges.push(e);
+    if(!mat[mk].byType[e.type]) mat[mk].byType[e.type]=[];
+    mat[mk].byType[e.type].push(e);
+  });
+  return mat;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// THREE.JS SCENE
+// ═══════════════════════════════════════════════════════════════
+const W=window.innerWidth, H=window.innerHeight;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x101014);
+scene.fog = new THREE.FogExp2(0x101014, 0.012);
+
+const camera = new THREE.PerspectiveCamera(50, W/H, 0.1, 200);
+camera.position.set(20, 18, 28);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setSize(W, H);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.2;
+document.body.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.target.set(usedKeys.length*0.5, 0, usedKeys.length*0.5);
+controls.minDistance = 5;
+controls.maxDistance = 80;
+controls.maxPolarAngle = Math.PI * 0.48;
+controls.update();
+
+// Lights
+const ambientLight = new THREE.AmbientLight(0x404060, 0.6);
+scene.add(ambientLight);
+const dirLight = new THREE.DirectionalLight(0xffeedd, 1.0);
+dirLight.position.set(15, 25, 20);
+dirLight.castShadow = true;
+dirLight.shadow.mapSize.set(1024,1024);
+dirLight.shadow.camera.near = 1; dirLight.shadow.camera.far = 60;
+dirLight.shadow.camera.left=-30; dirLight.shadow.camera.right=30;
+dirLight.shadow.camera.top=30; dirLight.shadow.camera.bottom=-30;
+scene.add(dirLight);
+
+const rimLight = new THREE.DirectionalLight(0x6688cc, 0.3);
+rimLight.position.set(-10, 10, -15);
+scene.add(rimLight);
+
+// Ground plane
+const N = usedKeys.length;
+const groundGeo = new THREE.PlaneGeometry(N+4, N+4);
+const groundMat = new THREE.MeshStandardMaterial({ color:0x12121a, roughness:0.95, metalness:0.1 });
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI/2;
+ground.position.set(N/2, -0.01, N/2);
+ground.receiveShadow = true;
+scene.add(ground);
+
+// Grid lines on ground
+const gridHelper = new THREE.GridHelper(N+2, N+2, 0x222233, 0x1a1a28);
+gridHelper.position.set(N/2, 0, N/2);
+scene.add(gridHelper);
+
+// ═══════════════════════════════════════════════════════════════
+// BUILD BARS
+// ═══════════════════════════════════════════════════════════════
+let bars = [];
+const barGroup = new THREE.Group();
+scene.add(barGroup);
+
+// Axis label sprites
+function makeLabel(text, position, color=0x808090, size=0.35) {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  canvas.width = 256; canvas.height = 64;
+  ctx.fillStyle = 'transparent'; ctx.fillRect(0,0,256,64);
+  ctx.font = 'bold 22px JetBrains Mono, monospace';
+  ctx.fillStyle = '#'+color.toString(16).padStart(6,'0');
+  ctx.textAlign = 'center';
+  ctx.fillText(text, 128, 40);
+  const tex = new THREE.CanvasTexture(canvas);
+  const mat = new THREE.SpriteMaterial({ map:tex, transparent:true, depthTest:false });
+  const sprite = new THREE.Sprite(mat);
+  sprite.position.copy(position);
+  sprite.scale.set(size*4, size, 1);
+  return sprite;
+}
+
+const labelGroup = new THREE.Group();
+scene.add(labelGroup);
+
+function buildBars() {
+  // Clear old
+  while(barGroup.children.length) barGroup.remove(barGroup.children[0]);
+  while(labelGroup.children.length) labelGroup.remove(labelGroup.children[0]);
+  bars = [];
+
+  const matrix = buildMatrix();
+  let maxCount = 1;
+  Object.values(matrix).forEach(v => { if(v.edges.length > maxCount) maxCount = v.edges.length; });
+  const heightScale = 8 / maxCount;
+
+  // Axis labels
+  usedKeys.forEach((k,i) => {
+    const [p] = k.split('|');
+    // Row labels (Z axis = source)
+    labelGroup.add(makeLabel(cellLabel(k), new THREE.Vector3(-1.2, 0.1, i+0.5), PC[p], 0.3));
+    // Col labels (X axis = target)
+    const colSprite = makeLabel(cellLabel(k), new THREE.Vector3(i+0.5, 0.1, N+1.2), PC[p], 0.3);
+    labelGroup.add(colSprite);
+  });
+  // Axis titles
+  labelGroup.add(makeLabel('SOURCE →', new THREE.Vector3(-2.5, 0.3, N/2), 0xe5a210, 0.4));
+  labelGroup.add(makeLabel('TARGET →', new THREE.Vector3(N/2, 0.3, N+2.5), 0xe5a210, 0.4));
+
+  // Base plates for each cell
+  usedKeys.forEach((rk, ri) => {
+    usedKeys.forEach((ck, ci) => {
+      const mk = rk+'>'+ck;
+      const data = matrix[mk];
+
+      // Base tile
+      const tileGeo = new THREE.BoxGeometry(0.9, 0.02, 0.9);
+      const tileMat = new THREE.MeshStandardMaterial({
+        color: rk===ck ? 0x1e1e2a : 0x16161e,
+        roughness: 0.9, metalness: 0.0, transparent: true, opacity: 0.7
+      });
+      const tile = new THREE.Mesh(tileGeo, tileMat);
+      tile.position.set(ci+0.5, 0, ri+0.5);
+      tile.receiveShadow = true;
+      barGroup.add(tile);
+
+      if (!data || data.edges.length === 0) return;
+
+      // Extruded bar
+      const count = data.edges.length;
+      const h = Math.max(0.15, count * heightScale);
+      const dominant = Object.entries(data.byType).sort((a,b)=>b[1].length-a[1].length)[0][0];
+      const color = EC[dominant];
+
+      const barGeo = new THREE.BoxGeometry(0.7, h, 0.7);
+      const barMat = new THREE.MeshStandardMaterial({
+        color: color,
+        roughness: 0.3,
+        metalness: 0.5,
+        emissive: color,
+        emissiveIntensity: 0.15,
+      });
+      const bar = new THREE.Mesh(barGeo, barMat);
+      bar.position.set(ci+0.5, h/2, ri+0.5);
+      bar.castShadow = true;
+      bar.receiveShadow = true;
+      bar.userData = { srcKey:rk, tgtKey:ck, data, count, dominant };
+      barGroup.add(bar);
+      bars.push(bar);
+
+      // Count label on top
+      if (count >= 2) {
+        const lbl = makeLabel(count.toString(), new THREE.Vector3(ci+0.5, h+0.25, ri+0.5), 0xffffff, 0.2);
+        barGroup.add(lbl);
+      }
+    });
+  });
+}
+
+buildBars();
+buildStats();
+buildLegend();
+
+// ═══════════════════════════════════════════════════════════════
+// RAYCASTING (hover + click)
+// ═══════════════════════════════════════════════════════════════
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+let hoveredBar = null;
+const tooltip = document.getElementById('tooltip');
+
+renderer.domElement.addEventListener('mousemove', e => {
+  mouse.x = (e.clientX / W) * 2 - 1;
+  mouse.y = -(e.clientY / H) * 2 + 1;
+  raycaster.setFromCamera(mouse, camera);
+  const hits = raycaster.intersectObjects(bars);
+
+  if (hoveredBar) {
+    hoveredBar.material.emissiveIntensity = 0.15;
+    hoveredBar.scale.set(1,1,1);
+  }
+
+  if (hits.length > 0) {
+    const bar = hits[0].object;
+    if (bar.userData.data) {
+      hoveredBar = bar;
+      bar.material.emissiveIntensity = 0.5;
+      bar.scale.set(1.08, 1.05, 1.08);
+      const d = bar.userData;
+      document.getElementById('tt-title').textContent = `${cellLabel(d.srcKey)} → ${cellLabel(d.tgtKey)}`;
+      document.getElementById('tt-count').textContent = d.count + ' edge' + (d.count>1?'s':'');
+      const types = Object.entries(d.data.byType).map(([t,e])=>`${EL[t]}: ${e.length}`).join(' · ');
+      document.getElementById('tt-detail').textContent = types;
+      tooltip.style.display = 'block';
+      tooltip.style.left = (e.clientX + 16) + 'px';
+      tooltip.style.top = (e.clientY - 10) + 'px';
+      renderer.domElement.style.cursor = 'pointer';
+    }
+  } else {
+    hoveredBar = null;
+    tooltip.style.display = 'none';
+    renderer.domElement.style.cursor = 'grab';
+  }
+});
+
+renderer.domElement.addEventListener('click', e => {
+  raycaster.setFromCamera(mouse, camera);
+  const hits = raycaster.intersectObjects(bars);
+  if (hits.length > 0 && hits[0].object.userData.data) {
+    showDetail(hits[0].object.userData);
+  }
+});
+
+function showDetail(d) {
+  const panel = document.getElementById('detail');
+  panel.style.display = 'block';
+  document.getElementById('det-title').textContent = `${cellLabel(d.srcKey)} → ${cellLabel(d.tgtKey)}`;
+  document.getElementById('det-meta').textContent = `${d.count} dependency edges`;
+  const el = document.getElementById('det-edges');
+  el.innerHTML = '';
+  Object.entries(d.data.byType).sort((a,b)=>b[1].length-a[1].length).forEach(([type, edges]) => {
+    el.innerHTML += `<div class="d-section" style="color:#${EC[type].toString(16).padStart(6,'0')}">${EL[type]} (${edges.length})</div>`;
+    edges.forEach(e => {
+      el.innerHTML += `<div class="d-edge"><div class="d-dot" style="background:#${EC[e.type].toString(16).padStart(6,'0')}"></div><span>${NM[e.s]?.n||e.s}</span><span class="d-arrow">→</span><span>${NM[e.t]?.n||e.t}</span></div>`;
+    });
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// STATS + LEGEND
+// ═══════════════════════════════════════════════════════════════
+function buildStats() {
+  let total=0, cross=0, directCross=0, eventRouted=0;
+  ALL_EDGES.forEach(e => {
+    const s=NM[e.s],t=NM[e.t]; if(!s||!t) return;
+    total++;
+    if(s.p!==t.p){
+      cross++;
+      if(!['event-sub','event-raise','inherit','interface','uses-util'].includes(e.type)) directCross++;
+      if(e.type==='event-sub'||e.type==='event-raise') eventRouted++;
+    }
+  });
+  const crossPct = Math.round(cross/total*100);
+  const directPct = Math.round(directCross/total*100);
+  document.getElementById('stats').innerHTML = `
+    <div class="stat-card"><h4>Total</h4><div class="val">${total}</div><div class="sub">edges</div></div>
+    <div class="stat-card"><h4>Intra-Phase</h4><div class="val">${total-cross}</div><div class="sub">${100-crossPct}%</div></div>
+    <div class="stat-card ${crossPct>60?'bad':crossPct>40?'warn':'good'}"><h4>Cross-Phase</h4><div class="val">${cross}</div><div class="sub">${crossPct}%</div></div>
+    <div class="stat-card ${directPct>20?'bad':directPct>10?'warn':'good'}"><h4>Direct X-Phase</h4><div class="val">${directCross}</div><div class="sub">${directPct}% coupling smell</div></div>
+    <div class="stat-card good"><h4>Event-Routed</h4><div class="val">${eventRouted}</div><div class="sub">decoupled</div></div>
+  `;
+}
+
+function buildLegend() {
+  const el = document.getElementById('legend');
+  ET.forEach(t => {
+    el.innerHTML += `<div class="leg-row"><div class="leg-sq" style="background:#${EC[t].toString(16).padStart(6,'0')}"></div>${EL[t]}</div>`;
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MODE TOGGLES
+// ═══════════════════════════════════════════════════════════════
+document.getElementById('btn-all').onclick = () => {
+  crossOnly=false;
+  document.getElementById('btn-all').classList.add('active');
+  document.getElementById('btn-cross').classList.remove('active');
+  document.getElementById('detail').style.display='none';
+  buildBars(); buildStats();
+};
+document.getElementById('btn-cross').onclick = () => {
+  crossOnly=true;
+  document.getElementById('btn-cross').classList.add('active');
+  document.getElementById('btn-all').classList.remove('active');
+  document.getElementById('detail').style.display='none';
+  buildBars(); buildStats();
+};
+document.getElementById('btn-reset').onclick = () => {
+  camera.position.set(20, 18, 28);
+  controls.target.set(N*0.5, 0, N*0.5);
+  controls.update();
+};
+
+// ═══════════════════════════════════════════════════════════════
+// ANIMATION LOOP
+// ═══════════════════════════════════════════════════════════════
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+// Resize
+window.addEventListener('resize', () => {
+  const w=window.innerWidth, h=window.innerHeight;
+  camera.aspect = w/h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w,h);
+});
 </script>
 </body>
 </html>
