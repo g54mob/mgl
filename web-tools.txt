@@ -4052,25 +4052,56 @@ const barGroup = new THREE.Group();
 scene.add(barGroup);
 
 // Axis label sprites
-function makeLabel(text, position, color=0x808090, size=0.35) {
+function makeLabel(text, position, color=0x808090, size=0.5) {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
-  canvas.width = 256; canvas.height = 64;
-  ctx.fillStyle = 'transparent'; ctx.fillRect(0,0,256,64);
-  ctx.font = 'bold 22px JetBrains Mono, monospace';
+  canvas.width = 512; canvas.height = 128;
+  ctx.clearRect(0,0,512,128);
+  ctx.font = 'bold 36px JetBrains Mono, monospace';
   ctx.fillStyle = '#'+color.toString(16).padStart(6,'0');
   ctx.textAlign = 'center';
-  ctx.fillText(text, 128, 40);
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, 256, 64);
   const tex = new THREE.CanvasTexture(canvas);
+  tex.minFilter = THREE.LinearFilter;
   const mat = new THREE.SpriteMaterial({ map:tex, transparent:true, depthTest:false });
   const sprite = new THREE.Sprite(mat);
   sprite.position.copy(position);
-  sprite.scale.set(size*4, size, 1);
+  sprite.scale.set(size*5, size*1.25, 1);
+  return sprite;
+}
+function makeBigLabel(text, position, color=0xe5a210, size=0.7) {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  canvas.width = 1024; canvas.height = 128;
+  ctx.clearRect(0,0,1024,128);
+  ctx.font = 'bold 48px JetBrains Mono, monospace';
+  ctx.fillStyle = '#'+color.toString(16).padStart(6,'0');
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, 512, 64);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.minFilter = THREE.LinearFilter;
+  const mat = new THREE.SpriteMaterial({ map:tex, transparent:true, depthTest:false });
+  const sprite = new THREE.Sprite(mat);
+  sprite.position.copy(position);
+  sprite.scale.set(size*8, size*1.5, 1);
   return sprite;
 }
 
 const labelGroup = new THREE.Group();
 scene.add(labelGroup);
+
+// Pre-compute phase and layer boundaries for region rendering
+const phaseRanges = {}; // phase -> {start, end}
+const layerRanges = {}; // layer -> {start, end}
+usedKeys.forEach((k,i) => {
+  const [p,l] = k.split('|');
+  if (!phaseRanges[p]) phaseRanges[p] = {start:i, end:i};
+  phaseRanges[p].end = i;
+  if (!layerRanges[l]) layerRanges[l] = {start:i, end:i};
+  layerRanges[l].end = i;
+});
 
 function buildBars() {
   // Clear old
@@ -4083,18 +4114,78 @@ function buildBars() {
   Object.values(matrix).forEach(v => { if(v.edges.length > maxCount) maxCount = v.edges.length; });
   const heightScale = 8 / maxCount;
 
-  // Axis labels
+  // ── PHASE REGION STRIPS (colored ground strips along X and Z) ──
+  Object.entries(phaseRanges).forEach(([p, range]) => {
+    const len = range.end - range.start + 1;
+    const mid = range.start + len/2;
+    const color = PC[p];
+    // X-axis strip (target columns)
+    const stripGeoX = new THREE.PlaneGeometry(len, N+2);
+    const stripMatX = new THREE.MeshBasicMaterial({ color, transparent:true, opacity:0.03, side:THREE.DoubleSide });
+    const stripX = new THREE.Mesh(stripGeoX, stripMatX);
+    stripX.rotation.x = -Math.PI/2;
+    stripX.position.set(mid+0.5, 0.005, N/2);
+    barGroup.add(stripX);
+    // Z-axis strip (source rows)
+    const stripGeoZ = new THREE.PlaneGeometry(N+2, len);
+    const stripMatZ = new THREE.MeshBasicMaterial({ color, transparent:true, opacity:0.03, side:THREE.DoubleSide });
+    const stripZ = new THREE.Mesh(stripGeoZ, stripMatZ);
+    stripZ.rotation.x = -Math.PI/2;
+    stripZ.position.set(N/2, 0.006, mid+0.5);
+    barGroup.add(stripZ);
+    // Phase boundary lines (vertical walls at boundaries)
+    if (range.start > 0) {
+      const lineGeo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(range.start, 0, -0.5),
+        new THREE.Vector3(range.start, 0.3, -0.5),
+        new THREE.Vector3(range.start, 0.3, N+0.5),
+        new THREE.Vector3(range.start, 0, N+0.5),
+      ]);
+      const lineMat = new THREE.LineBasicMaterial({ color, transparent:true, opacity:0.4 });
+      barGroup.add(new THREE.Line(lineGeo, lineMat));
+      // Horizontal line on Z axis
+      const lineGeoZ = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(-0.5, 0, range.start),
+        new THREE.Vector3(-0.5, 0.3, range.start),
+        new THREE.Vector3(N+0.5, 0.3, range.start),
+        new THREE.Vector3(N+0.5, 0, range.start),
+      ]);
+      barGroup.add(new THREE.Line(lineGeoZ, lineMat));
+    }
+    // Phase name label along X axis (big, at bottom)
+    labelGroup.add(makeBigLabel('Phase-'+PL[p], new THREE.Vector3(mid+0.5, 0.5, N+3), color, 0.55));
+    // Phase name label along Z axis
+    labelGroup.add(makeBigLabel('Phase-'+PL[p], new THREE.Vector3(-3, 0.5, mid+0.5), color, 0.55));
+  });
+
+  // ── LAYER REGION LABELS (along both axes) ──
+  Object.entries(layerRanges).forEach(([l, range]) => {
+    const len = range.end - range.start + 1;
+    const mid = range.start + len/2;
+    // Layer label along X axis (below phase label)
+    labelGroup.add(makeLabel(LL[l], new THREE.Vector3(mid+0.5, 0.15, N+1.8), 0x606080, 0.35));
+    // Layer label along Z axis
+    labelGroup.add(makeLabel(LL[l], new THREE.Vector3(-1.5, 0.15, mid+0.5), 0x606080, 0.35));
+    // Subtle layer boundary lines
+    if (range.start > 0) {
+      const pts = [new THREE.Vector3(-0.3, 0.01, range.start), new THREE.Vector3(N+0.3, 0.01, range.start)];
+      const lg = new THREE.BufferGeometry().setFromPoints(pts);
+      barGroup.add(new THREE.Line(lg, new THREE.LineBasicMaterial({ color:0x333344, transparent:true, opacity:0.3 })));
+      const pts2 = [new THREE.Vector3(range.start, 0.01, -0.3), new THREE.Vector3(range.start, 0.01, N+0.3)];
+      const lg2 = new THREE.BufferGeometry().setFromPoints(pts2);
+      barGroup.add(new THREE.Line(lg2, new THREE.LineBasicMaterial({ color:0x333344, transparent:true, opacity:0.3 })));
+    }
+  });
+
+  // ── CELL LABELS (per-cell) ──
   usedKeys.forEach((k,i) => {
     const [p] = k.split('|');
-    // Row labels (Z axis = source)
-    labelGroup.add(makeLabel(cellLabel(k), new THREE.Vector3(-1.2, 0.1, i+0.5), PC[p], 0.3));
-    // Col labels (X axis = target)
-    const colSprite = makeLabel(cellLabel(k), new THREE.Vector3(i+0.5, 0.1, N+1.2), PC[p], 0.3);
-    labelGroup.add(colSprite);
+    labelGroup.add(makeLabel(cellLabel(k), new THREE.Vector3(-1.5, 0.6, i+0.5), PC[p], 0.3));
+    labelGroup.add(makeLabel(cellLabel(k), new THREE.Vector3(i+0.5, 0.6, N+1.5), PC[p], 0.3));
   });
   // Axis titles
-  labelGroup.add(makeLabel('SOURCE →', new THREE.Vector3(-2.5, 0.3, N/2), 0xe5a210, 0.4));
-  labelGroup.add(makeLabel('TARGET →', new THREE.Vector3(N/2, 0.3, N+2.5), 0xe5a210, 0.4));
+  labelGroup.add(makeBigLabel('SOURCE \u2192', new THREE.Vector3(-4.5, 1.0, N/2), 0xe5a210, 0.6));
+  labelGroup.add(makeBigLabel('TARGET \u2192', new THREE.Vector3(N/2, 1.0, N+4.5), 0xe5a210, 0.6));
 
   // Base plates for each cell
   usedKeys.forEach((rk, ri) => {
@@ -4159,10 +4250,10 @@ let hoveredBar = null;
 const tooltip = document.getElementById('tooltip');
 
 renderer.domElement.addEventListener('mousemove', e => {
-  mouse.x = (e.clientX / W) * 2 - 1;
-  mouse.y = -(e.clientY / H) * 2 + 1;
+  mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+  mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
   raycaster.setFromCamera(mouse, camera);
-  const hits = raycaster.intersectObjects(bars);
+  const hits = raycaster.intersectObjects(bars, false);
 
   if (hoveredBar) {
     hoveredBar.material.emissiveIntensity = 0.15;
@@ -4193,8 +4284,10 @@ renderer.domElement.addEventListener('mousemove', e => {
 });
 
 renderer.domElement.addEventListener('click', e => {
+  mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+  mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
   raycaster.setFromCamera(mouse, camera);
-  const hits = raycaster.intersectObjects(bars);
+  const hits = raycaster.intersectObjects(bars, false);
   if (hits.length > 0 && hits[0].object.userData.data) {
     showDetail(hits[0].object.userData);
   }
@@ -4306,84 +4399,130 @@ window.addEventListener('resize', () => {
   --muted:#808090;--accent:#e5a210;--accent2:#c48a0e;
   --phase-all:#b89eff;--phase-a:#6cb4ff;--phase-a1:#7af0ff;
   --phase-b:#45eaad;--phase-c:#ffd04a;--phase-d:#ff8080;
+  --cell:36px;
 }
+html{scroll-behavior:smooth;}
 body{font-family:'JetBrains Mono','Courier New',monospace;background:var(--bg);color:var(--text);min-height:100vh;padding:0;}
 
-/* HEADER */
-#header{background:var(--bg2);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;gap:16px;}
-#header h1{font-size:14px;font-weight:600;color:var(--accent);}
-#header .sub{font-size:10px;color:var(--muted);}
-.mode-btn{font-family:inherit;font-size:10px;padding:4px 10px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);cursor:pointer;margin-left:auto;}
-.mode-btn:hover{background:var(--bg3);}
-.mode-btn.active{background:var(--accent);color:var(--bg);border-color:var(--accent);font-weight:600;}
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar{width:6px;height:6px;}
+::-webkit-scrollbar-track{background:var(--bg);}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
+::-webkit-scrollbar-thumb:hover{background:var(--muted);}
+::-webkit-scrollbar-corner{background:var(--bg);}
 
-/* LAYOUT */
-#main{display:flex;height:calc(100vh - 48px);}
-#matrix-area{flex:1;overflow:auto;padding:20px 24px;}
-#detail-panel{width:320px;min-width:320px;background:var(--bg2);border-left:1px solid var(--border);padding:16px;overflow-y:auto;display:none;}
+/* ── HEADER ── */
+#header{background:var(--bg2);border-bottom:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;position:sticky;top:0;z-index:100;backdrop-filter:blur(10px);}
+#header h1{font-size:13px;font-weight:600;color:var(--accent);white-space:nowrap;}
+#header .sub{font-size:9px;color:var(--muted);display:none;}
+.btn-row{display:flex;gap:6px;margin-left:auto;}
+.mode-btn{font-family:inherit;font-size:10px;padding:6px 14px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer;transition:all .15s;-webkit-tap-highlight-color:transparent;touch-action:manipulation;}
+.mode-btn:hover{background:var(--bg3);border-color:var(--muted);}
+.mode-btn.active{background:var(--accent);color:#000;border-color:var(--accent);font-weight:600;}
 
-/* MATRIX */
-.matrix-wrap{display:inline-block;}
+/* ── LAYOUT ── */
+#main{display:flex;flex-direction:column;min-height:calc(100vh - 52px);}
+#matrix-area{flex:1;overflow:auto;padding:16px;}
+#detail-panel{background:var(--bg2);border-top:1px solid var(--border);padding:16px;overflow-y:auto;display:none;max-height:50vh;}
+
+/* ── MATRIX ── */
+.matrix-wrap{display:inline-block;margin:0 auto;}
 table.matrix{border-collapse:separate;border-spacing:2px;}
-table.matrix th{font-size:8px;font-weight:500;padding:2px 4px;color:var(--muted);white-space:nowrap;}
-table.matrix th.col-header{writing-mode:vertical-rl;text-orientation:mixed;transform:rotate(180deg);height:90px;vertical-align:bottom;padding-bottom:4px;}
-table.matrix th.row-header{text-align:right;padding-right:6px;}
-table.matrix td{width:28px;height:28px;min-width:28px;min-height:28px;border-radius:3px;cursor:pointer;position:relative;transition:all .12s;}
-table.matrix td:hover{outline:2px solid var(--accent);outline-offset:-1px;z-index:10;}
-table.matrix td .cell-count{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:7px;font-weight:700;color:rgba(0,0,0,0.6);pointer-events:none;}
-table.matrix td.empty{background:var(--bg3);cursor:default;opacity:0.5;}
-table.matrix td.empty:hover{outline:none;}
+table.matrix th{font-size:9px;font-weight:600;padding:3px 5px;color:var(--muted);white-space:nowrap;}
+table.matrix th.col-header{writing-mode:vertical-rl;text-orientation:mixed;transform:rotate(180deg);height:100px;vertical-align:bottom;padding-bottom:6px;font-size:8px;}
+table.matrix th.row-header{text-align:right;padding-right:8px;font-size:9px;}
+table.matrix td{width:var(--cell);height:var(--cell);min-width:var(--cell);min-height:var(--cell);border-radius:4px;cursor:pointer;position:relative;transition:all .15s;}
+table.matrix td:hover{outline:2px solid var(--accent);outline-offset:-1px;z-index:10;transform:scale(1.15);}
+table.matrix td:active{transform:scale(0.95);}
+table.matrix td .cell-count{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:rgba(255,255,255,0.85);pointer-events:none;text-shadow:0 1px 3px rgba(0,0,0,0.8);}
+table.matrix td.empty{background:var(--bg3);cursor:default;opacity:0.35;}
+table.matrix td.empty:hover{outline:none;transform:none;}
 table.matrix td.diagonal{background:rgba(255,255,255,0.04)!important;}
+table.matrix td.selected{outline:2px solid #fff;outline-offset:-1px;z-index:11;}
 
 /* Phase separator lines */
-table.matrix th.phase-sep,table.matrix td.phase-sep{border-left:2px solid #444;}
+table.matrix th.phase-sep,table.matrix td.phase-sep{border-left:2px solid rgba(255,255,255,0.12);}
 
-/* LEGEND under matrix */
-#matrix-legend{margin-top:16px;display:flex;gap:16px;flex-wrap:wrap;font-size:9px;}
+/* Phase group header row in matrix */
+.phase-group-cell{background:transparent!important;border:none!important;outline:none!important;height:auto!important;min-height:auto!important;cursor:default!important;padding:2px 0!important;}
+.phase-group-cell:hover{outline:none!important;transform:none!important;}
+.phase-group-label{font-size:10px;font-weight:700;text-align:center;padding:4px 0;letter-spacing:1px;}
+
+/* ── LEGEND ── */
+#matrix-legend{margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;font-size:10px;padding:10px 12px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;}
 .ml-item{display:flex;align-items:center;gap:5px;}
-.ml-swatch{width:14px;height:14px;border-radius:2px;}
+.ml-swatch{width:16px;height:16px;border-radius:3px;}
 
-/* SUMMARY CARDS */
-#summary{margin-top:20px;display:flex;gap:12px;flex-wrap:wrap;}
-.summary-card{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 14px;min-width:180px;}
-.summary-card h4{font-size:10px;color:var(--accent);font-weight:600;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px;}
-.summary-card .val{font-size:22px;font-weight:700;}
-.summary-card .sub{font-size:9px;color:var(--muted);margin-top:2px;}
-.summary-card.good .val{color:#34d399;}
-.summary-card.warn .val{color:#fbbf24;}
-.summary-card.bad .val{color:#f87171;}
+/* ── SUMMARY CARDS ── */
+#summary{margin-top:16px;display:grid;grid-template-columns:repeat(auto-fit, minmax(150px, 1fr));gap:10px;}
+.summary-card{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;transition:border-color .15s;}
+.summary-card:hover{border-color:var(--muted);}
+.summary-card h4{font-size:9px;color:var(--accent);font-weight:600;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px;}
+.summary-card .val{font-size:24px;font-weight:700;line-height:1;}
+.summary-card .sub{font-size:9px;color:var(--muted);margin-top:4px;}
+.summary-card.good .val{color:#45eaad;}
+.summary-card.warn .val{color:#ffd04a;}
+.summary-card.bad .val{color:#ff8080;}
 
-/* DETAIL PANEL */
-#detail-panel h3{font-size:12px;color:var(--accent);margin-bottom:4px;font-weight:600;}
-#detail-panel .meta{font-size:9px;color:var(--muted);margin-bottom:10px;}
-.edge-list{font-size:9px;}
-.edge-item{padding:3px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;}
+/* ── DETAIL PANEL ── */
+#detail-panel h3{font-size:13px;color:var(--accent);margin-bottom:4px;font-weight:600;}
+#detail-panel .meta{font-size:10px;color:var(--muted);margin-bottom:10px;}
+.edge-list{font-size:10px;}
+.edge-item{padding:5px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;}
 .edge-item:last-child{border-bottom:none;}
-.edge-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;}
-.edge-from{color:#a3a3a3;font-weight:500;}
+.edge-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+.edge-from{color:#c0c0c0;font-weight:500;}
 .edge-arrow{color:var(--accent);font-weight:700;}
-.edge-to{color:#a3a3a3;}
-.edge-type{color:var(--muted);font-size:8px;}
-.edge-label{color:#555;font-size:8px;}
+.edge-to{color:#c0c0c0;}
+.edge-type{color:var(--muted);font-size:9px;}
+.edge-label{color:#666;font-size:9px;}
 
-/* VERDICT */
-#verdict{margin-top:20px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:14px 18px;}
-#verdict h3{font-size:11px;color:var(--accent);margin-bottom:8px;font-weight:600;}
-#verdict .v-row{display:flex;align-items:flex-start;gap:8px;margin-bottom:6px;font-size:10px;}
-#verdict .v-icon{font-size:12px;flex-shrink:0;margin-top:1px;}
-#verdict .v-text{line-height:1.4;}
-#verdict .v-good{color:#34d399;}
-#verdict .v-warn{color:#fbbf24;}
-#verdict .v-bad{color:#f87171;}
+/* ── VERDICT ── */
+#verdict{margin-top:16px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:16px 18px;margin-bottom:24px;}
+#verdict h3{font-size:12px;color:var(--accent);margin-bottom:10px;font-weight:600;}
+#verdict .v-row{display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;font-size:11px;}
+#verdict .v-icon{font-size:14px;flex-shrink:0;margin-top:1px;}
+#verdict .v-text{line-height:1.5;}
+#verdict .v-good{color:#45eaad;}
+#verdict .v-warn{color:#ffd04a;}
+#verdict .v-bad{color:#ff8080;}
+
+/* ── RESPONSIVE: tablets ── */
+@media (min-width:768px){
+  #header .sub{display:inline;}
+  #main{flex-direction:row;}
+  #detail-panel{width:320px;min-width:320px;max-height:none;border-top:none;border-left:1px solid var(--border);}
+  :root{--cell:32px;}
+}
+/* ── RESPONSIVE: desktop ── */
+@media (min-width:1200px){
+  #matrix-area{padding:20px 24px;}
+  :root{--cell:36px;}
+  .summary-card .val{font-size:28px;}
+}
+/* ── RESPONSIVE: small mobile ── */
+@media (max-width:480px){
+  #header h1{font-size:11px;}
+  .mode-btn{font-size:9px;padding:5px 8px;}
+  :root{--cell:30px;}
+  #matrix-area{padding:10px 8px;}
+  table.matrix th.col-header{height:70px;font-size:7px;}
+  table.matrix th.row-header{font-size:7px;}
+  .summary-card{padding:8px 10px;}
+  .summary-card .val{font-size:20px;}
+  #verdict .v-row{font-size:10px;}
+}
 </style>
 </head>
 <body>
 
 <div id="header">
   <h1>MineMGL — Coupling Heatmap</h1>
-  <span class="sub">Phase×Layer matrix · click any cell to drill down · bright off-diagonal = coupling smell</span>
-  <button class="mode-btn active" id="btn-all">All Edges</button>
-  <button class="mode-btn" id="btn-cross">Cross-Phase Only</button>
+  <span class="sub">Phase×Layer matrix · tap any cell to drill down · bright off-diagonal = coupling smell</span>
+  <div class="btn-row">
+    <button class="mode-btn active" id="btn-all">All Edges</button>
+    <button class="mode-btn" id="btn-cross">Cross-Phase Only</button>
+  </div>
 </div>
 
 <div id="main">
@@ -4638,18 +4777,35 @@ function render() {
     hrow.appendChild(th);
   });
 
-  // Data rows
+  // Data rows — with phase group headers
   const tbody = table.createTBody();
   let prevRowPhase = '';
   usedKeys.forEach((rk, ri) => {
+    const [rp, rl] = rk.split('|');
+    // Insert phase group header row when phase changes
+    if (rp !== prevRowPhase) {
+      const gtr = tbody.insertRow();
+      const gth = document.createElement('th');
+      gth.className = 'row-header';
+      gth.style.color = PHASE_COLORS[rp];
+      gth.style.fontSize = '10px';
+      gth.style.fontWeight = '700';
+      gth.style.paddingTop = ri > 0 ? '8px' : '2px';
+      gth.textContent = 'Phase-' + PHASE_LABELS[rp];
+      gtr.appendChild(gth);
+      // fill remaining cells as empty spacers
+      usedKeys.forEach(() => {
+        const spacer = gtr.insertCell();
+        spacer.className = 'phase-group-cell';
+      });
+    }
+    prevRowPhase = rp;
     const tr = tbody.insertRow();
-    const [rp] = rk.split('|');
     const rth = document.createElement('th');
     rth.className = 'row-header';
     rth.textContent = cellLabel(rk);
     rth.style.color = PHASE_COLORS[rp];
     tr.appendChild(rth);
-    prevRowPhase = rp;
 
     let prevColPhase = '';
     usedKeys.forEach((ck, ci) => {
@@ -4678,7 +4834,11 @@ function render() {
       if (isCross) td.style.outline = '1px solid rgba(255,255,255,0.1)';
 
       td.title = `${cellLabel(rk)} → ${cellLabel(ck)}: ${count} edges`;
-      td.onclick = () => showDetail(rk, ck, data);
+      td.onclick = () => {
+        document.querySelectorAll('td.selected').forEach(el => el.classList.remove('selected'));
+        td.classList.add('selected');
+        showDetail(rk, ck, data);
+      };
     });
   });
 
@@ -4697,7 +4857,12 @@ function hexWithAlpha(hex, alpha) {
 
 function renderLegend() {
   const el = document.getElementById('matrix-legend');
-  el.innerHTML = '<span style="color:var(--muted);font-size:9px;">Cell color = dominant edge type, intensity = edge count (1-8+)</span>';
+  let html = '';
+  EDGE_TYPES.forEach(t => {
+    html += `<div class="ml-item"><div class="ml-swatch" style="background:${EDGE_COLORS[t]}"></div>${EDGE_LABELS[t]}</div>`;
+  });
+  html += `<div class="ml-item" style="color:var(--muted);margin-left:8px;">brightness = edge count</div>`;
+  el.innerHTML = html;
 }
 
 function renderSummary(matrix, usedKeys) {
