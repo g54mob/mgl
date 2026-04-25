@@ -1924,6 +1924,82 @@ MMF_Player "OnQuestComplete":
   5. MMF_AudioSource              → Victory jingle
 ```
 
+---
+
+## J. Package Size — What to Import (~300MB → ~20MB)
+
+> The full Feel `.unitypackage` is **~300MB**. Most of that is demo content.
+> After selective import, you keep **~20-25MB** of actual runtime code.
+
+### Size Breakdown
+
+| What | Est. Size | Keep? |
+|------|----------|-------|
+| **Demo scenes** (30+ scenes) | ~100MB | ❌ Skip |
+| **Demo textures/particles/audio** | ~80MB | ❌ Skip |
+| **Demo animations/prefabs** | ~50MB | ❌ Skip |
+| **NiceVibrations** (mobile haptics) | ~30MB | ❌ Skip — desktop game |
+| **HDRP/VFX Graph integrations** | ~15MB | ❌ Skip — using URP |
+| **Core scripts + editor** | ~15MB | ✅ Keep |
+| **Useful prefabs/materials/shaders** | ~2MB | ✅ Keep |
+| **MMTools utilities** | ~5MB | ✅ Partial |
+
+### What to UNCHECK when importing
+
+When importing the `.unitypackage` in Unity, uncheck these folders:
+- `Demos/` — biggest folder, all demo scenes
+- `NiceVibrations/` — entire mobile haptics sub-package
+- `MMFeedbacksForThirdParty/HDRP/`
+- `MMFeedbacksForThirdParty/VisualEffectGraph/`
+- `MMFeedbacksForThirdParty/UIToolkit/`
+- Any folder named `Demo`, `Example`, or `Test`
+
+### What to KEEP (import these)
+
+```
+MMFeedbacks/
+├── Core/           ← scripts + MMChannel ScriptableObjects
+├── Feedbacks/      ← 80+ feedback scripts (just .cs — no heavy assets)
+├── Shakers/        ← scripts + MMFlash prefab + flash material
+├── Springs/        ← scripts only
+├── MMFloatingText/ ← scripts + FloatingText prefab
+└── Editor/         ← custom inspector scripts
+
+MMTools/
+└── Core/           ← utility scripts (extensions, helpers)
+```
+
+### Non-Script Assets You Keep (~5 assets total)
+
+| Asset Type | What | Why needed |
+|-----------|------|-----------|
+| **Prefabs** | `MMFloatingTextSpawner` prefab, `MMFlash` screen overlay | Starting points for floating text + flash |
+| **Materials** | Flash overlay material (transparent white) | Screen flash effect |
+| **Shaders** | Screen flash shader (simple overlay) | Used by flash material |
+| **ScriptableObjects** | `MMChannel` assets (feedback routing) | Default channel for feedback targeting |
+
+**No meshes.** Feel has zero 3D models — it's a feedback framework, not an art pack.
+
+### Folders That Need Each Other
+
+| If you import... | You also need... |
+|-----------------|-----------------|
+| `MMFeedbacks/Core/` | `MMTools/Core/` (extensions, base classes) |
+| `MMFeedbacks/Feedbacks/` | `MMFeedbacks/Core/` |
+| `MMFeedbacks/Shakers/` | `MMFeedbacks/Core/` |
+| `MMFeedbacks/Springs/` | `MMFeedbacks/Core/` + `MMTools/Core/` |
+| `MMFeedbacks/MMFloatingText/` | `MMFeedbacks/Core/` + `MMTools/Core/` |
+| `MMFeedbacksForThirdParty/URP/` | `MMFeedbacks/Core/` + URP post-processing |
+| `MMFeedbacksForThirdParty/Cinemachine/` | `MMFeedbacks/Core/` + Cinemachine package |
+| `MMFeedbacksForThirdParty/TextMeshPro/` | `MMFeedbacks/Core/` + TMP package |
+
+### Quick Verification After Import
+
+After importing, check:
+1. **Zero console errors** — if errors about missing types, you're missing a dependency folder
+2. **MMF_Player component available** — Create empty GO → Add Component → search "MMF_Player"
+3. **Feedback dropdown works** — On MMF_Player, click "Add new feedback" → should show 80+ options
+
 <!-- ==== FILE: Documentation/GUI-Assets.md ==== -->
 # GUI & Art Assets — Complete Beginner Guide
 
@@ -3144,6 +3220,83 @@ The source also has `HighlightStyle.XrayThroughWalls` — a bool that sets `_ZTe
 ```
 
 The source groups renderers by `HighlightStyle` struct (Color + RimPower + Intensity + Xray) and renders them in a single `CommandBuffer`. Highlight Plus does the same internally via its URP Renderer Feature — no `CommandBuffer` management needed from your side.
+
+---
+
+## I. Package Size — What to Import
+
+> Highlight Plus is **much smaller** than Feel — the entire URP package is ~15-20MB.
+> After removing demos, you keep ~5-8MB.
+
+### Package Contents
+
+The repo contains **two versions** — only import one:
+
+| Folder | What | Import? |
+|--------|------|---------|
+| `HighlightPlus(URP unpacked)/` | **URP version** — this is what we need | ✅ YES |
+| `HighlightPlusBundle/` | Built-in RP version or bundle variant | ❌ Skip — wrong pipeline |
+
+### Folder Breakdown (URP version)
+
+```
+HighlightPlus(URP unpacked)/
+├── Runtime/              ← Core scripts + shaders + resources
+│   ├── Scripts/          ← HighlightEffect, HighlightManager, HighlightTrigger, HighlightProfile
+│   └── Resources/        ← Shaders, materials (Highlight Plus needs these at runtime)
+├── Editor/               ← Custom inspector scripts
+├── Demo/                 ← Demo scenes, materials, textures, scripts
+│   ├── Materials/        ← Demo materials
+│   ├── Profiles/         ← Example HighlightProfile assets
+│   ├── Scripts/          ← Demo controller scripts
+│   ├── Textures/         ← Demo textures
+│   └── URP settings/     ← Demo URP pipeline assets
+└── Documentation/        ← PDF/text docs
+```
+
+### What to KEEP
+
+| Folder | Size | Why |
+|--------|------|-----|
+| `Runtime/Scripts/` | ~2MB | Core components — `HighlightEffect`, `HighlightManager`, `HighlightProfile`, etc. |
+| `Runtime/Resources/` | ~3MB | Shaders + internal materials — **required** (loaded via `Resources.Load` at runtime) |
+| `Editor/` | ~1MB | Custom inspectors for HighlightEffect — nice to have |
+| `Demo/Profiles/` | ~50KB | Example HighlightProfile SOs — useful starting points to copy |
+
+### What to SKIP
+
+| Folder | Size | Why skip |
+|--------|------|---------|
+| `Demo/` (except Profiles) | ~8MB | Demo scenes, materials, textures — learning only |
+| `Documentation/` | ~1MB | PDF docs — you have this `.md` instead |
+| `HighlightPlusBundle/` | ~10MB | Built-in RP version — wrong pipeline |
+
+### Non-Script Assets You Keep
+
+| Asset Type | What | Why needed |
+|-----------|------|-----------|
+| **Shaders** (~10 .shader files) | Outline, glow, overlay, see-through, inner glow shaders | Core rendering — loaded from Resources at runtime |
+| **Materials** (~5 internal materials) | Internal materials used by the shaders | Required by the effect system |
+| **HighlightProfile SOs** (from Demo/Profiles) | Example profiles: outline, glow, see-through presets | Copy these as starting points for your own profiles |
+
+**No meshes. No textures (beyond internal shader resources).**
+
+### After Import
+
+1. URP Renderer Data → Add Renderer Feature → **Highlight Plus Renderer Feature** (auto-detected after import)
+2. That's it — no manual shader setup, no layer configuration, no custom Shader Graphs
+3. The `Highlighted` layer + `Highlight_Fresnel_Additive` Shader Graph + `FresnelHighlight` Renderer Feature from `ShaderGuide.md` are **all replaced** by Highlight Plus's single Renderer Feature
+
+### What It Replaces in Current Implementation
+
+| Current (temporary URP approach) | After Highlight Plus import |
+|--------------------------------|---------------------------|
+| `Highlight_Fresnel_Additive` Shader Graph | ❌ Delete — HP has its own shaders |
+| `M_Highlight_Fresnel` material | ❌ Delete — HP manages materials internally |
+| `Highlighted` layer (slot 31) | ❌ Delete — HP doesn't use layer swapping |
+| `FresnelHighlight` Renderer Feature (Render Objects) | ❌ Replace with Highlight Plus Renderer Feature |
+| `FresnelHighlighter.cs` layer-swap logic | ❌ Replace with `HighlightEffect.SetHighlighted(true/false)` |
+| `MaterialPropertyBlock` per-renderer color | ❌ Replace with `HighlightProfile` SOs per type |
 
 <!-- ==== FILE: Documentation/INDEX.md ==== -->
 # Imported Assets Analysis — Documentation Index
@@ -4773,3 +4926,93 @@ Shows building info text instantly.
 // Text types out when you look at a building
 // Auto-starts via OnShowText mode — no extra code needed
 ```
+
+---
+
+## G. Package Size — What to Import
+
+> Text Animator is **small** — the full package is ~5-10MB.
+> After removing examples, you keep ~2-3MB.
+
+### Package Contents
+
+```
+Febucci/Text Animator/
+├── Scripts/              ← Core runtime + editor
+│   ├── Runtime/          ← TextAnimator, TextAnimatorPlayer, built-in effects, action tags
+│   └── Editor/           ← Custom inspectors
+├── Extra/                ← Additional effects or utilities (optional)
+├── Example/              ← Demo scenes + scripts + fonts
+│   ├── Scripts/          ← Demo controller scripts
+│   └── Font/             ← Example TMP font assets
+└── Integrations/         ← Third-party integrations (dialogue systems, etc.)
+```
+
+### What to KEEP
+
+| Folder | Size | Why |
+|--------|------|-----|
+| `Scripts/Runtime/` | ~1.5MB | Core — `TextAnimator`, `TextAnimatorPlayer`, all built-in effects (shake, wave, bounce, fade, etc.) |
+| `Scripts/Editor/` | ~500KB | Custom inspectors — preview effects in editor |
+| `Extra/` | ~200KB | Additional effects — keep unless you only need basics |
+
+### What to SKIP
+
+| Folder | Size | Why skip |
+|--------|------|---------|
+| `Example/` | ~3MB | Demo scenes, demo scripts, example fonts — learning only |
+| `Integrations/` | ~1MB | Dialogue system integrations (Ink, Yarn, etc.) — not using those |
+| `Example/Font/` | ~2MB | Example TMP font assets — use your own fonts |
+
+### Non-Script Assets You Keep
+
+| Asset Type | What | Why needed |
+|-----------|------|-----------|
+| **ScriptableObjects** | Built-in effect presets (if any ship as SOs) | Effect configuration — usually created at runtime from tags |
+
+**No meshes. No textures. No materials. No shaders.** Text Animator works entirely through TMP's existing rendering — it manipulates per-character vertex data, doesn't add any visual assets.
+
+### Is This the Complete Package?
+
+**Yes.** The folder `Febucci/Text Animator/` contains:
+- All 12 behavior effects (shake, wave, bounce, wiggle, swing, rotation, fade, etc.)
+- All 8 appearance effects (size, fade, offset, rotation, etc.)
+- Typewriter system (`TextAnimatorPlayer`)
+- Action tags system (pause, speed, events)
+- Custom effect support via ScriptableObjects
+- Editor preview tools
+
+### After Import
+
+1. **Zero setup needed** — no Renderer Features, no layers, no shaders
+2. Add `TextAnimator` component to any TMP GO → effects work immediately via rich-text tags
+3. Add `TextAnimatorPlayer` for typewriter → text types out character by character
+4. Use tags directly in text strings: `"<shake>DANGER</shake> ahead!"`
+
+### Integration with Existing Scripts
+
+Text Animator is **purely additive** — you add components to existing TMP GameObjects, then use tags in your text strings. No script changes required for basic usage:
+
+```csharp
+// BEFORE (current — plain text)
+_moneyText.text = "$400.00";
+
+// AFTER (with Text Animator — add TextAnimator component to the GO, then)
+_moneyText.text = "<bounce>$400.00</bounce>";
+// The text bounces — zero code changes, just a tag in the string
+
+// For typewriter on quest descriptions:
+// 1. Add TextAnimator + TextAnimatorPlayer to quest description TMP
+// 2. Set TextAnimatorPlayer.OnShowText = OnEnable
+// 3. The text types out automatically whenever the GO is enabled
+```
+
+### Dependencies
+
+| Requires | Why |
+|----------|-----|
+| **TextMeshPro** (TMP) | Text Animator hooks into TMP's vertex manipulation — won't work without TMP |
+| Unity 2019.4+ | Minimum version |
+
+TMP is already in the project (used by all UI text), so no new dependencies.
+
