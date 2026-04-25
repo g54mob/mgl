@@ -16,7 +16,14 @@ FILES TO UPDATE:
 3. minemgl-heatmap-3d.html — 3D extruded bar heatmap (Three.js, orbit controls, hover glow, click inspect, shadows+fog+rim lighting, ACES tone mapping)
 
 WHAT TO DO:
-1. Read every *.cs file inside learn/ (all phase folders: phase-All, phase-a-1(New), phase-b(New), phase-c(New), phase-d(New), and any NEW phase-X folders, plus handTyped(latest)/Scripts/phase-a for phase-a scripts).
+1. Read every *.cs file from these sources (handTyped is the truth for phases All, A, A-1):
+   - Phase-All:  learn/handTyped(latest)/Scripts/phase-@all/
+   - Phase-A:    learn/handTyped(latest)/Scripts/phase-a/
+   - Phase-A1:   learn/handTyped(latest)/Scripts/phase-a-1/
+   - Phase-B:    learn/phase-b(New)/Scripts/
+   - Phase-C:    learn/phase-c(New)/Scripts/
+   - Phase-D:    learn/phase-d(New)/Scripts/
+   - Future:     any NEW learn/phase-X folders or handTyped(latest)/Scripts/phase-X/ as specified
 2. For each script, extract:
    - Phase (which folder it lives in)
    - Layer (0-Core, 1-Managers, 2-Data, 3-MonoBehaviours, 4-Utils, 5-Tests)
@@ -1536,9 +1543,11 @@ renderer.blockquote = function(quote) {
 };
 
 // Custom list items — handle task lists manually
+let mdvTaskIdx = 0;
 renderer.listitem = function(text, task, checked) {
     if (task) {
-        return `<li class="task-item"><input type="checkbox" class="task-cb"${checked ? ' checked' : ''} disabled />${text}</li>\n`;
+        const i = mdvTaskIdx++;
+        return `<li class="task-item"><input type="checkbox" class="task-cb" data-task-index="${i}"${checked ? ' checked' : ''} />${text}</li>\n`;
     }
     return `<li>${text}</li>\n`;
 };
@@ -1598,11 +1607,35 @@ function renderMD(src) {
 }
 
 function render() {
+    mdvTaskIdx = 0;
     const html = renderMD(MD);
     prevBody.innerHTML = html;
     splitPrev.innerHTML = html;
     buildTOC(html);
     updateStats();
+    // Interactive task checkboxes
+    [prevBody, splitPrev].forEach(container => {
+        container.querySelectorAll('.task-cb').forEach(cb => {
+            cb.addEventListener('change', () => {
+                const re = /- \[([ xX])\]/g;
+                let idx = 0;
+                MD = MD.replace(re, (m, ch) => {
+                    if (idx++ === parseInt(cb.dataset.taskIndex)) {
+                        return ch.trim() ? '- [ ]' : '- [x]';
+                    }
+                    return m;
+                });
+                rawEditor.value = MD;
+                splitEd.value = MD;
+                // Sync the other container's matching checkbox
+                [prevBody, splitPrev].forEach(c => {
+                    if (c === container) return;
+                    const other = c.querySelector(`.task-cb[data-task-index="${cb.dataset.taskIndex}"]`);
+                    if (other) other.checked = cb.checked;
+                });
+            });
+        });
+    });
 }
 
 function schedRender() {
@@ -5126,7 +5159,7 @@ function getAllFiles(dirPath) {
 }
 
 const targetDir = process.argv[2];
-if (!targetDir) { console.error('Usage: node pack.js <folder>'); process.exit(1); }
+if (!targetDir) { console.error("Usage: node pack.js <folder>"); process.exit(1); }
 if (!fs.existsSync(targetDir)) { console.error(`Folder not found: ${targetDir}`); process.exit(1); }
 
 const folderName = path.basename(targetDir);
@@ -6632,6 +6665,16 @@ function buildMarkedRenderer() {
         return `<div class="tbl-wrap"><table><thead>${header}</thead><tbody>${body}</tbody></table></div>`;
     };
 
+    // Task list checkboxes (interactive)
+    let taskIdx = 0;
+    renderer.listitem = function(text, task, checked) {
+        if (task) {
+            const i = taskIdx++;
+            return `<li class="md-task-item"><input type="checkbox" class="md-task-cb" data-task-index="${i}"${checked ? ' checked' : ''} />${text}</li>\n`;
+        }
+        return `<li>${text}</li>\n`;
+    };
+
     return renderer;
 }
 
@@ -6827,6 +6870,23 @@ function _renderContent(content, lang, ext, isMd) {
         // Apply hljs to any code blocks that weren't handled by renderer (fallback)
         div.querySelectorAll('pre code:not(.hljs)').forEach(block => {
             hljs.highlightElement(block);
+        });
+        // Interactive task checkboxes
+        div.querySelectorAll('.md-task-cb').forEach(cb => {
+            cb.addEventListener('change', () => {
+                const path = state.selectedPath;
+                if (!path) return;
+                const src = state.files[path];
+                const re = /- \[([ xX])\]/g;
+                let idx = 0, result = src.replace(re, (m, ch) => {
+                    if (idx++ === parseInt(cb.dataset.taskIndex)) {
+                        return ch.trim() ? '- [ ]' : '- [x]';
+                    }
+                    return m;
+                });
+                state.files[path] = result;
+                state.fullContent[path] = result;
+            });
         });
         codeWrapper.appendChild(div);
         return;
@@ -7315,5 +7375,4 @@ marked.use({ tokenizer: { del() {} } });
 </script>
 </body>
 </html>
-
 
