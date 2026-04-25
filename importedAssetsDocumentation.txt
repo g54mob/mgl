@@ -95,8 +95,8 @@ transform.DOMove(new Vector3(5, 0, 0), 1f);
 3. Tools > Demigiant > DOTween Utility Panel > **Setup DOTween**
 
 **Option B — From DLLs (already in this project):**
-1. Copy `Assemblies/DOTween.dll` and `Assemblies/DOTweenPro.dll` to `Assets/Plugins/`
-2. Unity will detect them automatically
+1. Copy `Assemblies/DOTween.dll` to `Assets/Plugins/` (skip `DOTweenPro.dll` — not needed)
+2. Unity will detect it automatically
 
 ### 3.2 First Usage
 
