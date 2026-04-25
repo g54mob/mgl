@@ -782,7 +782,7 @@ body {
     vertical-align: middle;
     position: relative;
     top: -1px;
-    cursor: default;
+    cursor: pointer;
     transition: background .14s, border-color .14s;
     background: transparent;
 }
@@ -1546,8 +1546,9 @@ renderer.blockquote = function(quote) {
 let mdvTaskIdx = 0;
 renderer.listitem = function(text, task, checked) {
     if (task) {
+        text = text.replace(/^<input[^>]*>/, '');
         const i = mdvTaskIdx++;
-        return `<li class="task-item"><input type="checkbox" class="task-cb" data-task-index="${i}"${checked ? ' checked' : ''} />${text}</li>\n`;
+        return `<li class="task-item"><input type="checkbox" class="task-cb" data-task-index="${i}"${checked ? ' checked' : ''} style="cursor:pointer" />${text}</li>\n`;
     }
     return `<li>${text}</li>\n`;
 };
@@ -3297,6 +3298,7 @@ const nodes = [
   {id:'ISaveLoadObj',label:'ISaveLoadableObj',phase:'b',layer:'2-Data',type:'interface'},
   {id:'SO_FootstepDef',label:'SO_FootstepDef',phase:'b',layer:'2-Data',type:'SO'},
   {id:'FresnelHL',label:'FresnelHighlighter',phase:'b',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
+  {id:'IHighlightable',label:'IHighlightable',phase:'b',layer:'2-Data',type:'interface'},
   {id:'InvOrch',label:'InventoryOrchestrator',phase:'b',layer:'3-MonoBehaviours',type:'Orchestrator'},
   {id:'BasePhysObj',label:'BasePhysicsObject',phase:'b',layer:'3-MonoBehaviours',type:'base class'},
   {id:'BaseSellable',label:'BaseSellableItem',phase:'b',layer:'3-MonoBehaviours',type:'base class'},
@@ -3384,9 +3386,11 @@ const links = [
   {s:'ConvShaker',t:'ConveyorBelt',type:'inherit'},{s:'ConvShakerH',t:'ConveyorBelt',type:'inherit'},
   {s:'ModBuildSupp',t:'BaseModSupp',type:'inherit'},
   // INTERFACE
-  {s:'InteractableComputer',t:'IInteractable',type:'interface'},{s:'BaseHeldTool',t:'IInteractable',type:'interface'},
+  {s:'InteractableComputer',t:'IInteractable',type:'interface'},{s:'InteractableComputer',t:'IHighlightable',type:'interface'},{s:'BaseHeldTool',t:'IInteractable',type:'interface'},
+  {s:'BaseHeldTool',t:'IHighlightable',type:'interface'},
   {s:'BaseHeldTool',t:'IIconItem',type:'interface'},{s:'BaseHeldTool',t:'ISaveLoadObj',type:'interface'},
-  {s:'BuildingObj',t:'IInteractable',type:'interface'},{s:'BuildingCrate',t:'IInteractable',type:'interface'},
+  {s:'BuildingObj',t:'IInteractable',type:'interface'},{s:'BuildingObj',t:'IHighlightable',type:'interface'},
+  {s:'BuildingCrate',t:'IInteractable',type:'interface'},
   {s:'OreNode',t:'IDamageable',type:'interface'},{s:'DmgOrePiece',t:'IDamageable',type:'interface'},
   // SINGLETON READS
   {s:'ShopUI',t:'UIManager',type:'singleton',lbl:'CloseAllSubManager'},{s:'InteractionWheelUI',t:'UIManager',type:'singleton',lbl:'CloseAllSubManager'},
@@ -3452,9 +3456,9 @@ const links = [
   {s:'PlayerGrab',t:'PlayerMov',type:'get',lbl:'_movement ref'},
   {s:'RbDragger',t:'PlayerGrab',type:'get',lbl:'ForceRelease()'},
   {s:'PlayerMov',t:'PlayerSpawn',type:'get',lbl:'GetRandomSpawnPoint()'},
-  {s:'FresnelHL',t:'BaseHeldTool',type:'get',lbl:'GetComponentInParent'},
-  {s:'FresnelHL',t:'UtilsB',type:'uses-util',lbl:'SetLayerRecursively'},
-  {s:'FresnelHL',t:'UtilsAll',type:'uses-util',lbl:'HasTag()'},
+  {s:'FresnelHL',t:'IHighlightable',type:'get',lbl:'GetHighlightProfile()'},
+  {s:'FresnelHL',t:'GameEvents_All',type:'event-sub',lbl:'OnMenuStateChanged'},
+  {s:'FresnelHL',t:'GE_B',type:'event-sub',lbl:'OnToolEquipped/ItemDropped'},
   {s:'ToolPickaxe',t:'PhysSoundPlayer',type:'get',lbl:'PlayImpactSound()'},
   {s:'ToolMagnet',t:'UtilsB',type:'uses-util',lbl:'IgnoreAllCollisions'},
   {s:'ToolMagnet',t:'BasePhysObj',type:'get',lbl:'STANDARD_DAMPING'},
@@ -3937,7 +3941,7 @@ const NM={
   InvDataService:{p:'b',l:'2-Data',n:'InventoryDataService'},GlobalEnumsB:{p:'b',l:'2-Data',n:'GlobalEnumsB'},
   F_InvSlot:{p:'b',l:'2-Data',n:'Field_InvSlot'},IIconItem:{p:'b',l:'2-Data',n:'IIconItem'},
   ISaveLoadObj:{p:'b',l:'2-Data',n:'ISaveLoadableObj'},SO_FootstepDef:{p:'b',l:'2-Data',n:'SO_FootstepDef'},
-  FresnelHL:{p:'b',l:'3-MonoBehaviours',n:'FresnelHighlighter'},InvOrch:{p:'b',l:'3-MonoBehaviours',n:'InventoryOrchestrator'},
+  FresnelHL:{p:'b',l:'3-MonoBehaviours',n:'FresnelHighlighter'},IHighlightable:{p:'b',l:'2-Data',n:'IHighlightable'},InvOrch:{p:'b',l:'3-MonoBehaviours',n:'InventoryOrchestrator'},
   BasePhysObj:{p:'b',l:'3-MonoBehaviours',n:'BasePhysicsObject'},BaseSellable:{p:'b',l:'3-MonoBehaviours',n:'BaseSellableItem'},
   PhysicsGib:{p:'b',l:'3-MonoBehaviours',n:'PhysicsGib'},PhysSoundPlayer:{p:'b',l:'3-MonoBehaviours',n:'PhysicsSoundPlayer'},
   PlayerCam:{p:'b',l:'3-MonoBehaviours',n:'PlayerCamera'},PlayerFoot:{p:'b',l:'3-MonoBehaviours',n:'PlayerFootsteps'},
@@ -3986,9 +3990,11 @@ const ALL_EDGES=[
   {s:'ToolWrench',t:'BaseHeldTool',type:'inherit'},
   {s:'ConvShaker',t:'ConveyorBelt',type:'inherit'},{s:'ConvShakerH',t:'ConveyorBelt',type:'inherit'},
   {s:'ModBuildSupp',t:'BaseModSupp',type:'inherit'},
-  {s:'InteractableComputer',t:'IInteractable',type:'interface'},{s:'BaseHeldTool',t:'IInteractable',type:'interface'},
+  {s:'InteractableComputer',t:'IInteractable',type:'interface'},{s:'InteractableComputer',t:'IHighlightable',type:'interface'},
+  {s:'BaseHeldTool',t:'IInteractable',type:'interface'},{s:'BaseHeldTool',t:'IHighlightable',type:'interface'},
   {s:'BaseHeldTool',t:'IIconItem',type:'interface'},{s:'BaseHeldTool',t:'ISaveLoadObj',type:'interface'},
-  {s:'BuildingObj',t:'IInteractable',type:'interface'},{s:'BuildingCrate',t:'IInteractable',type:'interface'},
+  {s:'BuildingObj',t:'IInteractable',type:'interface'},{s:'BuildingObj',t:'IHighlightable',type:'interface'},
+  {s:'BuildingCrate',t:'IInteractable',type:'interface'},
   {s:'OreNode',t:'IDamageable',type:'interface'},{s:'DmgOrePiece',t:'IDamageable',type:'interface'},
   {s:'ShopUI',t:'UIManager',type:'singleton',lbl:'CloseAll'},{s:'InteractionWheelUI',t:'UIManager',type:'singleton',lbl:'CloseAll'},
   {s:'moneyUI',t:'EconomyManager',type:'singleton',lbl:'GetMoney'},{s:'ShopDataService',t:'EconomyManager',type:'singleton',lbl:'GetMoney'},
@@ -4030,8 +4036,8 @@ const ALL_EDGES=[
   {s:'ShopUIOrch',t:'F_ShopCategory',type:'set'},{s:'ShopUIOrch',t:'WShopItem',type:'get'},
   {s:'PlayerCam',t:'PlayerMov',type:'get'},{s:'PlayerFoot',t:'PlayerMov',type:'get'},
   {s:'PlayerGrab',t:'PlayerMov',type:'get'},{s:'RbDragger',t:'PlayerGrab',type:'get'},
-  {s:'PlayerMov',t:'PlayerSpawn',type:'get'},{s:'FresnelHL',t:'BaseHeldTool',type:'get'},
-  {s:'FresnelHL',t:'UtilsB',type:'uses-util'},{s:'FresnelHL',t:'UtilsAll',type:'uses-util'},
+  {s:'PlayerMov',t:'PlayerSpawn',type:'get'},  {s:'FresnelHL',t:'IHighlightable',type:'get'},
+  {s:'FresnelHL',t:'GameEvents_All',type:'event-sub'},{s:'FresnelHL',t:'GE_B',type:'event-sub'},
   {s:'ToolPickaxe',t:'PhysSoundPlayer',type:'get'},{s:'ToolMagnet',t:'UtilsB',type:'uses-util'},
   {s:'ToolMagnet',t:'BasePhysObj',type:'get'},{s:'BaseHeldTool',t:'PlayerMov',type:'get'},
   {s:'BaseHeldTool',t:'GlobalEnumsB',type:'get'},{s:'BaseHeldTool',t:'SO_InteractionOpt',type:'get'},
@@ -4693,7 +4699,7 @@ const NM={
   InvDataService:{p:'b',l:'2-Data',n:'InventoryDataService'},GlobalEnumsB:{p:'b',l:'2-Data',n:'GlobalEnumsB'},
   F_InvSlot:{p:'b',l:'2-Data',n:'Field_InvSlot'},IIconItem:{p:'b',l:'2-Data',n:'IIconItem'},
   ISaveLoadObj:{p:'b',l:'2-Data',n:'ISaveLoadableObj'},SO_FootstepDef:{p:'b',l:'2-Data',n:'SO_FootstepDef'},
-  FresnelHL:{p:'b',l:'3-MonoBehaviours',n:'FresnelHighlighter'},InvOrch:{p:'b',l:'3-MonoBehaviours',n:'InventoryOrchestrator'},
+  FresnelHL:{p:'b',l:'3-MonoBehaviours',n:'FresnelHighlighter'},IHighlightable:{p:'b',l:'2-Data',n:'IHighlightable'},InvOrch:{p:'b',l:'3-MonoBehaviours',n:'InventoryOrchestrator'},
   BasePhysObj:{p:'b',l:'3-MonoBehaviours',n:'BasePhysicsObject'},BaseSellable:{p:'b',l:'3-MonoBehaviours',n:'BaseSellableItem'},
   PhysicsGib:{p:'b',l:'3-MonoBehaviours',n:'PhysicsGib'},PhysSoundPlayer:{p:'b',l:'3-MonoBehaviours',n:'PhysicsSoundPlayer'},
   PlayerCam:{p:'b',l:'3-MonoBehaviours',n:'PlayerCamera'},PlayerFoot:{p:'b',l:'3-MonoBehaviours',n:'PlayerFootsteps'},
@@ -4743,9 +4749,11 @@ const EDGES=[
   {s:'ToolWrench',t:'BaseHeldTool',type:'inherit'},
   {s:'ConvShaker',t:'ConveyorBelt',type:'inherit'},{s:'ConvShakerH',t:'ConveyorBelt',type:'inherit'},
   {s:'ModBuildSupp',t:'BaseModSupp',type:'inherit'},
-  {s:'InteractableComputer',t:'IInteractable',type:'interface'},{s:'BaseHeldTool',t:'IInteractable',type:'interface'},
+  {s:'InteractableComputer',t:'IInteractable',type:'interface'},{s:'InteractableComputer',t:'IHighlightable',type:'interface'},
+  {s:'BaseHeldTool',t:'IInteractable',type:'interface'},{s:'BaseHeldTool',t:'IHighlightable',type:'interface'},
   {s:'BaseHeldTool',t:'IIconItem',type:'interface'},{s:'BaseHeldTool',t:'ISaveLoadObj',type:'interface'},
-  {s:'BuildingObj',t:'IInteractable',type:'interface'},{s:'BuildingCrate',t:'IInteractable',type:'interface'},
+  {s:'BuildingObj',t:'IInteractable',type:'interface'},{s:'BuildingObj',t:'IHighlightable',type:'interface'},
+  {s:'BuildingCrate',t:'IInteractable',type:'interface'},
   {s:'OreNode',t:'IDamageable',type:'interface'},{s:'DmgOrePiece',t:'IDamageable',type:'interface'},
   {s:'ShopUI',t:'UIManager',type:'singleton',lbl:'CloseAllSubManager'},{s:'InteractionWheelUI',t:'UIManager',type:'singleton',lbl:'CloseAllSubManager'},
   {s:'moneyUI',t:'EconomyManager',type:'singleton',lbl:'GetMoney'},{s:'ShopDataService',t:'EconomyManager',type:'singleton',lbl:'GetMoney'},
@@ -4796,8 +4804,9 @@ const EDGES=[
   {s:'ShopUIOrch',t:'F_ShopCategory',type:'set',lbl:'SetNameText'},{s:'ShopUIOrch',t:'WShopItem',type:'get',lbl:'itemDef'},
   {s:'PlayerCam',t:'PlayerMov',type:'get',lbl:'Speed/IsGrounded'},{s:'PlayerFoot',t:'PlayerMov',type:'get',lbl:'MoveInput'},
   {s:'PlayerGrab',t:'PlayerMov',type:'get',lbl:'_movement'},{s:'RbDragger',t:'PlayerGrab',type:'get',lbl:'ForceRelease()'},
-  {s:'PlayerMov',t:'PlayerSpawn',type:'get',lbl:'GetRandomSpawnPoint()'},{s:'FresnelHL',t:'BaseHeldTool',type:'get',lbl:'GetComponentInParent'},
-  {s:'FresnelHL',t:'UtilsB',type:'uses-util',lbl:'SetLayerRecursively'},{s:'FresnelHL',t:'UtilsAll',type:'uses-util',lbl:'HasTag()'},
+  {s:'PlayerMov',t:'PlayerSpawn',type:'get',lbl:'GetRandomSpawnPoint()'},{s:'FresnelHL',t:'IHighlightable',type:'get',lbl:'GetHighlightProfile()'},
+  {s:'FresnelHL',t:'GameEvents_All',type:'event-sub',lbl:'OnMenuStateChanged'},
+  {s:'FresnelHL',t:'GE_B',type:'event-sub',lbl:'OnToolEquipped/ItemDropped'},
   {s:'ToolPickaxe',t:'PhysSoundPlayer',type:'get',lbl:'PlayImpactSound()'},{s:'ToolMagnet',t:'UtilsB',type:'uses-util',lbl:'IgnoreAllCollisions'},
   {s:'ToolMagnet',t:'BasePhysObj',type:'get',lbl:'STANDARD_DAMPING'},{s:'BaseHeldTool',t:'PlayerMov',type:'get',lbl:'ViewModelContainer'},
   {s:'BaseHeldTool',t:'GlobalEnumsB',type:'get',lbl:'InteractionType'},{s:'BaseHeldTool',t:'SO_InteractionOpt',type:'get',lbl:'interactionType'},
@@ -6669,6 +6678,7 @@ function buildMarkedRenderer() {
     let taskIdx = 0;
     renderer.listitem = function(text, task, checked) {
         if (task) {
+            text = text.replace(/^<input[^>]*>/, '');
             const i = taskIdx++;
             return `<li class="md-task-item"><input type="checkbox" class="md-task-cb" data-task-index="${i}"${checked ? ' checked' : ''} />${text}</li>\n`;
         }
