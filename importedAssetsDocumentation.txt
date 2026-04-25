@@ -37,6 +37,7 @@
 25. [MMF_Player Inspector Deep Dive](#25-mmf_player-inspector-deep-dive) — Every setting explained
 26. [Creating Custom Feedbacks](#26-advanced-creating-custom-feedbacks) — Extend the system
 27. [Quick Reference Card](#27-quick-reference-card) — Copy-paste API cheatsheet
+28. [Real-World Use Cases From the Main Source](#28-real-world-use-cases-from-the-main-source) — TNT explosion, pickaxe hit, ore break, item pickup, camera shaker replacement, particle pooling, quest completion
 
 ---
 
@@ -1667,6 +1668,144 @@ MyManager.Instance.DoSomething();
 bool exists = MyManager.HasInstance;
 ```
 
+---
+
+## 28. Real-World Use Cases From the Main Source
+
+> This section maps actual systems in `Scripts/Assembly-CSharp/` to Feel features that could replace or enhance them.
+
+### 28.1 TNT Explosion → MMF_Player "OnExplosion"
+
+**Current source** (`DetonatorExplosion.cs` line 123–168):
+The `Explode()` method plays a sound, enables particles, spawns ore pieces, and calls `PhysicsUtils.SimpleExplosion()`. There is **no camera shake, no screen flash, no freeze frame** — just sound + particles + physics.
+
+**With Feel:**
+
+```
+MMF_Player "OnTNTExplosion" (assign to DetonatorExplosion):
+  1. MMF_FreezeFrame         → 0.06s hit-stop (sells the impact)
+  2. MMF_CameraShake         → Amplitude 5, Duration 0.6s, Frequency 25
+  3. MMF_Flash               → White, Duration 0.15s, Alpha 0.8
+  4. MMF_ParticlesInstantiation → Spawn dust cloud VFX at explosion point
+  5. MMF_Vignette (URP)      → Dark edges for 0.3s (post-processing)
+```
+
+```csharp
+// In DetonatorExplosion.Explode():
+[SerializeField] MMF_Player _explosionFeedback;
+
+// After: ParticleObject.SetActive(true);
+_explosionFeedback?.PlayFeedbacks(ParticleObject.transform.position);
+```
+
+### 28.2 Pickaxe Mining Hit → MMF_Player "OnMineHit"
+
+**Current source** (`ToolPickaxe.cs` line 49–94):
+`PerformAttack()` raycasts, calls `TakeDamage()`, spawns hit particles, plays sound, applies force. **No camera punch, no screen feedback.**
+
+**With Feel:**
+
+```
+MMF_Player "OnPickaxeHit" (assign to ToolPickaxe):
+  1. MMF_CameraShake         → Amplitude 0.5, Duration 0.15s (subtle)
+  2. MMF_ScaleSpring          → Punch the pickaxe model scale (0.85→1.0)
+  3. MMF_ChromaticAberration  → Brief 0.05s pulse (URP post-process)
+```
+
+```csharp
+// In ToolPickaxe.PerformAttack(), after TakeDamage:
+[SerializeField] MMF_Player _hitFeedback;
+_hitFeedback?.PlayFeedbacks(hit.point);
+```
+
+### 28.3 Ore Node Break → MMF_Player "OnOreBreak"
+
+**Current source** (`DamageableOrePiece.cs` line 20–31):
+When `Health <= 0`, plays break sound, spawns break particles, calls `CompleteClusterBreaking()` and `SimpleExplosion()`.
+
+**With Feel:**
+
+```
+MMF_Player "OnOreBreak":
+  1. MMF_FreezeFrame         → 0.04s (micro hit-stop)
+  2. MMF_CameraShake         → Amplitude 2, Duration 0.3s
+  3. MMF_ParticlesInstantiation → Extra debris VFX
+  4. MMF_ScaleSpring          → Punch nearby UI ore counter
+```
+
+### 28.4 Item Pickup → MMF_Player "OnPickup"
+
+**Current source** (`PlayerInventory.cs` line 307–363):
+`TryAddToInventory()` sets tool inactive, plays `PickupItemSound`, calls `UpdateUI()`. **No visual juice.**
+
+**With Feel:**
+
+```
+MMF_Player "OnItemPickup":
+  1. MMF_Scale               → UI slot icon scale punch (1.0→1.3→1.0)
+  2. MMF_Flash               → Subtle green flash, Duration 0.1s, Alpha 0.3
+  3. MMF_AudioSource          → Replace manual PlayUISound
+```
+
+### 28.5 MainMenuCameraShaker → Replace with MMCameraShaker
+
+**Current source** (`MainMenuCameraShaker.cs`, 52 lines):
+Custom Perlin noise-based camera shake + `ApplyViewPunch()`. This is exactly what `MMCameraShaker` + `MMPositionShaker` does out of the box.
+
+**With Feel (replace entirely):**
+
+```csharp
+// Delete MainMenuCameraShaker.cs
+// On MainMenu Camera: add MMCameraShaker + MMPositionShaker
+// In MainMenu.PlayElevatorLowerAnimation():
+//   OLD: FindObjectOfType<MainMenuCameraShaker>()?.ApplyViewPunch(...)
+//   NEW: elevatorFeedback.PlayFeedbacks();
+
+MMF_Player "OnElevatorDrop":
+  1. MMF_CameraShake     → Amplitude 3, Duration 1s
+  2. MMF_PositionShake   → Low-freq rumble
+```
+
+### 28.6 TMPBounceEffect → Replace with MMSpringTMP or Keep
+
+**Current source** (`TMPBounceEffect.cs`, 92 lines):
+Uses DOTweenTMPAnimator to bounce+color-cycle each character. This is a DOTween dependency that could be replaced by:
+- **MMSpringTMPFontSize** + **MMSpringTMPTextColor** for spring-based approach
+- Or keep DOTween version — it works fine and is more specialized
+
+### 28.7 ParticleManager → Enhance with MMSimpleObjectPooler
+
+**Current source** (`ParticleManager.cs`, 25 lines):
+`CreateParticle()` calls `Object.Instantiate()` every time. **No pooling** — GC pressure on frequent hits.
+
+**With Feel:**
+Replace with `MMF_ParticlesInstantiation` feedback (has built-in pooling) or use `MMSimpleObjectPooler` directly:
+
+```csharp
+// Replace:
+Singleton<ParticleManager>.Instance.CreateParticle(prefab, pos, rot);
+// With (pooled):
+GameObject particle = particlePooler.GetPooledGameObject();
+particle.transform.SetPositionAndRotation(pos, rot);
+particle.SetActive(true);
+```
+
+### 28.8 Quest Completion → MMF_Player "OnQuestComplete"
+
+**Current source** (`QuestManager.cs` line 38–59):
+When quest completes: adds money, adds research tickets, removes from active list, fires `QuestCompleted` event. **No celebration feedback.**
+
+**With Feel:**
+
+```
+MMF_Player "OnQuestComplete":
+  1. MMF_Scale               → HUD quest panel punch
+  2. MMF_Flash               → Gold flash, 0.2s
+  3. MMF_TMPColor            → "Quest Complete!" text gold→white
+  4. MMF_ParticlesInstantiation → Confetti burst on screen edges
+  5. MMF_AudioSource          → Victory jingle
+```
+
 <!-- ==== FILE: Documentation/GUI-Assets.md ==== -->
 # GUI & Art Assets — Complete Beginner Guide
 
@@ -1952,7 +2091,7 @@ For UI frames/panels that need to scale without stretching corners:
 11. [Performance Tips](#11-performance-tips)
 12. [Troubleshooting](#12-troubleshooting)
 13. [Folder Structure](#13-folder-structure)
-14. [Real-World Example: Replacing FresnelHighlighter (Phase B/D)](#14-real-world-example-replacing-a-custom-fresnel-highlighter) — Full migration from custom shader to Highlight Plus
+14. [Real-World Example: Replacing FresnelHighlighter (Phase B/D)](#14-real-world-example-replacing-a-custom-fresnel-highlighter) — Full migration from custom shader to Highlight Plus, complete PlayerController.OutlineLookedAtThing() mapping
 
 ---
 
@@ -2854,6 +2993,35 @@ effect.seeThroughTintColor = new Color(0, 0.5f, 1f, 0.5f);
 
 Add `HighlightSeeThroughOccluder` to wall objects, and highlighted objects become visible through them — useful for tools behind crates, ores behind rocks, etc.
 
+### 14.8 Full Source Mapping: Every Highlight Call in PlayerController.OutlineLookedAtThing()
+
+The original `PlayerController.cs` (line 655–739) raycasts and highlights 7 different object types. Here's the **exact 1:1 Highlight Plus replacement** for each:
+
+```
+Source: PlayerController.OutlineLookedAtThing()
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ORIGINAL (FresnelHighlighter)                    → HIGHLIGHT PLUS REPLACEMENT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━    ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BaseHeldTool         → ToolPreset (cyan)         → Profile_Tool (outline+glow cyan)
+BuildingCrate        → ToolPreset (cyan)         → Profile_Tool
+ComputerTerminal     → ToolPreset (cyan)         → Profile_Tool
+ContractsTerminal    → ToolPreset (cyan)         → Profile_Tool
+DetonatorTrigger     → ToolPreset (cyan)         → Profile_Tool
+DetonatorBuySign     → ToolPreset (cyan)         → Profile_Tool
+Tag:"Grabbable"      → GenericGrabbablePreset    → Profile_Grabbable
+BuildingObject+Hammer→ BuildingPreset (cyan)     → Profile_Building
+BuildingObject+Wrench→ WrenchEnable/Disable      → Profile_WrenchGreen / Profile_WrenchRed
+```
+
+The source also has `HighlightStyle.XrayThroughWalls` — a bool that sets `_ZTest` to `Always(8)` vs `LessEqual(4)`. Highlight Plus equivalent:
+
+```csharp
+// XrayThroughWalls = true  →  effect.outlineVisibility = Visibility.AlwaysOnTop;
+// XrayThroughWalls = false →  effect.outlineVisibility = Visibility.Normal;
+```
+
+The source groups renderers by `HighlightStyle` struct (Color + RimPower + Intensity + Xray) and renders them in a single `CommandBuffer`. Highlight Plus does the same internally via its URP Renderer Feature — no `CommandBuffer` management needed from your side.
+
 <!-- ==== FILE: Documentation/INDEX.md ==== -->
 # Imported Assets Analysis — Documentation Index
 
@@ -3709,6 +3877,7 @@ animator.PrepopulateCrossfadePool(3);
 13. [Performance Tips](#13-performance-tips)
 14. [Troubleshooting](#14-troubleshooting)
 15. [Folder Structure](#15-folder-structure)
+16. [Real-World Use Cases From the Main Source](#16-real-world-use-cases-from-the-main-source) — TMPBounceEffect replacement, Quest HUD, Popups, Controls, Building Info
 
 ---
 
@@ -4364,5 +4533,117 @@ Febucci/Text Animator/
 <shake a=10 f=3>                       → amplitude=10, frequency=3
 <wave a=5 f=1 d=0.1>                 → amplitude=5, frequency=1, delay=0.1
 <bounce a=8>                           → amplitude=8
+```
+
+---
+
+## 16. Real-World Use Cases From the Main Source
+
+> This section maps actual systems in `Scripts/Assembly-CSharp/` to Text Animator features.
+
+### 16.1 TMPBounceEffect.cs → Replace with Text Animator Tags
+
+**Current source** (`TMPBounceEffect.cs`, 92 lines):
+A custom DOTween-based per-character bounce + color cycling effect. Requires DOTween dependency, 92 lines of code, manual `DOTweenTMPAnimator` setup.
+
+**With Text Animator (replace entirely — 0 lines of code):**
+
+```
+// BEFORE (TMPBounceEffect.cs — 92 lines + DOTween dependency):
+_animator = new DOTweenTMPAnimator(_text);
+for (int i = 0; i < characterCount; i++)
+    _seq.Join(_animator.DOOffsetChar(i, new Vector3(0, bounceHeight, 0), duration)
+        .SetLoops(int.MaxValue, LoopType.Yoyo));
+
+// AFTER (Text Animator — zero code, just tags in the text string):
+"<bounce a=2.5><rainb>Quest Complete!</rainb></bounce>"
+```
+
+The `<bounce>` tag replicates the vertical offset animation. The `<rainb>` tag replicates the color cycling. Both are built-in — no DOTween, no script, no Awake/OnEnable/OnDisable lifecycle management.
+
+**Bonus:** Text Animator effects are **per-word controllable** via tags:
+
+```
+"<bounce>New Item:</bounce> <wave>Diamond Pickaxe</wave>"
+// "New Item:" bounces, "Diamond Pickaxe" waves — different effects per word
+```
+
+### 16.2 QuestHud / QuestInfoUI → Typewriter for Quest Text
+
+**Current source** (`QuestHud.cs` + `QuestInfoUI.cs`):
+Quest names and reward text are set instantly via `NameText.text = _quest.Name`. No animation.
+
+**With Text Animator:**
+
+```csharp
+// In QuestInfoUI.Initialize():
+// BEFORE:
+NameText.text = _quest.Name;
+
+// AFTER (add TextAnimator + TextAnimatorPlayer to the TMP_Text):
+NameText.text = "<size>" + _quest.Name + "</size>";
+// Characters scale in one by one as the quest appears in the HUD
+```
+
+### 16.3 InfoMessagePopup → Typewriter for Important Messages
+
+**Current source** (`InfoMessagePopup.cs`, 23 lines):
+`ShowInfoPopup(header, message)` sets text instantly. These are important game messages that could benefit from typewriter reveal.
+
+**With Text Animator:**
+
+```csharp
+// Add TextAnimator + TextAnimatorPlayer to _messageText
+// The message types out character by character
+// Add emphasis to keywords:
+string animatedMessage = "<shake>WARNING:</shake> Your mine is running out of " +
+    "<wave>" + resourceName + "</wave>";
+popup.ShowInfoPopup("Alert", animatedMessage);
+```
+
+### 16.4 UIManager.UpdateOnScreenControls → Animated Keybind Display
+
+**Current source** (`UIManager.cs` line 254–268):
+Builds a controls text string with keybind names. Static text, no emphasis.
+
+**With Text Animator:**
+
+```csharp
+// BEFORE:
+text = "Grab Physics - " + grabKey + "\nInteract - " + interactKey;
+
+// AFTER (make keybinds pop):
+text = "Grab Physics - <bounce>" + grabKey + "</bounce>\n" +
+       "Interact - <bounce>" + interactKey + "</bounce>";
+// Keybind names bounce to draw attention
+```
+
+### 16.5 QuestTreeItemButton → "Completed!" with Effects
+
+**Current source** (`QuestTreeItemButton.cs` line 109–112):
+When quest is completed, text is set to `"Completed!"` — static, no fanfare.
+
+**With Text Animator:**
+
+```csharp
+// BEFORE:
+_questProgressText.text = "Completed!";
+
+// AFTER:
+_questProgressText.text = "<bounce><rainb>Completed!</rainb></bounce>";
+// "Completed!" bounces with rainbow colors — visible celebration
+```
+
+### 16.6 Building Info Description → Animated Tooltip
+
+**Current source** (`UIManager.ShowBuildingInfo(string description)`, line 247–252):
+Shows building info text instantly.
+
+**With Text Animator (typewriter tooltip):**
+
+```csharp
+// Add TextAnimator + TextAnimatorPlayer to _autominerResourceText
+// Text types out when you look at a building
+// Auto-starts via OnShowText mode — no extra code needed
 ```
 
