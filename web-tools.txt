@@ -3367,31 +3367,33 @@ const links = [
   {s:'SellerMachine',t:'EconomyManager',type:'singleton',lbl:'AddMoney'},
   {s:'BuildingObj',t:'BuildingMgr',type:'singleton',lbl:'GetCratePrefab'},{s:'BuildingCrate',t:'EconomyManager',type:'singleton',lbl:'GetMoney'},
   {s:'ShopUITest',t:'EconomyManager',type:'singleton',lbl:'AddMoney'},
-  // EVENT SUBSCRIBE
-  {s:'UIManager',t:'GE_A',type:'event-sub',lbl:'OnMenuStateChanged'},{s:'UIManager',t:'GE_B',type:'event-sub',lbl:'OnOpenInventoryView'},
+  // EVENT SUBSCRIBE (OnMenuStateChanged + OnMoneyChanged now in GameEvents_All)
+  {s:'UIManager',t:'GameEvents_All',type:'event-sub',lbl:'OnMenuStateChanged'},
   {s:'InteractionWheelUI',t:'GE_A',type:'event-sub',lbl:'OnOpen/CloseInteractionView'},
   {s:'ShopUI',t:'GE_A',type:'event-sub',lbl:'OnOpen/CloseShopView'},
-  {s:'bgUI',t:'GE_A',type:'event-sub',lbl:'OnMenuStateChanged'},{s:'moneyUI',t:'GE_A',type:'event-sub',lbl:'OnMoneyChanged'},
-  {s:'ShopUIOrch',t:'GE_A',type:'event-sub',lbl:'OnMoneyChanged/UnlockedCat'},
-  {s:'SimplePlayerCtrl',t:'GE_A',type:'event-sub',lbl:'OnMenuStateChanged'},
+  {s:'bgUI',t:'GameEvents_All',type:'event-sub',lbl:'OnMenuStateChanged'},{s:'moneyUI',t:'GameEvents_All',type:'event-sub',lbl:'OnMoneyChanged'},
+  {s:'ShopUIOrch',t:'GameEvents_All',type:'event-sub',lbl:'OnMoneyChanged'},{s:'ShopUIOrch',t:'GE_A',type:'event-sub',lbl:'OnUnlockedCategory'},
+  {s:'SimplePlayerCtrl',t:'GameEvents_All',type:'event-sub',lbl:'OnMenuStateChanged'},
   {s:'InventoryUI',t:'GE_B',type:'event-sub',lbl:'OnOpen/CloseInventoryView'},
-  {s:'InvOrch',t:'GE_B',type:'event-sub',lbl:'OnToolPickupRequested'},{s:'InvOrch',t:'GE_A',type:'event-sub',lbl:'OnMoneyChanged'},
-  {s:'PlayerMov',t:'GE_A',type:'event-sub',lbl:'OnMenuStateChanged'},{s:'PlayerCam',t:'GE_A',type:'event-sub',lbl:'OnMenuStateChanged'},
-  {s:'PlayerGrab',t:'GE_A',type:'event-sub',lbl:'OnMenuStateChanged'},{s:'PlayerGrab',t:'GE_B',type:'event-sub',lbl:'OnToolEquipped'},
-  {s:'StartingElevator',t:'GE_A1',type:'event-sub',lbl:'OnGamePaused/Unpaused'},
-  {s:'ElevatorTest',t:'GE_A1',type:'event-sub',lbl:'OnElevatorLanded'},
+  {s:'InvOrch',t:'GE_B',type:'event-sub',lbl:'OnToolPickupRequested'},{s:'InvOrch',t:'GameEvents_All',type:'event-sub',lbl:'OnMoneyChanged'},
+  {s:'PlayerMov',t:'GameEvents_All',type:'event-sub',lbl:'OnMenuStateChanged'},{s:'PlayerCam',t:'GameEvents_All',type:'event-sub',lbl:'OnMenuStateChanged'},
+  {s:'PlayerGrab',t:'GameEvents_All',type:'event-sub',lbl:'OnMenuStateChanged'},{s:'PlayerGrab',t:'GE_B',type:'event-sub',lbl:'OnToolEquipped'},
+  {s:'StartingElevator',t:'GE_A1',type:'event-sub',lbl:'OnGamePaused/UnPaused'},
+  {s:'CameraShaker',t:'GE_A1',type:'event-sub',lbl:'OnCamViewPunch'},
   {s:'PhysLimitWarn',t:'GE_C',type:'event-sub',lbl:'OnOreLimitChanged'},
-  // EVENT RAISE
-  {s:'EconomyManager',t:'GE_A',type:'event-raise',lbl:'RaiseMoneyChanged'},
-  {s:'InteractionWheelUI',t:'GE_A',type:'event-raise',lbl:'RaiseMenuStateChanged'},
-  {s:'ShopUI',t:'GE_A',type:'event-raise',lbl:'RaiseMenuStateChanged'},
-  {s:'InventoryUI',t:'GE_A',type:'event-raise',lbl:'RaiseMenuStateChanged'},{s:'InventoryUI',t:'GE_B',type:'event-raise',lbl:'RaiseCloseInventoryView'},
+  // EVENT RAISE (OnMenuStateChanged + OnMoneyChanged now target GameEvents_All)
+  {s:'EconomyManager',t:'GameEvents_All',type:'event-raise',lbl:'RaiseMoneyChanged'},
+  {s:'UIManager',t:'GE_A',type:'event-raise',lbl:'RaiseCloseShopView/InteractionView'},
+  {s:'InteractionWheelUI',t:'GameEvents_All',type:'event-raise',lbl:'RaiseMenuStateChanged'},
+  {s:'ShopUI',t:'GameEvents_All',type:'event-raise',lbl:'RaiseMenuStateChanged'},
+  {s:'InventoryUI',t:'GameEvents_All',type:'event-raise',lbl:'RaiseMenuStateChanged'},{s:'InventoryUI',t:'GE_B',type:'event-raise',lbl:'RaiseCloseInventoryView'},
   {s:'InteractableComputer',t:'GE_A',type:'event-raise',lbl:'RaiseOpenShopView'},
   {s:'SimplePlayerIntr',t:'GE_A',type:'event-raise',lbl:'RaiseOpenInteractionView'},
-  {s:'ShopUIOrch',t:'GE_A',type:'event-raise',lbl:'RaiseMoneyChanged/CloseShop'},
+  {s:'ShopUIOrch',t:'GE_A',type:'event-raise',lbl:'RaiseCloseShopView'},
   {s:'BaseHeldTool',t:'GE_B',type:'event-raise',lbl:'RaiseToolPickupRequested'},
   {s:'InvOrch',t:'GE_B',type:'event-raise',lbl:'RaiseToolEquipped/Switched'},
-  {s:'StartingElevator',t:'GE_A1',type:'event-raise',lbl:'RaiseElevatorLanded'},
+  {s:'StartingElevator',t:'GE_A1',type:'event-raise',lbl:'RaiseElevatorLanded/CamViewPunch'},
+  {s:'ElevatorTest',t:'GE_A1',type:'event-raise',lbl:'RaiseCamViewPunch/GamePaused/UnPaused'},
   {s:'OreNode',t:'GE_C',type:'event-raise',lbl:'RaiseOreMined'},{s:'OrePiece',t:'GE_C',type:'event-raise',lbl:'RaiseOreSold'},
   {s:'OreLimitMgr',t:'GE_C',type:'event-raise',lbl:'RaiseOreLimitChanged'},{s:'SellerMachine',t:'GE_C',type:'event-raise',lbl:'RaiseOreSold'},
   {s:'BuildingObj',t:'GE_D',type:'event-raise',lbl:'RaiseBuildingRemoved'},{s:'BuildingCrate',t:'GE_D',type:'event-raise',lbl:'RaiseBuildingTakeReq'},
@@ -3628,9 +3630,11 @@ nodeEls.append('text')
 
 // Edge toggle bar
 const edgeBar = document.getElementById('edge-bar');
+const edgeBtns = [];
 EDGE_TYPES.forEach(t => {
   const btn = document.createElement('button');
   btn.className = 'edge-btn active';
+  btn.dataset.type = t;
   btn.innerHTML = `<span class="edge-swatch" style="background:${EDGE_COLORS[t]}"></span>${EDGE_LABELS[t]}`;
   btn.onclick = () => {
     if (activeEdges.has(t)) { activeEdges.delete(t); btn.classList.add('off'); btn.classList.remove('active'); }
@@ -3638,7 +3642,33 @@ EDGE_TYPES.forEach(t => {
     edgeEls.style('display', d => activeEdges.has(d.type) ? null : 'none');
   };
   edgeBar.appendChild(btn);
+  edgeBtns.push(btn);
 });
+// Separator + None / All buttons
+const sep = document.createElement('span');
+sep.style.cssText = 'width:1px;height:16px;background:var(--border);margin:0 3px;';
+edgeBar.appendChild(sep);
+const noneBtn = document.createElement('button');
+noneBtn.className = 'edge-btn';
+noneBtn.textContent = 'None';
+noneBtn.style.cssText = 'color:var(--muted);font-style:italic;';
+noneBtn.onclick = () => {
+  activeEdges.clear();
+  edgeBtns.forEach(b => { b.classList.add('off'); b.classList.remove('active'); });
+  edgeEls.style('display', 'none');
+};
+edgeBar.appendChild(noneBtn);
+const allBtn = document.createElement('button');
+allBtn.className = 'edge-btn';
+allBtn.textContent = 'All';
+allBtn.style.cssText = 'color:var(--accent);font-weight:600;';
+allBtn.onclick = () => {
+  EDGE_TYPES.forEach(t => activeEdges.add(t));
+  edgeBtns.forEach(b => { b.classList.remove('off'); b.classList.add('active'); });
+  edgeEls.style('display', null);
+};
+edgeBar.appendChild(allBtn);
+
 
 // Click node to highlight + show info
 let selectedId = null;
@@ -3938,20 +3968,22 @@ const ALL_EDGES=[
   {s:'SellerMachine',t:'EconomyManager',type:'singleton',lbl:'AddMoney'},
   {s:'BuildingObj',t:'BuildingMgr',type:'singleton',lbl:'GetCratePrefab'},{s:'BuildingCrate',t:'EconomyManager',type:'singleton',lbl:'GetMoney'},
   {s:'ShopUITest',t:'EconomyManager',type:'singleton',lbl:'AddMoney'},
-  {s:'UIManager',t:'GE_A',type:'event-sub'},{s:'UIManager',t:'GE_B',type:'event-sub'},
+  {s:'UIManager',t:'GameEvents_All',type:'event-sub'},
   {s:'InteractionWheelUI',t:'GE_A',type:'event-sub'},{s:'ShopUI',t:'GE_A',type:'event-sub'},
-  {s:'bgUI',t:'GE_A',type:'event-sub'},{s:'moneyUI',t:'GE_A',type:'event-sub'},
-  {s:'ShopUIOrch',t:'GE_A',type:'event-sub'},{s:'SimplePlayerCtrl',t:'GE_A',type:'event-sub'},
-  {s:'InventoryUI',t:'GE_B',type:'event-sub'},{s:'InvOrch',t:'GE_B',type:'event-sub'},{s:'InvOrch',t:'GE_A',type:'event-sub'},
-  {s:'PlayerMov',t:'GE_A',type:'event-sub'},{s:'PlayerCam',t:'GE_A',type:'event-sub'},
-  {s:'PlayerGrab',t:'GE_A',type:'event-sub'},{s:'PlayerGrab',t:'GE_B',type:'event-sub'},
-  {s:'StartingElevator',t:'GE_A1',type:'event-sub'},{s:'ElevatorTest',t:'GE_A1',type:'event-sub'},
+  {s:'bgUI',t:'GameEvents_All',type:'event-sub'},{s:'moneyUI',t:'GameEvents_All',type:'event-sub'},
+  {s:'ShopUIOrch',t:'GameEvents_All',type:'event-sub'},{s:'ShopUIOrch',t:'GE_A',type:'event-sub'},
+  {s:'SimplePlayerCtrl',t:'GameEvents_All',type:'event-sub'},
+  {s:'InventoryUI',t:'GE_B',type:'event-sub'},{s:'InvOrch',t:'GE_B',type:'event-sub'},{s:'InvOrch',t:'GameEvents_All',type:'event-sub'},
+  {s:'PlayerMov',t:'GameEvents_All',type:'event-sub'},{s:'PlayerCam',t:'GameEvents_All',type:'event-sub'},
+  {s:'PlayerGrab',t:'GameEvents_All',type:'event-sub'},{s:'PlayerGrab',t:'GE_B',type:'event-sub'},
+  {s:'StartingElevator',t:'GE_A1',type:'event-sub'},{s:'CameraShaker',t:'GE_A1',type:'event-sub'},
   {s:'PhysLimitWarn',t:'GE_C',type:'event-sub'},
-  {s:'EconomyManager',t:'GE_A',type:'event-raise'},{s:'InteractionWheelUI',t:'GE_A',type:'event-raise'},
-  {s:'ShopUI',t:'GE_A',type:'event-raise'},{s:'InventoryUI',t:'GE_A',type:'event-raise'},{s:'InventoryUI',t:'GE_B',type:'event-raise'},
+  {s:'EconomyManager',t:'GameEvents_All',type:'event-raise'},{s:'UIManager',t:'GE_A',type:'event-raise'},
+  {s:'InteractionWheelUI',t:'GameEvents_All',type:'event-raise'},
+  {s:'ShopUI',t:'GameEvents_All',type:'event-raise'},{s:'InventoryUI',t:'GameEvents_All',type:'event-raise'},{s:'InventoryUI',t:'GE_B',type:'event-raise'},
   {s:'InteractableComputer',t:'GE_A',type:'event-raise'},{s:'SimplePlayerIntr',t:'GE_A',type:'event-raise'},
   {s:'ShopUIOrch',t:'GE_A',type:'event-raise'},{s:'BaseHeldTool',t:'GE_B',type:'event-raise'},
-  {s:'InvOrch',t:'GE_B',type:'event-raise'},{s:'StartingElevator',t:'GE_A1',type:'event-raise'},
+  {s:'InvOrch',t:'GE_B',type:'event-raise'},{s:'StartingElevator',t:'GE_A1',type:'event-raise'},{s:'ElevatorTest',t:'GE_A1',type:'event-raise'},
   {s:'OreNode',t:'GE_C',type:'event-raise'},{s:'OrePiece',t:'GE_C',type:'event-raise'},
   {s:'OreLimitMgr',t:'GE_C',type:'event-raise'},{s:'SellerMachine',t:'GE_C',type:'event-raise'},
   {s:'BuildingObj',t:'GE_D',type:'event-raise'},{s:'BuildingCrate',t:'GE_D',type:'event-raise'},
@@ -4693,29 +4725,31 @@ const EDGES=[
   {s:'SellerMachine',t:'EconomyManager',type:'singleton',lbl:'AddMoney'},
   {s:'BuildingObj',t:'BuildingMgr',type:'singleton',lbl:'GetCratePrefab'},{s:'BuildingCrate',t:'EconomyManager',type:'singleton',lbl:'GetMoney'},
   {s:'ShopUITest',t:'EconomyManager',type:'singleton',lbl:'AddMoney'},
-  {s:'UIManager',t:'GE_A',type:'event-sub',lbl:'OnMenuStateChanged'},{s:'UIManager',t:'GE_B',type:'event-sub',lbl:'OnOpenInventoryView'},
+  {s:'UIManager',t:'GameEvents_All',type:'event-sub',lbl:'OnMenuStateChanged'},
   {s:'InteractionWheelUI',t:'GE_A',type:'event-sub',lbl:'OnOpen/CloseInteractionView'},
   {s:'ShopUI',t:'GE_A',type:'event-sub',lbl:'OnOpen/CloseShopView'},
-  {s:'bgUI',t:'GE_A',type:'event-sub',lbl:'OnMenuStateChanged'},{s:'moneyUI',t:'GE_A',type:'event-sub',lbl:'OnMoneyChanged'},
-  {s:'ShopUIOrch',t:'GE_A',type:'event-sub',lbl:'OnMoneyChanged/UnlockedCat'},
-  {s:'SimplePlayerCtrl',t:'GE_A',type:'event-sub',lbl:'OnMenuStateChanged'},
+  {s:'bgUI',t:'GameEvents_All',type:'event-sub',lbl:'OnMenuStateChanged'},{s:'moneyUI',t:'GameEvents_All',type:'event-sub',lbl:'OnMoneyChanged'},
+  {s:'ShopUIOrch',t:'GameEvents_All',type:'event-sub',lbl:'OnMoneyChanged'},{s:'ShopUIOrch',t:'GE_A',type:'event-sub',lbl:'OnUnlockedCategory'},
+  {s:'SimplePlayerCtrl',t:'GameEvents_All',type:'event-sub',lbl:'OnMenuStateChanged'},
   {s:'InventoryUI',t:'GE_B',type:'event-sub',lbl:'OnOpen/CloseInventoryView'},
-  {s:'InvOrch',t:'GE_B',type:'event-sub',lbl:'OnToolPickupRequested'},{s:'InvOrch',t:'GE_A',type:'event-sub',lbl:'OnMoneyChanged'},
-  {s:'PlayerMov',t:'GE_A',type:'event-sub',lbl:'OnMenuStateChanged'},{s:'PlayerCam',t:'GE_A',type:'event-sub',lbl:'OnMenuStateChanged'},
-  {s:'PlayerGrab',t:'GE_A',type:'event-sub',lbl:'OnMenuStateChanged'},{s:'PlayerGrab',t:'GE_B',type:'event-sub',lbl:'OnToolEquipped'},
-  {s:'StartingElevator',t:'GE_A1',type:'event-sub',lbl:'OnGamePaused'},
-  {s:'ElevatorTest',t:'GE_A1',type:'event-sub',lbl:'OnElevatorLanded'},
+  {s:'InvOrch',t:'GE_B',type:'event-sub',lbl:'OnToolPickupRequested'},{s:'InvOrch',t:'GameEvents_All',type:'event-sub',lbl:'OnMoneyChanged'},
+  {s:'PlayerMov',t:'GameEvents_All',type:'event-sub',lbl:'OnMenuStateChanged'},{s:'PlayerCam',t:'GameEvents_All',type:'event-sub',lbl:'OnMenuStateChanged'},
+  {s:'PlayerGrab',t:'GameEvents_All',type:'event-sub',lbl:'OnMenuStateChanged'},{s:'PlayerGrab',t:'GE_B',type:'event-sub',lbl:'OnToolEquipped'},
+  {s:'StartingElevator',t:'GE_A1',type:'event-sub',lbl:'OnGamePaused/UnPaused'},
+  {s:'CameraShaker',t:'GE_A1',type:'event-sub',lbl:'OnCamViewPunch'},
   {s:'PhysLimitWarn',t:'GE_C',type:'event-sub',lbl:'OnOreLimitChanged'},
-  {s:'EconomyManager',t:'GE_A',type:'event-raise',lbl:'RaiseMoneyChanged'},
-  {s:'InteractionWheelUI',t:'GE_A',type:'event-raise',lbl:'RaiseMenuStateChanged'},
-  {s:'ShopUI',t:'GE_A',type:'event-raise',lbl:'RaiseMenuStateChanged'},
-  {s:'InventoryUI',t:'GE_A',type:'event-raise',lbl:'RaiseMenuStateChanged'},{s:'InventoryUI',t:'GE_B',type:'event-raise',lbl:'RaiseCloseInventoryView'},
+  {s:'EconomyManager',t:'GameEvents_All',type:'event-raise',lbl:'RaiseMoneyChanged'},
+  {s:'UIManager',t:'GE_A',type:'event-raise',lbl:'RaiseCloseShopView/InteractionView'},
+  {s:'InteractionWheelUI',t:'GameEvents_All',type:'event-raise',lbl:'RaiseMenuStateChanged'},
+  {s:'ShopUI',t:'GameEvents_All',type:'event-raise',lbl:'RaiseMenuStateChanged'},
+  {s:'InventoryUI',t:'GameEvents_All',type:'event-raise',lbl:'RaiseMenuStateChanged'},{s:'InventoryUI',t:'GE_B',type:'event-raise',lbl:'RaiseCloseInventoryView'},
   {s:'InteractableComputer',t:'GE_A',type:'event-raise',lbl:'RaiseOpenShopView'},
   {s:'SimplePlayerIntr',t:'GE_A',type:'event-raise',lbl:'RaiseOpenInteractionView'},
-  {s:'ShopUIOrch',t:'GE_A',type:'event-raise',lbl:'RaiseMoneyChanged/CloseShop'},
+  {s:'ShopUIOrch',t:'GE_A',type:'event-raise',lbl:'RaiseCloseShopView'},
   {s:'BaseHeldTool',t:'GE_B',type:'event-raise',lbl:'RaiseToolPickupRequested'},
   {s:'InvOrch',t:'GE_B',type:'event-raise',lbl:'RaiseToolEquipped/Switched'},
-  {s:'StartingElevator',t:'GE_A1',type:'event-raise',lbl:'RaiseElevatorLanded'},
+  {s:'StartingElevator',t:'GE_A1',type:'event-raise',lbl:'RaiseElevatorLanded/CamViewPunch'},
+  {s:'ElevatorTest',t:'GE_A1',type:'event-raise',lbl:'RaiseCamViewPunch/GamePaused/UnPaused'},
   {s:'OreNode',t:'GE_C',type:'event-raise',lbl:'RaiseOreMined'},{s:'OrePiece',t:'GE_C',type:'event-raise',lbl:'RaiseOreSold'},
   {s:'OreLimitMgr',t:'GE_C',type:'event-raise',lbl:'RaiseOreLimitChanged'},{s:'SellerMachine',t:'GE_C',type:'event-raise',lbl:'RaiseOreSold'},
   {s:'BuildingObj',t:'GE_D',type:'event-raise',lbl:'RaiseBuildingRemoved'},{s:'BuildingCrate',t:'GE_D',type:'event-raise',lbl:'RaiseBuildingTakeReq'},
