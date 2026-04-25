@@ -1,14 +1,16 @@
 <!-- ==== FILE: Documentation/DOTween.md ==== -->
 # DOTween (HOTween v2) — Complete Beginner Guide
 
-> **Package:** DOTween + DOTween Pro by Demigiant  
+> **Package:** DOTween (FREE version) by Demigiant  
 > **Purpose:** High-performance tween engine — animate any property smoothly  
 > **Namespace:** `DG.Tweening`  
 > **Pipeline:** Any (not render-pipeline dependent)  
-> **Size:** ~500KB (tiny)  
-> **Website:** [dotween.demigiant.com](https://dotween.demigiant.com)
+> **Size:** ~400KB (tiny)  
+> **Website:** [dotween.demigiant.com](https://dotween.demigiant.com)  
+> **Cost:** FREE — Pro version ($15) adds path tweens, visual editor, blendable tweens — not needed.
 >
-> **Already in the original MineMGL game:** `DOTween.dll` + `DOTweenPro.dll` ship in `Assemblies/`.
+> **This guide covers the FREE version only.** Everything MineMGL needs is in the free API.  
+> The original game ships `DOTweenPro.dll` too, but none of its code uses Pro-only features.
 
 ---
 
@@ -721,11 +723,10 @@ DOTween is tiny. **Import everything** — no selective import needed.
 
 | What | Size | Import? |
 |------|------|---------|
-| `DOTween/` core | ~400KB | Yes — the tween engine |
-| `DOTweenPro/` | ~100KB | Yes — extra shortcuts (path tweens, spiral, etc.) |
+| `DOTween/` core | ~350KB | Yes — the tween engine |
 | `DOTween/Modules/` | ~50KB | Yes — Unity module integrations (Physics, Audio, UI) |
 
-**Total: ~500KB.** No demos. No textures. No meshes. Just scripts.
+**Total: ~400KB.** No demos. No textures. No meshes. Just scripts. No Pro needed.
 
 ### After Import
 
