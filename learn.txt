@@ -1701,6 +1701,18 @@ public interface IDamageable
 }
 ```
 
+```csharp
+/// <summary> Any object that can be outlined when the player looks at it. ObjectHighlighterManager
+/// raycasts each frame, finds IHighlightable via GetComponentInParent, and calls
+/// GetHighlightProfile(activeTool). The object decides its own profile — or returns null
+/// to skip highlighting. BaseHeldTool returns cyan. BuildingObject checks activeTool:
+/// hammer→cyan, wrench→green/red. OrePiece returns null if held by magnet. </summary>
+public interface IHighlightable
+{
+    HighlightProfile GetHighlightProfile(BaseHeldTool activeTool);
+}
+```
+
 ### Enum Summary — what each value means in context
 
 ```csharp
@@ -2157,6 +2169,20 @@ These are purely hand-tested — no script automates them. The `.md` is the test
 | **Highlight Plus** (URP) | B+ | Object outline/glow on hover — replaces custom fresnel shader | `HighlightPlus.md` |
 | **DOTween** (free) | A/D+ | Smooth property animation (gate slide, hatch rotate, UI) | `DOTween.md` |
 | **Feel** (MMFeedbacks) | B/C/D/H | Game juice — camera shake, screen flash, floating text, springs | `Feel-MMFeedbacks.md` |
+
+### Feel Integration Points (per phase)
+
+| Phase | Event | Script | Feel Adds | Gameplay Impact |
+|-------|-------|--------|-----------|-----------------|
+| **B** | Pickaxe hit | `ToolPickaxe` | `_hitFeedback?.PlayFeedbacks()` — camera shake + viewmodel punch | Mining feels POWERFUL |
+| **C** | Ore node break | `OreNode.BreakNode()` | `_breakFeedback?.PlayFeedbacks()` — freeze frame + shake + chromatic aberration | The "oh YEAH" moment |
+| **C** | Ore sold | `OrePiece.DelayThenSell()` | `_sellFeedback?.PlayFeedbacks()` — floating "$1.23" text + money HUD bounce | Player SEES the money |
+| **D** | Building placed | `ToolBuilder.PrimaryFire()` | `_placeFeedback?.PlayFeedbacks()` — scale bounce + particle puff | Placement confirmed |
+| **D** | Gate/hatch toggle | `ConveyorBlockerT2`, `RoutingConveyor`, `ChuteHatch` | `_toggleFeedback?.PlayFeedbacks()` — toggle sound + camera nudge | Machines feel alive |
+| **H** | All sound stubs | ~15 scripts | Replace `// Phase H: play sound` with `_feedback?.PlayFeedbacks()` | Sound = 50% of game feel |
+
+> All Feel calls use `?.` null-conditional — does nothing if not wired. Game runs identically without Feel.
+
 | **Text Animator** | A/F/H | Per-character TMP animation + typewriter | `TextAnimator.md` |
 
 **Integration rules:**
@@ -2398,7 +2424,7 @@ SPLIT — PlayerController (888 lines doing 10 things):
   → PlayerMovement (WASD, jump, slope, duck)
   → PlayerCamera (look, FOV, bob)
   → PlayerGrab (SpringJoint, rope)
-  → PlayerOutline (FresnelHighlighter)
+  → PlayerOutline (ObjectHighlighterManager)
   WHY: each fits one sentence. Camera bob has nothing to do with grab physics.
 
 DON'T SPLIT — ToolMagnet (108 lines):
@@ -2578,6 +2604,8 @@ For each phase, the agent must produce:
    - **Actively create DataServices** for any pure C# logic (collections, lookups, formatting, validation). Ask: "Can I test this via `new`?" If yes → DataService. See GOAL.md "Common candidates" list. Don't leave testable logic buried in Managers/MonoBehaviours.
    - **Actively extract reusable logic into UtilsPhaseX.** If a method appears in 2+ scripts, or is a pure static helper (no `this`), it goes in `4-Utils/UtilsPhaseX.cs`. If logic was moved off an SO_ (pure data rule), put reusable parts in Utils, not in a single consumer.
    - **Reduce verbosity** — actively use `?.` (null-conditional), `??` (null-coalescing), `=>` (expression-bodied), `.sum()`, `.GetOrCreate()`, LINQ extensions. See GOAL.md "C# Features" for full list. Keep guard clauses (`if (x == null) return;`) when the block does multiple things.
+   - **IHighlightable** — any new script that the player should be able to outline (tools, interactables, buildings, ore) MUST implement `IHighlightable`. Add `[SerializeField] HighlightProfile _highlightProfile;` + `GetHighlightProfile(activeTool)`. ObjectHighlighterManager finds it automatically — zero changes to the highlighter.
+   - **Feel feedback** — for key game events (mining hit, ore break, sell, building place, machine toggle), add `[SerializeField] MMF_Player _xxxFeedback;` + `_xxxFeedback?.PlayFeedbacks();` at the point of impact. Null-safe — does nothing if not wired.
 
 3. **Test scripts for Vertical Slice Test of Each System in that phase** with:
    - Summary comment: prerequisites, NOT required, "How to test" steps, controls
@@ -2740,6 +2768,373 @@ Fix what the user flags. You'll calibrate to their strictness level after 1-2 co
 - **SPACE_UTIL extensions exist.** Read GOAL.md "The User's Coding Style" section for `.map()`, `.gc<>()`, `.destroyLeaves()`, `.toggle()`, `.colorTag()`, `INPUT.K.InstantDown()`, `LOG.AddLog()`, `C.method()` etc. Use them, don't reinvent.
 - **Append surfer.md** after completing the phase with critical decisions made.
 - **Read `learn/handTyped(latest)/....`** to see the user's ACTUAL coding style — match it.
+
+<!-- ==== FILE: learn/OptionalFeatures.md ==== -->
+# Optional Features — External Package Integration Guide
+
+> Features that enhance gameplay but are NOT required for core functionality.
+> The game works 100% without these — they add **polish, juice, and visual quality**.
+> Each feature is additive, null-safe, and removable without breaking anything.
+
+---
+
+## 1. Feel (MMFeedbacks) — Game Juice System
+
+> **Package:** Feel by More Mountains (~20MB after selective import)  
+> **Doc:** `importedAssetsAnalysis/Documentation/Feel-MMFeedbacks.md`  
+> **What it does:** Camera shake, screen flash, freeze frames, floating text, spring animations, sound orchestration  
+> **Integration pattern:** `[SerializeField] MMF_Player _xxxFeedback;` + `_xxxFeedback?.PlayFeedbacks();`  
+> **Null-safe:** `?.` means does nothing if not wired. Game runs identically without Feel.
+
+---
+
+### Phase B — Player Tools
+
+#### B.1 — Pickaxe Hit (camera shake + viewmodel punch)
+
+**Script:** `phase-b(New)/Scripts/3-MonoBehaviours/Tool/ToolPickaxe.cs`  
+**Where:** Inside `PerformAttack()`, after the raycast hit + TakeDamage call
+
+```csharp
+// ADD: field
+[SerializeField] MMF_Player _hitFeedback;
+
+// ADD: after TakeDamage or Rigidbody push (line ~52)
+_hitFeedback?.PlayFeedbacks(hit.point);
+```
+
+**Lines changed:** +2 (1 field + 1 call)
+
+**MMF_Player "OnPickaxeHit" configuration (in inspector):**
+
+| # | Feedback Type | Settings | What It Does |
+|---|--------------|----------|-------------|
+| 1 | `MMF_CameraShake` | Amplitude 0.5, Duration 0.15s | Subtle camera jolt on each swing hit |
+| 2 | `MMF_ScaleSpring` | Target: pickaxe ViewModel, Bump 0.85 | Pickaxe squishes slightly on impact then returns |
+
+**Requires in scene:** `MMCameraShaker` component on Camera GO
+
+**Gameplay impact:** ⭐⭐⭐ **HIGH** — Each pickaxe swing has WEIGHT. Without it: clicking in silence. With it: you FEEL the hit.
+
+---
+
+#### B.2 — Tool Swing (generic — all tools)
+
+**Script:** `phase-b(New)/Scripts/3-MonoBehaviours/Tool/BaseHeldTool.cs`  
+**Where:** Inside `PrimaryFire()`, after the animator play
+
+```csharp
+// ADD: field
+[SerializeField] MMF_Player _swingFeedback;
+
+// ADD: after _viewModelAnimator.Play() (line ~63)
+_swingFeedback?.PlayFeedbacks();
+```
+
+**Lines changed:** +2
+
+**MMF_Player "OnToolSwing" configuration:**
+
+| # | Feedback Type | Settings | What It Does |
+|---|--------------|----------|-------------|
+| 1 | `MMF_ScaleSpring` | Target: ViewModel, Bump 0.95 | Subtle recoil on any tool use |
+
+**Gameplay impact:** ⭐⭐ **MEDIUM** — Subtle screen response on every tool action.
+
+---
+
+### Phase C — Mining & Selling
+
+#### C.1 — Ore Node Break (freeze frame + shake + chromatic aberration)
+
+**Script:** `phase-c(New)/Scripts/3-MonoBehaviours/OreNode.cs`  
+**Where:** Inside `BreakNode()`, after spawning ore pieces and before `Destroy(gameObject)`
+
+```csharp
+// ADD: field
+[SerializeField] MMF_Player _breakFeedback;
+
+// ADD: after ParticleManager.CreateParticle, before Destroy (line ~72)
+_breakFeedback?.PlayFeedbacks(hitPosition);
+```
+
+**Lines changed:** +2
+
+**MMF_Player "OnOreBreak" configuration:**
+
+| # | Feedback Type | Settings | What It Does |
+|---|--------------|----------|-------------|
+| 1 | `MMF_FreezeFrame` | Duration 0.04s | Micro hit-stop — screen freezes for 1 frame. Creates the "impact" sensation. |
+| 2 | `MMF_CameraShake` | Amplitude 2, Duration 0.3s | Camera jolts violently — the world reacts to the break |
+| 3 | `MMF_ChromaticAberration_URP` | Duration 0.1s, Intensity 0.5 | Brief color split at screen edges — cinematic impact |
+| 4 | `MMF_ParticlesInstantiation` | Prefab: extra debris VFX | Additional debris particles beyond the basic break burst |
+
+**Requires in scene:**
+- `MMCameraShaker` on Camera GO
+- `MMChromaticAberrationShaker_URP` on URP Post-Processing Volume GO
+- Post-Processing Volume with Chromatic Aberration override
+
+**Gameplay impact:** 🔥🔥🔥 **TRANSFORMATIVE** — This is the #1 most impactful single feedback in the game. The 0.04s freeze frame + camera shake transforms node breaking from "node disappears" to "oh YEAH that was satisfying." This is the moment players fall in love with mining.
+
+---
+
+#### C.2 — Ore Sold at SellerMachine (floating money text + HUD bounce)
+
+**Script:** `phase-c(New)/Scripts/3-MonoBehaviours/OrePiece.cs`  
+**Where:** Inside `DelayThenSell()` coroutine, after `EconomyManager.AddMoney`
+
+```csharp
+// ADD: field
+[SerializeField] MMF_Player _sellFeedback;
+
+// ADD: after AddMoney, before Delete (line ~152)
+_sellFeedback?.PlayFeedbacks(transform.position);
+```
+
+**Lines changed:** +2
+
+**MMF_Player "OnOreSold" configuration:**
+
+| # | Feedback Type | Settings | What It Does |
+|---|--------------|----------|-------------|
+| 1 | `MMF_FloatingText` | Text: "$" + price, Duration 1.5s, Float Up, Color: green | Floating "$1.23" text rises from the ore's position |
+| 2 | `MMF_ScaleSpring` | Target: money HUD text, Bump 1.3 | Money counter in the UI bounces when value changes |
+| 3 | `MMF_AudioSource` | Clip: coin sound | Cha-ching sound on each sell |
+
+**Requires in scene:**
+- `MMFloatingTextSpawner` on a GO in scene (manages the floating text pool)
+- Money HUD TMP text referenced as target for the ScaleSpring
+
+**Gameplay impact:** 🔥🔥🔥 **TRANSFORMATIVE** — Currently selling ore is INVISIBLE — a number changes somewhere in the UI silently. With floating text: every ore sale creates a visible, tangible reward rising from the ore piece. Player SEES and FEELS the money.
+
+---
+
+#### C.3 — DamageableOrePiece Cluster Break (mini shake)
+
+**Script:** `phase-c(New)/Scripts/3-MonoBehaviours/DamageableOrePiece.cs`  
+**Where:** Inside `TakeDamage()`, after health reaches 0
+
+```csharp
+// ADD: field
+[SerializeField] MMF_Player _clusterBreakFeedback;
+
+// ADD: after ParticleManager.CreateParticle (line ~35)
+_clusterBreakFeedback?.PlayFeedbacks(transform.position);
+```
+
+**Lines changed:** +2
+
+**MMF_Player "OnClusterBreak" configuration:**
+
+| # | Feedback Type | Settings | What It Does |
+|---|--------------|----------|-------------|
+| 1 | `MMF_FreezeFrame` | Duration 0.02s | Tiny hit-stop (half of node break) |
+| 2 | `MMF_CameraShake` | Amplitude 0.5, Duration 0.15s | Small shake — less intense than full node break |
+
+**Gameplay impact:** ⭐⭐ **MEDIUM** — Similar to node break but smaller scale. Cluster splits feel impactful.
+
+---
+
+### Phase D — Buildings & Conveyors
+
+#### D.1 — Building Placed (scale bounce + particle puff)
+
+**Script:** `phase-d(New)/Scripts/3-MonoBehaviours/Tool/ToolBuilder.cs`  
+**Where:** Inside `PrimaryFire()`, after Instantiate + RaiseBuildingPlaced
+
+```csharp
+// ADD: field
+[SerializeField] MMF_Player _placeFeedback;
+
+// ADD: after GameEvents.RaiseBuildingPlaced (line ~80)
+_placeFeedback?.PlayFeedbacks(placed.transform.position);
+```
+
+**Lines changed:** +2
+
+**MMF_Player "OnBuildingPlaced" configuration:**
+
+| # | Feedback Type | Settings | What It Does |
+|---|--------------|----------|-------------|
+| 1 | `MMF_Scale` | Target: placed building, From 0.8 to 1.0, Duration 0.2s, Ease: OutBack | Building "pops" into existence with a bounce |
+| 2 | `MMF_ParticlesInstantiation` | Prefab: dust puff VFX | Small dust cloud at build position |
+| 3 | `MMF_AudioSource` | Clip: build/place sound | Satisfying "clunk" placement sound |
+
+**Gameplay impact:** ⭐⭐ **MEDIUM** — Building placement feels confirmed and satisfying. Without it: building just appears.
+
+---
+
+#### D.2 — Building Packed into Crate (camera nudge)
+
+**Script:** `phase-d(New)/Scripts/3-MonoBehaviours/Building/BuildingObject.cs`  
+**Where:** Inside `Pack()`, after Instantiate crate
+
+```csharp
+// ADD: field
+[SerializeField] MMF_Player _packFeedback;
+
+// ADD: after crate instantiation (line ~88)
+_packFeedback?.PlayFeedbacks(transform.position);
+```
+
+**Lines changed:** +2
+
+**MMF_Player "OnBuildingPacked" configuration:**
+
+| # | Feedback Type | Settings | What It Does |
+|---|--------------|----------|-------------|
+| 1 | `MMF_CameraShake` | Amplitude 0.3, Duration 0.1s | Tiny camera nudge on pack |
+| 2 | `MMF_AudioSource` | Clip: crate thud sound | Wooden thud when crate spawns |
+
+**Gameplay impact:** ⭐ **LOW** — Nice touch but not game-changing. The crate already flies out with physics.
+
+---
+
+#### D.3 — Conveyor Gate/Hatch Toggle (sound + feel)
+
+**Scripts:** 3 scripts, same pattern on each:
+- `phase-d(New)/Scripts/3-MonoBehaviours/Conveyor/ConveyorBlockerT2.cs` → `SetClosed()`
+- `phase-d(New)/Scripts/3-MonoBehaviours/Conveyor/RoutingConveyor.cs` → `SetDirection()`
+- `phase-d(New)/Scripts/3-MonoBehaviours/Building/ChuteHatch.cs` → `SetDirection()`
+
+```csharp
+// ADD to each: field
+[SerializeField] MMF_Player _toggleFeedback;
+
+// ADD at end of SetClosed/SetDirection method:
+_toggleFeedback?.PlayFeedbacks();
+```
+
+**Lines changed:** +2 per script = **+6 total**
+
+**MMF_Player "OnMachineToggle" configuration (shared by all 3):**
+
+| # | Feedback Type | Settings | What It Does |
+|---|--------------|----------|-------------|
+| 1 | `MMF_AudioSource` | Clip: mechanical toggle sound | Click/clunk when gate moves |
+| 2 | `MMF_CameraShake` | Amplitude 0.15, Duration 0.08s | Tiny nudge — you feel the machine move |
+
+**Gameplay impact:** ⭐⭐ **MEDIUM** — Machines feel mechanical and alive instead of silently teleporting.
+
+---
+
+### Phase H — Sound System (bulk replacement)
+
+> Phase H replaces all `// Phase H: play sound` comment stubs with actual audio.
+> With Feel, these become `_xxxFeedback?.PlayFeedbacks()` instead of `SoundManager.PlaySound()`.
+
+**Approximate scope:**
+
+| Category | Stubs | Scripts | What Changes |
+|----------|-------|---------|-------------|
+| Tool sounds | ~8 | ToolPickaxe, ToolMagnet, ToolHammer, BaseHeldTool | Swing, hit, drop, equip sounds |
+| Ore sounds | ~4 | OreNode, OrePiece, DamageableOrePiece | Break, crush, sell sounds |
+| Building sounds | ~6 | BuildingObject, BuildingCrate, ChuteHatch, ConveyorBlockerT2, RoutingConveyor | Place, pack, toggle sounds |
+| Player sounds | ~6 | PlayerMovement, PlayerGrab, PlayerFootsteps | Footsteps, jump, land, grab, release |
+| Conveyor sounds | ~3 | ConveyorBelt, ConveyorSoundSource | Belt hum (looping), start/stop |
+| UI sounds | ~3 | InventoryOrchestrator, ShopUIOrchestrator | Click, purchase, error |
+
+**Lines changed:** ~30 fields + ~30 calls = **~60 lines across ~15 scripts**
+
+**Gameplay impact:** 🔥🔥🔥 **TRANSFORMATIVE** — Sound is 50% of game feel. A silent game feels broken. With Feel's sound feedbacks: pickaxe clinks, ore crunches, belts hum, money cha-chings, doors clunk, footsteps thud.
+
+---
+
+### Phase I — TNT Explosion (biggest single feedback)
+
+**Script:** `DetonatorExplosion` (Phase I)
+
+```csharp
+[SerializeField] MMF_Player _explosionFeedback;
+
+// After: ParticleObject.SetActive(true);
+_explosionFeedback?.PlayFeedbacks(ParticleObject.transform.position);
+```
+
+**Lines changed:** +2
+
+**MMF_Player "OnTNTExplosion" configuration:**
+
+| # | Feedback Type | Settings | What It Does |
+|---|--------------|----------|-------------|
+| 1 | `MMF_FreezeFrame` | Duration 0.06s | Hit-stop — screen freezes on explosion |
+| 2 | `MMF_CameraShake` | Amplitude 5, Duration 0.6s, Frequency 25 | Heavy violent shake |
+| 3 | `MMF_Flash` | Color: White, Duration 0.15s, Alpha 0.8 | Screen goes white on detonation |
+| 4 | `MMF_ParticlesInstantiation` | Prefab: dust cloud VFX | Dust/debris cloud |
+| 5 | `MMF_Vignette_URP` | Duration 0.3s, Intensity 0.5 | Screen edges darken — cinematic |
+| 6 | `MMF_AudioSource` | Clip: explosion boom | Massive boom sound |
+
+**Gameplay impact:** 🔥🔥🔥 **CINEMATIC** — Explosions feel EXPLOSIVE. Screen goes white, camera shakes violently, edges darken, time freezes for a split second.
+
+---
+
+## Summary — All Feel Integration Points
+
+| # | Phase | Event | Script | Lines | Priority | Impact |
+|---|-------|-------|--------|-------|----------|--------|
+| 1 | **B** | Pickaxe hit | `ToolPickaxe` | +2 | ⭐⭐⭐ | Mining feels powerful |
+| 2 | **B** | Tool swing | `BaseHeldTool` | +2 | ⭐⭐ | Subtle recoil |
+| 3 | **C** | Ore node break | `OreNode` | +2 | 🔥🔥🔥 | #1 most impactful feedback |
+| 4 | **C** | Ore sold | `OrePiece` | +2 | 🔥🔥🔥 | Floating money text |
+| 5 | **C** | Cluster break | `DamageableOrePiece` | +2 | ⭐⭐ | Mini node break |
+| 6 | **D** | Building placed | `ToolBuilder` | +2 | ⭐⭐ | Placement bounce |
+| 7 | **D** | Building packed | `BuildingObject` | +2 | ⭐ | Camera nudge |
+| 8 | **D** | Gate/hatch toggle ×3 | `ConveyorBlockerT2`, `RoutingConveyor`, `ChuteHatch` | +6 | ⭐⭐ | Machines feel alive |
+| 9 | **H** | All sounds | ~15 scripts | +60 | 🔥🔥🔥 | Sound = 50% of feel |
+| 10 | **I** | TNT explosion | `DetonatorExplosion` | +2 | 🔥🔥🔥 | Cinematic explosion |
+| | | | **TOTAL** | **~82 lines** | | |
+
+### Scene Requirements (one-time setup)
+
+| Component | Add To | Why |
+|-----------|--------|-----|
+| `MMCameraShaker` | Camera GO | Receives camera shake feedbacks |
+| `MMFlash` | Full-screen UI Image GO | Screen flash overlay target |
+| `MMFloatingTextSpawner` | Any GO in scene | Manages floating text pool |
+| `MMChromaticAberrationShaker_URP` | Post-Processing Volume GO | Chromatic aberration pulse target |
+| `MMVignetteShaker_URP` | Post-Processing Volume GO | Vignette dark edges target |
+
+### Priority Order — What to Wire First
+
+1. **OreNode break** (C.1) — 2 lines, biggest gameplay transformation
+2. **Ore sold floating text** (C.2) — 2 lines, makes money visible
+3. **Pickaxe hit** (B.1) — 2 lines, mining feels real
+4. **Phase H sounds** (H) — 60 lines, completes the audio experience
+5. **Everything else** — diminishing returns, wire as polish
+
+---
+
+## 2. DOTween — Smooth Property Animation
+
+> See `importedAssetsAnalysis/Documentation/DOTween.md` for complete guide.  
+> DOTween handles **motion** (gate slides, hatch rotates, UI panels). Feel handles **reactions** (shake, flash, sound).
+
+**Already documented in:** Phase D GUIDE.md (cross-phase modifications), DOTween.md (Phase Mapping appendix).
+
+---
+
+## 3. Highlight Plus — Object Outlining
+
+> See `importedAssetsAnalysis/Documentation/HighlightPlus.md` for complete guide.  
+> **Already fully implemented** via `IHighlightable` interface + `ObjectHighlighterManager`.
+
+**Implemented on:** BaseHeldTool (B), InteractableComputer (A), OrePiece (C), BuildingCrate (D), BuildingObject (D).
+
+---
+
+## 4. Text Animator — Animated TMP Text
+
+> See `importedAssetsAnalysis/Documentation/TextAnimator.md` for complete guide.  
+> Zero code changes — add components to TMP GOs + use `<shake>` / `<bounce>` tags in text strings.
+
+| Phase | Where | Tag | Effect |
+|-------|-------|-----|--------|
+| A | Money UI text | `<bounce>$400</bounce>` | Bouncy money display |
+| C | PhysicsLimitUIWarning text | `<shake>WARNING</shake>` | Shaking urgency |
+| D | BuildingCrate quantity | `<bounce>x3</bounce>` | Bouncy quantity |
+| F | Quest descriptions | Typewriter via `TextAnimatorPlayer` | Text types out letter by letter |
+| F | Quest complete text | `<bounce><rainb>Completed!</rainb></bounce>` | Rainbow bounce celebration |
+| H | Info popups | Typewriter via `TextAnimatorPlayer` | Popups type out naturally |
 
 <!-- ==== FILE: learn/PhaseMap.md ==== -->
 # PhaseMap — Full Build Roadmap
@@ -2950,7 +3345,7 @@ Equip magnet tool → hold right-click → nearby physics objects
 fly toward you via spring joints. Left-click to launch them.
 R to drop gently. Q to cycle grab mode.
 
-FresnelHighlighter outlines whatever you're looking at.
+ObjectHighlighterManager outlines whatever you're looking at.
 Each system testable independently.
 ```
 
@@ -2968,7 +3363,7 @@ ToolHammer             → "I pick up / pack placed buildings"
 ToolBuilder            → "I show ghost preview and place buildings (partial — Phase D completes)"
 InventoryOrchestrator  → "I wire inventory slot Field_ instances"
 Field_InventorySlot    → "I display one inventory slot"
-FresnelHighlighter     → "I outline whatever the player looks at"
+ObjectHighlighterManager     → "I outline whatever the player looks at"
 WInventorySlot         → "I track what's in one inventory slot this session"
 InventoryDataService   → "I manage all inventory slot data"
 ```
@@ -3011,7 +3406,7 @@ InventoryDataService   → "I manage all inventory slot data"
 ├── BaseSellableItem.cs
 ├── PhysicsSoundPlayer.cs
 ├── PhysicsGib.cs
-├── FresnelHighlighter.cs            — Highlight Plus wrapper
+├── ObjectHighlighterManager.cs            — Highlight Plus wrapper
 ├── BaseHeldTool.cs                  — base class for all tools
 ├── ToolPickaxe.cs
 ├── ToolMagnet.cs
@@ -3207,7 +3602,7 @@ Conveyor belt in the world:
   - Belt has visual texture scroll (ConveyorRenderer)
 
 Equip hammer → look at any placed building:
-  - FresnelHighlighter outlines it in cyan
+  - ObjectHighlighterManager outlines it in cyan
   - Press E → interaction wheel: "Take" or "Pack"
   - Take → building goes back into inventory as ToolBuilder
   - Pack → building becomes a crate on the ground
@@ -3286,7 +3681,7 @@ Buildings on uneven ground:
 | `ToolBuilder.cs` (B) | **REPLACED** by phase-d version — complete placement logic | Phase B was partial stubs |
 | `GlobalEnumsB.cs` (B) | Add `pack`, `switchDirection` to InteractionType | BuildingObject "Pack", RoutingConveyor "Switch Direction" |
 | `BasePhysicsObject.cs` (B) | Complete conveyor stubs (`AddConveyorVelocity`, `RemoveTouchingConveyorBelt`, etc.) | ConveyorBelt + ConveyorBeltManager call these |
-| `FresnelHighlighter.cs` (B) | Add building + wrench highlight checks | Hammer/wrench outline buildings |
+| `BuildingObject.cs` + `BuildingCrate.cs` (D) | Add `IHighlightable` interface | ObjectHighlighterManager finds them automatically — zero changes to highlighter |
 | `SO_ShopItemDef.cs` (A) | Add `SO_BuildingInventoryDefinition` field | Links shop items to building data |
 | `AutoMiner.cs` (C) | Add `SetResourceDefinition()` public method | BuildingPlacementNode.AttachBuilding calls this |
 
@@ -4587,7 +4982,7 @@ Every Orchestrator follows this exact flow. The SubManager owns lifecycle (open/
 | Original | Lines | Responsibilities | Split Into |
 |----------|-------|-----------------|------------|
 | `ComputerShopUI` | 321 | panel lifecycle + Field_ instantiation + cart data + onClick wiring + currency refresh | `ShopUI` (lifecycle) + `ShopUIOrchestrator` (wiring) + `ShopDataService` (data) |
-| `PlayerController` | 888 | movement + camera + grab + outline + inventory input | `PlayerMovement` + `PlayerCamera` + `PlayerGrab` + `FresnelHighlighter` |
+| `PlayerController` | 888 | movement + camera + grab + outline + inventory input | `PlayerMovement` + `PlayerCamera` + `PlayerGrab` + `ObjectHighlighterManager` |
 | `PlayerInventory` | 418 | slot data + UI instantiation + hotbar keys + tool actions + drag-drop + display | `InventoryDataService` (data) + `InventoryOrchestrator` (wiring) + `Field_InventorySlot` (display) + `InventoryUI` (lifecycle) |
 | `EconomyManager` | 162 | money + AllShopItems + unlock logic + ShopPurchases + price queries | `EconomyManager` (money only) + shop items/unlock/purchases → `ShopDataService` |
 | `QuestManager` | 238 | quest collections + completion checks + reward distribution + progress + save/load | `QuestDataService` (collections + progress + queries) + `QuestManager` (lifecycle + event firing) |
@@ -4675,6 +5070,7 @@ phase-b/
 ├── 0-Core/
 │   └── GameEvents.cs                       (partial: OnToolSwitched, OnItemPickedUp, OnItemDropped)
 ├── 1-Managers/
+│   ├── ObjectHighlighterManager.cs         → "I raycast + find IHighlightable + apply HighlightProfile"
 │   └── SubManager/
 │       └── InventoryUI.cs
 ├── 2-Data/
@@ -4682,6 +5078,7 @@ phase-b/
 │   ├── Field_InventorySlot.cs
 │   ├── Interface/
 │   │   ├── IIconItem.cs
+│   │   ├── IHighlightable.cs              → "I can be outlined — returns HighlightProfile or null"
 │   │   └── ISaveLoadableObject.cs          (stub)
 │   ├── DataWrapper/
 │   │   └── WInventorySlot.cs
@@ -4689,8 +5086,7 @@ phase-b/
 │   │   └── InventoryDataService.cs         (nested: Slot)
 │   └── Entities/
 │       ├── MagnetToolSelectionMode.cs
-│       ├── SavableObjectID.cs              (stub)
-│       └── HighlightStyle.cs
+│       └── SavableObjectID.cs              (stub)
 ├── 3-MonoBehaviours/
 │   ├── Orchestrator/
 │   │   └── InventoryOrchestrator.cs
@@ -4714,7 +5110,6 @@ phase-b/
 │   │   ├── BaseSellableItem.cs             → "I have a base sell value"
 │   │   ├── PhysicsSoundPlayer.cs           → "I play sound on collision impact"
 │   │   └── PhysicsGib.cs                   → "I'm a debris piece that despawns after time"
-│   └── FresnelHighlighter.cs               → "I outline whatever the player looks at"
 ├── 4-Utils/
 │   ├── UtilsPhaseB.cs
 │   └── PhaseBLOG.cs
@@ -6836,34 +7231,45 @@ public class SO_ShopItemDef : ScriptableObject
 ﻿using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
+using HighlightPlus;
 
 using SPACE_UTIL;
 
-public class InteractableComputer : MonoBehaviour, IInteractable
+/// <summary>
+/// I'm a static world object the player can interact with (shop terminal, contracts terminal).
+/// I implement IInteractable for E-key interaction and IHighlightable for Highlight Plus outline.
+/// When the player looks at me, ObjectHighlighterManager finds my IHighlightable and applies my cyan
+/// profile. When they press E, SimplePlayerInteraction finds my IInteractable and calls Interact.
+///
+/// Who uses me: ObjectHighlighterManager (IHighlightable), SimplePlayerInteraction (IInteractable).
+/// Events I fire: RaiseOpenShopView (on "openShopView" interaction).
+/// </summary>
+public class InteractableComputer : MonoBehaviour, IInteractable, IHighlightable
 {
+	#region Inspector Fields
 	[SerializeField] List<SO_InteractionOption> _OPTION;
 	[SerializeField] bool _selectFirstOptionDefault = true;
+	[Header("Highlight")]
+	[SerializeField] HighlightProfile _highlightProfile;
+	#endregion
 
-	public string GetObjectName()
-	{
-		return this.gameObject.name;
-	}
-	public bool ShouldUseInteractionWheel()
-	{
-		return this._selectFirstOptionDefault == false;
-	}
-	public List<SO_InteractionOption> GetOptions()
-	{
-		return this._OPTION;
-	}
+	#region public API — IInteractable
+	public string GetObjectName() => gameObject.name;
+	public bool ShouldUseInteractionWheel() => !_selectFirstOptionDefault;
+	public List<SO_InteractionOption> GetOptions() => _OPTION;
 	public void Interact(SO_InteractionOption selectedInteraction)
 	{
-		// Debug.Log($"should perform {selectedInteraction.interactionName}".colorTag("lime"));
 		if(selectedInteraction.interactionName == "openShopView")
 		{
 			GameEvents.RaiseOpenShopView();
 		}
 	}
+	#endregion
+
+	#region public API — IHighlightable
+	/// <summary> Always returns cyan profile — computer is always highlightable regardless of active tool. </summary>
+	public HighlightProfile GetHighlightProfile(BaseHeldTool activeTool) => _highlightProfile;
+	#endregion
 }
 
 <!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-a/3-MonoBehaviours/Orchestrator/ShopUIOrchestrator.cs ==== -->
@@ -7347,19 +7753,19 @@ public static class UtilsPhaseA
 # Highlight Computer Terminal — Manual Test Flow
 
 > Verifies that InteractableComputer gets a cyan Highlight Plus outline when the player
-> looks at it, and that pressing E opens the shop. Tests the FresnelHighlighter integration
+> looks at it, and that pressing E opens the shop. Tests the ObjectHighlighterManager integration
 > with Phase A's InteractableComputer.
 
 ---
 
 ## Prerequisites
 
-- **Phase A scripts** hand-typed (InteractableComputer, ShopUI, ShopUIOrchestrator, etc.)
-- **Phase B scripts** hand-typed (FresnelHighlighter, PlayerMovement, PlayerGrab)
+- **Phase A scripts** hand-typed (InteractableComputer with `IHighlightable`, ShopUI, ShopUIOrchestrator, etc.)
+- **Phase B scripts** hand-typed (ObjectHighlighterManager, IHighlightable, PlayerMovement, PlayerGrab)
 - **Highlight Plus** imported (URP version — Runtime/ + Editor/)
 - URP Renderer Data → **Highlight Plus Renderer Feature** added
 - `Profile_Tool` HighlightProfile asset created (cyan outline)
-- FresnelHighlighter `InteractableComputer` check **uncommented** (lines 99-100)
+- `InteractableComputer` has `IHighlightable` implemented + `_highlightProfile` assigned in inspector
 
 ---
 
@@ -7375,7 +7781,7 @@ Scene Root
 ├── EconomyManager (singleton, _defaultMoney = 400)
 ├── Player
 │   ├── Camera
-│   │   └── FresnelHighlighter (component)
+│   │   └── ObjectHighlighterManager (component)
 │   ├── ViewModelContainer (empty)
 │   └── HoldPosition (empty)
 ├── Floor (Plane, layer: Ground)
@@ -7398,61 +7804,106 @@ Scene Root
 |-------|--------|
 | `_OPTION` | Create SO_InteractionOption → name "OpenShop", interactionName = "openShopView" |
 | `_selectFirstOptionDefault` | ✅ true (auto-selects first option = no wheel) |
+| `_highlightProfile` | `Profile_Tool.asset` (cyan — from Highlight Plus profiles) |
 
-### Step 3 — FresnelHighlighter Setup
+### Step 3 — Create `Profile_Tool` HighlightProfile Asset
 
-1. On Camera GO → ensure `FresnelHighlighter` component exists
-2. Wire:
+> A HighlightProfile is a ScriptableObject that stores outline/glow settings. Create ONE, reuse
+> on all objects that need the same look (tools, computers, crates all use the same cyan profile).
 
-| Field | Assign |
-|-------|--------|
-| `_cam` | Camera component |
-| `_interactRange` | 2 |
-| `_interactLayerMask` | `Interact` layer |
-| `_toolProfile` | `Profile_Tool.asset` (cyan outline) |
-| `_grabbableProfile` | `Profile_Grabbable.asset` (or same as tool) |
+1. In Project panel: right-click → **Create → Highlight Plus Profile**
+2. Name it `Profile_Tool`
+3. Select the asset → Inspector shows all highlight settings. Configure:
 
-### Step 4 — Uncomment the InteractableComputer Check
+**Outline section:**
 
-In `FresnelHighlighter.cs`, uncomment lines 99-100:
+| Inspector Field | Set To | What It Does |
+|----------------|--------|-------------|
+| **Outline** | ✅ checked (1.0) | Enables the edge outline. 0 = off, 1 = full intensity |
+| **Color** | Cyan `(0.25, 0.85, 1)` | The outline edge color — click the color box, enter RGB |
+| **Width** | 0.5 | How thick the outline is in screen pixels. 0.2 = thin, 1.0 = thick |
+| **Quality** | High | `Fastest` = jagged, `Medium` = decent, `High` = smooth. Use High for tools. |
+| **Constant Width** | ✅ checked | Outline stays same screen size whether you're near or far. If unchecked, outline shrinks with distance. |
+
+**Outer Glow section:**
+
+| Inspector Field | Set To | What It Does |
+|----------------|--------|-------------|
+| **Glow** | 1.5 | Soft luminous halo intensity. 0 = no glow, 1.5 = visible glow |
+| **Width** | 0.4 | How far the glow extends from the object edge |
+| **Color** (HQ) | Cyan `(0.25, 0.85, 1)` | Glow color — match the outline color for cohesive look |
+| **Animation Speed** | 0 | Pulsing speed. 0 = no pulse (static glow), 1 = gentle pulse |
+
+**Leave everything else OFF** (Overlay, Inner Glow, See-Through, Target FX, Hit FX — not needed for basic hover highlight).
+
+### Step 4 — ObjectHighlighterManager Setup
+
+1. On Camera GO → Add Component → `ObjectHighlighterManager`
+2. Wire in Inspector:
+
+| Inspector Field | Set To | What It Does |
+|----------------|--------|-------------|
+| **Cam** | Drag the Camera component | Which camera to raycast from (player's eyes) |
+| **Interact Range** | 3 | Max distance in meters to detect highlightable objects |
+| **Interact Layer Mask** | Check only "Interact" | Which physics layers the raycast can hit. Only objects on this layer are candidates. |
+
+> ObjectHighlighterManager has NO profile fields — each object owns its own profile via IHighlightable.
+
+### Step 5 — Verify IHighlightable on InteractableComputer
+
+1. Select `ComputerTerminal` GO in Hierarchy
+2. Look at the `InteractableComputer` component in Inspector
+3. You should see a **"Highlight"** header with `_highlightProfile` field
+4. Drag `Profile_Tool.asset` into `_highlightProfile`
+
+**If the field is missing** → your `InteractableComputer.cs` doesn't have `IHighlightable`. Add it:
 
 ```csharp
-// BEFORE (commented):
-// if (hit.collider.GetComponentInParent<InteractableComputer>() != null)
-// { ApplyHighlight(hit.collider.gameObject, _toolProfile); return; }
+using HighlightPlus;
 
-// AFTER (uncommented):
-if (hit.collider.GetComponentInParent<InteractableComputer>() != null)
-{ ApplyHighlight(hit.collider.gameObject, _toolProfile); return; }
+public class InteractableComputer : MonoBehaviour, IInteractable, IHighlightable
+{
+    [Header("Highlight")]
+    [SerializeField] HighlightProfile _highlightProfile;  // assign Profile_Tool in inspector
+
+    public HighlightProfile GetHighlightProfile(BaseHeldTool activeTool) => _highlightProfile;
+
+    // ... existing IInteractable methods unchanged ...
+}
 ```
 
-### Step 5 — Press Play
+### Step 6 — URP Renderer Feature (if not already done)
+
+1. Edit → Project Settings → Graphics → click your **URP Renderer Data** asset
+2. Scroll to bottom → check if **Highlight Plus** Renderer Feature exists
+3. If NOT: click **Add Renderer Feature** → select **Highlight Plus**
+4. No configuration needed — it auto-detects HighlightEffect components
+
+### Step 7 — Press Play
 
 ---
 
 ## How It Works (System Flow)
 
-**Every frame:** `FresnelHighlighter.Update()` runs. `ClearCurrent()` disables the previous
-frame's highlight (`currentHighlight.highlighted = false`). Then `OutlineLookedAtThing()` fires
-a raycast from the camera forward, masked to the `Interact` layer.
+**Every frame:** `ObjectHighlighterManager.Update()` runs. `ClearCurrent()` disables the previous
+frame's highlight. If `isMenuOpen` → returns early. Then `OutlineLookedAtThing()` fires a single
+raycast from the camera forward, masked to the `Interact` layer.
 
 **Computer detected:** The raycast hits the ComputerTerminal's BoxCollider (on Interact layer).
-The priority checks run: `BaseHeldTool`? No. `BuildingCrate`? No. `InteractableComputer`? **Yes.**
-`ApplyHighlight(hit.collider.gameObject, _toolProfile)` runs.
+`GetComponentInParent<IHighlightable>()` finds `InteractableComputer` (which implements `IHighlightable`).
+Calls `highlightable.GetHighlightProfile(activeTool)` → InteractableComputer returns `_highlightProfile`
+(Profile_Tool, cyan). ObjectHighlighterManager calls `ApplyHighlight(go, profile)`.
 
-**Inside ApplyHighlight:** It calls `target.GetComponent<HighlightEffect>()`. First time → returns
-null, so it does `target.AddComponent<HighlightEffect>()` and sets `effectGroup = TargetOptions.Children`
-(so the cube child mesh also gets outlined). Then `effect.ProfileLoad(_toolProfile)` loads the cyan
-outline/glow settings. `effect.highlighted = true` turns on the visual outline.
+**Inside ApplyHighlight:** `target.GetComponent<HighlightEffect>()` — first time returns null, so
+`AddComponent<HighlightEffect>()` + `effectGroup = TargetOptions.Children`. Then `ProfileLoad(profile)`
+loads cyan settings. `highlighted = true` turns on the outline.
 
-**Look away:** Next frame, `ClearCurrent()` sets `currentHighlight.highlighted = false` → outline
-disappears. The `HighlightEffect` component stays on the GO (reused next time you look at it).
+**Look away:** Next frame, `ClearCurrent()` sets `highlighted = false` → outline disappears.
 
-**Press E to interact:** This is handled by `SimplePlayerInteraction` (Phase A), NOT by
-FresnelHighlighter. The interaction system does its own raycast, finds `IInteractable` on the
-computer, and calls `Interact(selectedOption)` → `GameEvents.RaiseOpenShopView()` → ShopUI opens.
-The highlight and the interaction are **fully independent systems** — they happen to look at the
-same object but don't communicate with each other.
+**Press E to interact:** Handled by `SimplePlayerInteraction` (Phase A), NOT by ObjectHighlighterManager.
+The interaction system does its own raycast, finds `IInteractable`, calls `Interact(selectedOption)`
+→ `GameEvents.RaiseOpenShopView()` → ShopUI opens. Highlight and interaction are **fully independent
+systems** — they both find interfaces on the same object but don't communicate.
 
 ---
 
@@ -7463,19 +7914,19 @@ same object but don't communicate with each other.
 - No outlines visible
 - No console errors
 
-**Behind the scenes:** FresnelHighlighter raycasts, hits floor (layer Ground, not in Interact mask) → no highlight applied.
+**Behind the scenes:** ObjectHighlighterManager raycasts, hits floor (layer Ground, not in Interact mask) → `GetComponentInParent<IHighlightable>()` returns null → no highlight applied.
 
 ---
 
 ## 2. Look At Computer
 
-**DO:** Walk toward ComputerTerminal, aim crosshair at the cube mesh (within 2m)
+**DO:** Walk toward ComputerTerminal, aim crosshair at the cube mesh (within 3m)
 **EXPECT:**
 - **Cyan outline appears** around the computer cube
 - Outline follows cube edges — visible border + subtle glow
 - Outline appears **instantly** (no fade-in)
 
-**Behind the scenes:** Raycast hits BoxCollider on Interact layer → `GetComponentInParent<InteractableComputer>()` returns the component → `ApplyHighlight(go, _toolProfile)` → `HighlightEffect` added → `ProfileLoad(Profile_Tool)` → cyan outline/glow → `highlighted = true`.
+**Behind the scenes:** Raycast hits BoxCollider on Interact layer → `GetComponentInParent<IHighlightable>()` finds `InteractableComputer` → calls `GetHighlightProfile(activeTool)` → returns `_highlightProfile` (Profile_Tool, cyan) → `ApplyHighlight(go, profile)` → `HighlightEffect` added → `ProfileLoad` → cyan outline → `highlighted = true`.
 
 ---
 
@@ -7508,7 +7959,7 @@ same object but don't communicate with each other.
 - Shop UI opens (Phase A ShopUI panel becomes active)
 - Outline may disappear (menu opens → `isMenuOpen = true` → Update skips raycasting)
 
-**Behind the scenes:** `SimplePlayerInteraction` raycasts independently, finds `IInteractable` on computer → calls `Interact(openShopView)` → `GameEvents.RaiseOpenShopView()` → ShopUI subscribes and opens. Meanwhile `GameEvents.RaiseMenuStateChanged(true)` fires → FresnelHighlighter sets `isMenuOpen = true` → next Update calls `ClearCurrent()` and returns early.
+**Behind the scenes:** `SimplePlayerInteraction` raycasts independently, finds `IInteractable` on computer → calls `Interact(openShopView)` → `GameEvents.RaiseOpenShopView()` → ShopUI subscribes and opens. Meanwhile `GameEvents.RaiseMenuStateChanged(true)` fires → ObjectHighlighterManager sets `isMenuOpen = true` → next Update calls `ClearCurrent()` and returns early.
 
 ---
 
@@ -7519,27 +7970,27 @@ same object but don't communicate with each other.
 - Outline appears again
 - Can interact again with E
 
-**Behind the scenes:** `GameEvents.RaiseMenuStateChanged(false)` → `isMenuOpen = false` → FresnelHighlighter resumes raycasting.
+**Behind the scenes:** `GameEvents.RaiseMenuStateChanged(false)` → `isMenuOpen = false` → ObjectHighlighterManager resumes raycasting.
 
 ---
 
 ## 7. Multiple Objects — Priority Check
 
-**DO:** Place a ToolPickaxe on the ground NEXT to the computer. Look at the pickaxe (both within 2m).
+**DO:** Place a ToolPickaxe on the ground NEXT to the computer. Look at the pickaxe (both within 3m).
 **EXPECT:**
-- **Pickaxe gets outline** (not computer) — `BaseHeldTool` check is BEFORE `InteractableComputer` in priority
+- **Pickaxe gets outline** (not computer) — raycast hits pickaxe collider first
 
 **DO:** Move crosshair from pickaxe → computer
 **EXPECT:**
 - Pickaxe outline disappears, computer outline appears
 
-**Behind the scenes:** Priority order in `OutlineLookedAtThing`: BaseHeldTool → BuildingCrate → InteractableComputer → Grabbable. First match wins.
+**Behind the scenes:** Both ToolPickaxe (`BaseHeldTool`) and `InteractableComputer` implement `IHighlightable`. The raycast hits whichever collider is closest to the camera. `GetComponentInParent<IHighlightable>()` returns the first one found on the hit object — so whichever object the crosshair is directly on gets outlined. Only ONE object at a time (ClearCurrent runs each frame).
 
 ---
 
 ## Summary Checklist
 
-- [ ] Computer gets cyan outline when looked at within 2m
+- [ ] Computer gets cyan outline when looked at within 3m
 - [ ] Outline disappears when looking away
 - [ ] Outline reappears without visual glitches
 - [ ] E key opens shop (interaction works independently of highlight)
@@ -9272,21 +9723,27 @@ In Unity 6000.3+, Shader Graph uses the **URP** target by default:
 | `Profile_WrenchEnable` | Green (0.3, 1, 0.3) | 0.5 | 1.5 | Phase D — enable supports (wrench) |
 | `Profile_WrenchDisable` | Red (1, 0.3, 0.3) | 0.5 | 1.5 | Phase D — disable supports (wrench) |
 
-5. **Wire profiles** to `FresnelHighlighter` inspector:
+5. **Wire profiles** to each `IHighlightable` object's inspector (NOT to ObjectHighlighterManager):
 
-| Field | Drag From |
-|-------|-----------|
-| `_toolProfile` | `Profile_Tool.asset` |
-| `_grabbableProfile` | `Profile_Grabbable.asset` |
-| `_buildingProfile` | `Profile_Building.asset` (Phase D, can leave empty for now) |
-| `_wrenchEnableProfile` | `Profile_WrenchEnable.asset` (Phase D) |
-| `_wrenchDisableProfile` | `Profile_WrenchDisable.asset` (Phase D) |
+| Script | Inspector Field | Profile Asset |
+|--------|----------------|--------------|
+| `BaseHeldTool` (all tools) | `_highlightProfile` | `Profile_Tool.asset` |
+| `InteractableComputer` (Phase A) | `_highlightProfile` | `Profile_Tool.asset` |
+| `OrePiece` (Phase C) | `_highlightProfile` | `Profile_Grabbable.asset` |
+| `BuildingCrate` (Phase D) | `_highlightProfile` | `Profile_Tool.asset` |
+| `BuildingObject` (Phase D) | `_buildingProfile` | `Profile_Building.asset` |
+| `BuildingObject` (Phase D) | `_wrenchEnableProfile` | `Profile_WrenchEnable.asset` |
+| `BuildingObject` (Phase D) | `_wrenchDisableProfile` | `Profile_WrenchDisable.asset` |
+
+> ObjectHighlighterManager has **zero profile fields** — it only has `_cam`, `_interactRange`, `_interactLayerMask`.
+> Each object owns its profile via `IHighlightable.GetHighlightProfile(activeTool)`.
 
 ### Used By
 
-| Script | Fields | Phase |
-|--------|--------|-------|
-| `FresnelHighlighter.cs` | 5 HighlightProfile fields + _cam + _interactLayerMask | B+D |
+| Script | Role | Phase |
+|--------|------|-------|
+| `ObjectHighlighterManager.cs` | Raycasts + finds IHighlightable + applies profile | B |
+| `IHighlightable` implementors | Each returns their own profile | A/B/C/D+ |
 
 ---
 
@@ -9484,7 +9941,7 @@ In Unity 6000.3+, Shader Graph uses the **URP** target by default:
 | Layer | Slot | Introduced | Purpose |
 |-------|------|-----------|---------|
 | `Ground` | (default or custom) | B | PlayerMovement ground check |
-| `Interact` | (custom) | B | FresnelHighlighter + InteractionSystem raycast |
+| `Interact` | (custom) | B | ObjectHighlighterManager + InteractionSystem raycast |
 | `BuildingGhost` | (custom) | D | Ghost preview during building placement |
 | `BuildingObject` | (custom) | D | Placed buildings' physical colliders |
 
@@ -9496,7 +9953,7 @@ In Unity 6000.3+, Shader Graph uses the **URP** target by default:
 
 | Tag | Introduced | Purpose |
 |-----|-----------|---------|
-| `Grabbable` / `TagType.grabbable` | B | PlayerGrab + FresnelHighlighter + SellerMachine |
+| `Grabbable` / `TagType.grabbable` | B | PlayerGrab + ObjectHighlighterManager + SellerMachine |
 | `MarkedForDestruction` / `TagType.markedForDestruction` | C | OrePiece during sell delay — prevents double-sell |
 
 ---
@@ -10114,7 +10571,7 @@ RobotGrabberArm (root)
 
 > You spawn in a small room. In front of you, 4 tools sit on the ground — a pickaxe,
 > magnet, hammer, and mining hat. Behind them, 5 cubes sit on the floor.
-> Walk forward → fresnel highlight outlines whatever you look at (cyan glow).
+> Walk forward → ObjectHighlighterManager outlines whatever you look at (cyan glow).
 > Press E near pickaxe → goes into hotbar. Press 1 → ViewModel appears in hand.
 > Left-click → swing animation. Right-click cubes → rope grab.
 > Tab → inventory. Drag slots. G → drop tool.
@@ -10731,7 +11188,7 @@ public class ElevatorTest : MonoBehaviour
 │       ▼                                    ▼                │
 │  PlayerGrab ◄─── OnToolEquipped ─── (sets tool.Owner)       │
 │       │                                                     │
-│  FresnelHighlighter (raycast → outline on hover)            │
+│  ObjectHighlighterManager (raycast → IHighlightable → profile → outline)            │
 │  PlayerFootsteps (reads movement speed)                     │
 │  RigidbodyDraggerController (OnJointBreak → ForceRelease)   │
 └─────────────────────────────────────────────────────────────┘
@@ -10821,7 +11278,7 @@ Inside `SwitchToSlot`, the orchestrator calls `tool.gameObject.SetActive(true)`.
 
 `PlayerGrab` is subscribed to `OnToolEquipped`. It receives the tool and sets `tool.Owner = _movement` — giving the tool access to `Owner.PlayerCam` for raycasts and `Owner.ViewModelContainer` for parenting. Now the tool **parents itself to ViewModelContainer** and shows the **ViewModel** — the pickaxe appears as a *first-person held tool* in front of the camera.
 
-The orchestrator also fires `GameEvents.RaiseToolSwitched(0)` (for `FresnelHighlighter` and test logging) and `GameEvents.RaiseItemPickedUp(tool)` (for test logging).
+The orchestrator also fires `GameEvents.RaiseToolSwitched(0)` (for `ObjectHighlighterManager` and test logging) and `GameEvents.RaiseItemPickedUp(tool)` (for test logging).
 
 Finally, `RefreshAllSlots()` loops through all 40 `Field_InventorySlot` displays. **Slot 0** now calls `SetData(pickaxeIcon, "Pickaxe", qty=1)` and `SetHighlighted(true)`. Slots 1–39 call `SetEmpty()`.
 
@@ -10960,7 +11417,7 @@ The player **presses Q** → `QButtonPressed` → `CycleSelectionMode()`. The mo
 | `OnCloseInventoryView` | InventoryUI (ESC/Tab), InventoryOrchestrator (equip) | InventoryUI (SetActive false) |
 | `OnToolPickupRequested(tool)` | BaseHeldTool.Interact("Take") | InventoryOrchestrator.HandleToolPickup |
 | `OnToolEquipped(tool)` | InventoryOrchestrator.SwitchToSlot | PlayerGrab (sets tool.Owner) |
-| `OnToolSwitched(index)` | InventoryOrchestrator.SwitchToSlot | FresnelHighlighter (future), tests |
+| `OnToolSwitched(index)` | InventoryOrchestrator.SwitchToSlot | ObjectHighlighterManager (future), tests |
 | `OnItemPickedUp(tool)` | InventoryOrchestrator.HandleToolPickup | Tests (logging) |
 | `OnItemDropped(tool)` | InventoryOrchestrator.HandleDropActiveTool | Tests (logging) |
 | `OnMoneyChanged(float)` | EconomyManager.AddMoney | InventoryOrchestrator (RefreshAllSlots) |
@@ -10990,7 +11447,7 @@ Equip magnet tool → hold right-click → nearby physics objects
 fly toward you via spring joints. Left-click to launch them.
 R to drop gently. Q to cycle grab mode.
 
-FresnelHighlighter outlines whatever you're looking at.
+ObjectHighlighterManager outlines whatever you're looking at.
 Each system testable independently.
 ```
 
@@ -11003,6 +11460,7 @@ phase-b(New)/
 ├── 0-Core/
 │   └── GameEvents.cs                       (partial: OnToolSwitched, OnItemPickedUp, etc.)
 ├── 1-Managers/
+│   ├── ObjectHighlighterManager.cs         → "I raycast + find IHighlightable + apply HighlightProfile"
 │   └── SubManager/
 │       └── InventoryUI.cs                  → "I open and close the inventory panel"
 ├── 2-Data/
@@ -11010,6 +11468,7 @@ phase-b(New)/
 │   ├── Field_InventorySlot.cs              → "I display one inventory slot"
 │   ├── Interface/
 │   │   ├── IIconItem.cs                    → "I have an inventory icon"
+│   │   ├── IHighlightable.cs               → "I can be outlined when player looks at me"
 │   │   └── ISaveLoadableObject.cs          → "I can be saved/loaded (stub)"
 │   ├── DataService/
 │   │   └── InventoryDataService.cs         → "I manage all inventory slots" (nested: Slot)
@@ -11042,7 +11501,6 @@ phase-b(New)/
 │   │   ├── BaseSellableItem.cs             → "I have a base sell value"
 │   │   ├── PhysicsSoundPlayer.cs           → "I play sound on collision impact"
 │   │   └── PhysicsGib.cs                   → "I'm a debris piece that despawns after time"
-│   └── FresnelHighlighter.cs               → "I outline whatever the player looks at"
 ├── 4-Utils/
 │   ├── UtilsPhaseB.cs                      → "I hold physics helpers"
 │   └── PhaseBLOG.cs                        → "I format inventory snapshots"
@@ -11085,7 +11543,8 @@ phase-b(New)/
 | `BaseSellableItem.cs` | I have a base sell value |
 | `PhysicsSoundPlayer.cs` | I play sound on collision impact |
 | `PhysicsGib.cs` | I'm a debris piece that despawns after time |
-| `FresnelHighlighter.cs` | I outline whatever the player looks at |
+| `IHighlightable.cs` | I can be outlined — return a HighlightProfile or null |
+| `ObjectHighlighterManager.cs` | I raycast, find IHighlightable, ask for profile, apply it |
 | `RigidbodyDraggerController.cs` | I auto-release grab when SpringJoint breaks |
 | `ToolHardHat.cs` | I'm a separate tool type extending ToolPickaxe |
 | `UIEventRelay.cs` | I relay Unity EventSystem events to Action callbacks (drag-drop, pointer) |
@@ -11150,7 +11609,7 @@ phase-b(New)/
 27. `RigidbodyDraggerController.cs`
 28. `PlayerFootsteps.cs`
 29. `PlayerSpawnPoint.cs`
-30. `FresnelHighlighter.cs`
+30. `ObjectHighlighterManager.cs`
 
 **STOP — compile. Run PlayerMovementTest.**
 
@@ -11489,18 +11948,21 @@ ToolMagnet_Controller: optional — Attack1 = subtle pulse. Or skip entirely.
 **Setup:**
 1. Import Highlight Plus (URP) — keep Runtime/, Editor/, Demo/Profiles/
 2. URP Renderer Data → Add Renderer Feature → **Highlight Plus**
-3. Create 5 `HighlightProfile` assets (see ShaderGuide.md for values)
-4. Wire profiles to `FresnelHighlighter` inspector
+3. Create HighlightProfile assets (see ShaderGuide.md for values)
+4. Implement `IHighlightable` on any object that should be outlineable
+5. Each object holds its own `[SerializeField] HighlightProfile` and returns it from `GetHighlightProfile(activeTool)`
 
-**Profiles** (set on `FresnelHighlighter` inspector):
+**Architecture:** ObjectHighlighterManager does ONE raycast → finds `IHighlightable` → asks it for a profile → applies. Zero type checks in the highlighter. Each object decides its own profile (or returns null to skip).
 
-| Profile | Outline Color | Used By |
-|---------|--------------|---------|
-| `_toolProfile` → `Profile_Tool` | Cyan (0.25, 0.85, 1) | Tools, terminals, crates |
-| `_grabbableProfile` → `Profile_Grabbable` | Cyan (0.25, 0.85, 1) | Grabbable physics objects |
-| `_buildingProfile` → `Profile_Building` | Cyan (0.25, 0.85, 1) | Phase D — buildings (hammer) |
-| `_wrenchEnableProfile` → `Profile_WrenchEnable` | Green (0.3, 1, 0.3) | Phase D — enable supports |
-| `_wrenchDisableProfile` → `Profile_WrenchDisable` | Red (1, 0.3, 0.3) | Phase D — disable supports |
+**Profiles** (each object holds its own via `[SerializeField]`):
+
+| Script | Profile | Color | Logic |
+|--------|---------|-------|-------|
+| `BaseHeldTool` (all tools) | `Profile_Tool` | Cyan | Always returns profile |
+| `InteractableComputer` (Phase A) | `Profile_Tool` | Cyan | Always returns profile |
+| `OrePiece` (Phase C) | `Profile_Grabbable` | Cyan | Returns null if held by magnet |
+| `BuildingCrate` (Phase D) | `Profile_Tool` | Cyan | Always returns profile |
+| `BuildingObject` (Phase D) | varies | Cyan/Green/Red | Checks activeTool: hammer→cyan, wrench→green/red |
 
 ### Tool Prefabs (per tool type)
 
@@ -11543,8 +12005,8 @@ Root **must** have an `Image` component with `raycastTarget = true` for drag-dro
 | Name | Type | Used By |
 |------|------|---------|
 | `Ground` | Layer | PlayerMovement slope/ground check |
-| `Interact` | Layer | FresnelHighlighter + InteractionSystem raycast |
-| `Grabbable` | Tag | PlayerGrab + FresnelHighlighter |
+| `Interact` | Layer | ObjectHighlighterManager + InteractionSystem raycast |
+| `Grabbable` | Tag | PlayerGrab + ObjectHighlighterManager |
 
 ---
 
@@ -11560,8 +12022,8 @@ Root **must** have an `Image` component with `raycastTarget = true` for drag-dro
    - Components: `Camera`
    - `PlayerCamera` wiring: `_cam` → this Camera, `_movement` → PlayerMovement on parent, `_viewModelContainer` → ViewModelContainer
 
-3. **FresnelHighlighter** (on Camera GO or separate GO)
-   - Wiring: `_cam` → Camera, `_interactLayerMask` → "Interact", all 5 HighlightProfile assets
+3. **ObjectHighlighterManager** (on Camera GO or separate GO)
+   - Wiring: `_cam` → Camera, `_interactLayerMask` → "Interact" (no profile fields — profiles live on each object)
 
 4. **ViewModelContainer** (child of Camera)
    - Tools parent here when equipped
@@ -11625,13 +12087,13 @@ Root **must** have an `Image` component with `raycastTarget = true` for drag-dro
 
 | What | Original Did | What We Did | Why |
 |------|-------------|-------------|-----|
-| Player controller | Single 888-line `PlayerController.cs` | Split into `PlayerMovement` + `PlayerCamera` + `PlayerGrab` + `FresnelHighlighter` | Each fits one sentence |
+| Player controller | Single 888-line `PlayerController.cs` | Split into `PlayerMovement` + `PlayerCamera` + `PlayerGrab` + `ObjectHighlighterManager` | Each fits one sentence |
 | Inventory data | `PlayerInventory.Items` (plain List) | `InventoryDataService` with `Slot` nested type | Testable via `new`, pure C# |
 | Inventory UI | `InventorySlotUI` (193 lines, has drag logic + FindObjectOfType) | `Field_InventorySlot` (display only) + `InventoryOrchestrator` (wiring) | Separation of display from logic |
 | Tool pickup | `FindObjectOfType<PlayerInventory>().TryAddToInventory()` | `GameEvents.RaiseToolPickupRequested(tool)` → Orchestrator subscribes | Decoupled, no FindObjectOfType |
 | Tool drop | `FindObjectOfType<PlayerInventory>().RemoveFromInventory()` | Orchestrator handles drop → fires `RaiseItemDropped` | Owner chain, no FindObjectOfType |
 | Tool Owner | `Owner = PlayerController` (set via GetComponent) | `Owner = PlayerMovement` (set by InventoryOrchestrator on equip) | Owner chain pattern |
-| Outline logic | Inside `PlayerController.Update()` | Self-contained in `FresnelHighlighter.Update()` | One sentence per script |
+| Outline logic | Inside `PlayerController.Update()` with if-else chain | `ObjectHighlighterManager` + `IHighlightable` interface — each object owns its profile | Zero coupling, open/closed principle |
 | Settings reads | `Singleton<SettingsManager>.Ins.MouseSensitivity` | Hardcoded defaults (Phase H adds settings) | Settings system is Phase H |
 | Sound calls | `Singleton<SoundManager>.Ins.PlaySound(...)` | Commented stubs `// Phase H: play sound` | Sound system is Phase H |
 | Inventory panel | `InventoryUIManager` (singleton, 187 lines, mixed concerns) | `InventoryUI` (SubManager, lifecycle only) + `InventoryOrchestrator` | Separation |
@@ -11650,7 +12112,7 @@ Root **must** have an `Image` component with `raycastTarget = true` for drag-dro
 | 3 | **Inventory** | `InventoryUI`, `InventoryOrchestrator`, `InventoryDataService`, `Field_InventorySlot`, `UIEventRelay` | `OnToolPickupRequested`, `OnToolEquipped`, `OnToolSwitched`, `OnItemPickedUp`, `OnItemDropped`, `OnOpenInventoryView`, `OnCloseInventoryView` |
 | 4 | **Tools** | `BaseHeldTool`, `ToolPickaxe`, `ToolMagnet`, `ToolHammer`, `ToolMiningHat`, `ToolSupportsWrench`, `ToolResourceScanner`, `ToolBuilder`, `ToolHardHat` | `RaiseToolPickupRequested` (fires on Take), Owner chain (set via event) |
 | 5 | **Physics** | `BasePhysicsObject`, `BaseSellableItem`, `PhysicsSoundPlayer`, `PhysicsGib` | None — inheritance chain, self-contained |
-| 6 | **Fresnel Highlight** | `FresnelHighlighter` | Standalone — raycasts from camera, no events needed |
+| 6 | **Fresnel Highlight** | `ObjectHighlighterManager`, `IHighlightable` | `OnMenuStateChanged` (block), `OnToolEquipped`/`OnItemDropped` (track active tool) |
 | 7 | **UI Management** | `UIManager` (phase-All) | `OnMenuStateChanged`, `OnCloseAllSubManagers`, `OnOpenInventoryView` |
 
 ### Testability Matrix
@@ -11754,6 +12216,130 @@ public static partial class GameEvents
 			.Invoke(tool);
 	}
 	// << when tool was equipped
+}
+
+<!-- ==== FILE: learn/phase-b(New)/Scripts/1-Managers/ObjectHighlighterManager.cs ==== -->
+using UnityEngine;
+using HighlightPlus;
+
+/// <summary>
+/// I outline whatever the player looks at using Highlight Plus. Every Update I raycast from
+/// the camera. If I hit something with IHighlightable, I ask it for a HighlightProfile via
+/// GetHighlightProfile(activeTool). If it returns a profile, I apply it. If null, I skip.
+///
+/// This is fully decoupled — ObjectHighlighterManager doesn't know about specific types (tools,
+/// buildings, computers). Each object decides its OWN profile via IHighlightable. New phases
+/// just implement the interface on their new scripts — no changes to this file ever.
+///
+/// SETUP REQUIRED:
+///   1. Import Highlight Plus package (Runtime + Editor + Demo/Profiles)
+///   2. URP Renderer Data → Add Renderer Feature → Highlight Plus
+///   3. Create HighlightProfile assets (see ShaderGuide.md)
+///   4. Assign _cam + _interactLayerMask in inspector
+///   5. Implement IHighlightable on any object that should be outlineable
+///
+/// Who uses me: Self (Update raycasts). External: PauseMenu (ClearCurrent), tutorial (HighlightObject).
+/// Events I fire: none. Events I subscribe to: OnMenuStateChanged, OnToolEquipped, OnItemDropped.
+/// </summary>
+public class ObjectHighlighterManager : Singleton<ObjectHighlighterManager>
+{
+	#region Inspector Fields
+	[Header("Raycast")]
+	[SerializeField] Camera _cam;
+	[SerializeField] float _interactRange = 3f;
+	[SerializeField] LayerMask _interactLayerMask;
+	#endregion
+
+	#region private API
+	HighlightEffect currentHighlight;
+	GameObject currentTarget;
+	bool isMenuOpen;
+	BaseHeldTool activeTool;
+	#endregion
+
+	#region public API
+	/// <summary> Disables the current highlight. External scripts (PauseMenu, tutorial) can call
+	/// this to force-clear when needed (e.g. menu opens, tutorial step changes). </summary>
+	public void ClearCurrent()
+	{
+		if (currentHighlight != null)
+		{
+			currentHighlight.highlighted = false;
+			currentHighlight = null;
+			currentTarget = null;
+		}
+	}
+	/// <summary> Highlights a specific object with the given profile. External scripts can call this
+	/// to programmatically highlight objects (e.g. tutorial highlighting a specific tool). The highlight
+	/// stays until ClearCurrent is called (which happens every frame in Update). </summary>
+	public void HighlightObject(GameObject target, HighlightProfile profile)
+	{
+		ApplyHighlight(target, profile);
+	}
+	#endregion
+
+	#region private API — raycast + apply
+	/// <summary> Single raycast from camera forward. Finds first IHighlightable on the hit object
+	/// (via GetComponentInParent). Asks it for a HighlightProfile (passing activeTool so objects like
+	/// BuildingObject can return different colors per tool). If profile is non-null, applies it.
+	/// Zero type checks — each object owns its highlight logic via IHighlightable. </summary>
+	void OutlineLookedAtThing()
+	{
+		if (!Physics.Raycast(_cam.transform.position, _cam.transform.forward,
+			out RaycastHit hit, _interactRange, _interactLayerMask))
+			return;
+		// → find IHighlightable on hit object or its parents
+		var highlightable = hit.collider.GetComponentInParent<IHighlightable>();
+		if (highlightable == null) return;
+		// → ask the object what profile it wants (null = skip highlighting)
+		var profile = highlightable.GetHighlightProfile(activeTool);
+		if (profile == null) return;
+		// → apply highlight on the GameObject that has the IHighlightable
+		ApplyHighlight(((MonoBehaviour)highlightable).gameObject, profile);
+	}
+	/// <summary> Gets or adds a HighlightEffect on the target, loads the profile, and turns it on.
+	/// HighlightEffect is added at runtime (not pre-placed on prefabs) so any object can be highlighted.
+	/// effectGroup = Children ensures ALL child meshes get the outline (e.g. tool with multiple parts). </summary>
+	void ApplyHighlight(GameObject target, HighlightProfile profile)
+	{
+		// → get existing HighlightEffect or add one at runtime
+		HighlightEffect effect = target.GetComponent<HighlightEffect>();
+		if (effect == null)
+		{
+			effect = target.AddComponent<HighlightEffect>();
+			effect.effectGroup = TargetOptions.Children;
+		}
+		// → load profile settings (outline color, width, glow, etc.)
+		effect.ProfileLoad(profile);
+		// → turn on the highlight
+		effect.highlighted = true;
+		// → store reference for ClearCurrent next frame
+		currentHighlight = effect;
+		currentTarget = target;
+	}
+	#endregion
+
+	#region Unity Life Cycle
+	/// <summary> Subscribes to menu state (blocks highlight) and tool equip (tracks active tool
+	/// so IHighlightable implementors can decide profile based on what the player is holding). </summary>
+	private void Start()
+	{
+		// purpose: block highlight when menu is open
+		GameEvents.OnMenuStateChanged += (open) => isMenuOpen = open;
+		// purpose: track active tool — IHighlightable.GetHighlightProfile receives this
+		GameEvents.OnToolEquipped += (tool) => activeTool = tool;
+		// purpose: clear active tool when item is dropped
+		GameEvents.OnItemDropped += (tool) => { if (activeTool == tool) activeTool = null; };
+	}
+	/// <summary> Every frame: clears previous highlight, then raycasts (unless menu is open).
+	/// Finds IHighlightable on hit → asks for profile → applies. Zero type checks in this script. </summary>
+	private void Update()
+	{
+		ClearCurrent();
+		if (isMenuOpen) return;
+		OutlineLookedAtThing();
+	}
+	#endregion
 }
 
 <!-- ==== FILE: learn/phase-b(New)/Scripts/1-Managers/SubManager/InventoryUI.cs ==== -->
@@ -12136,6 +12722,26 @@ public class Field_InventorySlot : MonoBehaviour
 	#endregion
 }
 
+<!-- ==== FILE: learn/phase-b(New)/Scripts/2-Data/Interface/IHighlightable.cs ==== -->
+using HighlightPlus;
+
+/// <summary>
+/// Any object that can be outlined when the player looks at it. ObjectHighlighterManager raycasts
+/// each frame and calls GetHighlightProfile on the first IHighlightable it hits. The object
+/// decides which profile to return (or null to skip highlighting).
+///
+/// Who implements me: BaseHeldTool (cyan), InteractableComputer (cyan), OrePiece (cyan, skip if magnet-held),
+///   BuildingCrate (cyan), BuildingObject (cyan/green/red depending on active tool).
+/// Who calls me: ObjectHighlighterManager.OutlineLookedAtThing().
+/// </summary>
+public interface IHighlightable
+{
+	/// <summary> Returns the HighlightProfile to use when the player looks at this object.
+	/// activeTool is the currently equipped tool (or null if empty-handed).
+	/// Return null to skip highlighting (e.g. ore already held by magnet). </summary>
+	HighlightProfile GetHighlightProfile(BaseHeldTool activeTool);
+}
+
 <!-- ==== FILE: learn/phase-b(New)/Scripts/2-Data/Interface/IIconItem.cs ==== -->
 using UnityEngine;
 
@@ -12176,200 +12782,6 @@ public class SO_FootstepSoundDefinition : ScriptableObject
 	// Phase H: change to SO_SoundDefinition when SoundManager exists
 	public AudioClip LeftFootstepClip;
 	public AudioClip RightFootstepClip;
-}
-
-<!-- ==== FILE: learn/phase-b(New)/Scripts/3-MonoBehaviours/FresnelHighlighter.cs ==== -->
-using UnityEngine;
-using HighlightPlus;
-
-/// <summary>
-/// I outline whatever the player looks at using Highlight Plus. Every Update I do TWO raycasts:
-/// 1. Interact raycast (_interactLayerMask) — tools, crates, terminals, detonators, grabbables
-/// 2. Building raycast (_buildingHighlightMask) — buildings ONLY when holding Hammer or Wrench
-///
-/// For each hit type, I get or add a HighlightEffect component and load the matching
-/// HighlightProfile (cyan for tools/grabbables, green/red for wrench enable/disable).
-/// ClearCurrent disables the previous highlight each frame — exactly one outline at a time.
-///
-/// The original source has this logic in PlayerController.OutlineLookedAtThing() calling
-/// _fresnel.HighlightObject() and _fresnel.ClearAll(). We keep the logic HERE (decoupled
-/// from PlayerMovement) but expose public API so external scripts can also highlight objects.
-///
-/// SETUP REQUIRED:
-///   1. Import Highlight Plus package (Runtime + Editor + Demo/Profiles)
-///   2. URP Renderer Data → Add Renderer Feature → Highlight Plus
-///   3. Create 5 HighlightProfile assets (see ShaderGuide.md)
-///   4. Assign _cam, layer masks, profiles in inspector
-///
-/// Who uses me: Self (Update raycasts). External: PauseMenu (ClearCurrent), tutorial (HighlightObject).
-/// Events I fire: none. Events I subscribe to: OnMenuStateChanged, OnToolEquipped, OnItemDropped.
-/// </summary>
-public class FresnelHighlighter : MonoBehaviour
-{
-	#region Inspector Fields
-	[Header("Raycast")]
-	[SerializeField] Camera _cam;
-	[SerializeField] float _interactRange = 2f;
-	[SerializeField] LayerMask _interactLayerMask;
-	[SerializeField] float _buildingHighlightRange = 3f;
-	[SerializeField] LayerMask _buildingHighlightMask;
-	[Header("Highlight Profiles (Create → Highlight Plus → Profile)")]
-	[SerializeField] HighlightProfile _toolProfile;
-	[SerializeField] HighlightProfile _grabbableProfile;
-	[SerializeField] HighlightProfile _buildingProfile;
-	[SerializeField] HighlightProfile _wrenchEnableProfile;
-	[SerializeField] HighlightProfile _wrenchDisableProfile;
-	#endregion
-
-	#region private API
-	HighlightEffect currentHighlight;
-	GameObject currentTarget;
-	bool isMenuOpen;
-	BaseHeldTool activeTool;
-	#endregion
-
-	#region public API
-	/// <summary> Disables the current highlight. External scripts (PauseMenu, tutorial) can call
-	/// this to force-clear when needed (e.g. menu opens, tutorial step changes). </summary>
-	public void ClearCurrent()
-	{
-		if (currentHighlight != null)
-		{
-			currentHighlight.highlighted = false;
-			currentHighlight = null;
-			currentTarget = null;
-		}
-	}
-	/// <summary> Highlights a specific object with the given profile. External scripts can call this
-	/// to programmatically highlight objects (e.g. tutorial highlighting a specific tool). The highlight
-	/// stays until ClearCurrent is called (which happens every frame in Update). </summary>
-	public void HighlightObject(GameObject target, HighlightProfile profile)
-	{
-		ApplyHighlight(target, profile);
-	}
-	public HighlightProfile GetToolProfile() => _toolProfile;
-	public HighlightProfile GetGrabbableProfile() => _grabbableProfile;
-	public HighlightProfile GetBuildingProfile() => _buildingProfile;
-	public HighlightProfile GetWrenchEnableProfile() => _wrenchEnableProfile;
-	public HighlightProfile GetWrenchDisableProfile() => _wrenchDisableProfile;
-	#endregion
-
-	#region private API — raycast + apply
-	/// <summary> Two raycasts matching original PlayerController.OutlineLookedAtThing():
-	/// 1. Interact layer — tools, crates, terminals, detonators, grabbables (priority order)
-	/// 2. Building layer — buildings ONLY when holding Hammer or Wrench (different profile per tool) </summary>
-	void OutlineLookedAtThing()
-	{
-		// ═══ RAYCAST 1: interact layer (tools, crates, terminals, grabbables) ═══
-		if (Physics.Raycast(_cam.transform.position, _cam.transform.forward,
-			out RaycastHit hit, _interactRange, _interactLayerMask))
-		{
-			// → tool on ground (pickaxe, magnet, hammer, etc.)
-			if (hit.collider.GetComponentInParent<BaseHeldTool>() != null)
-			{
-				ApplyHighlight(hit.collider.gameObject, _toolProfile);
-				return;
-			}
-			// → Phase D: building crate on ground
-			// if (hit.collider.GetComponentInParent<BuildingCrate>() != null)
-			// { ApplyHighlight(hit.collider.gameObject, _toolProfile); return; }
-
-			// → Phase A: InteractableComputer (shop terminal, contracts terminal)
-			// NOTE: can't use generic IInteractable check — BaseHeldTool and BuildingObject
-			// also implement IInteractable but need different profiles. Check specific types.
-			// if (hit.collider.GetComponentInParent<InteractableComputer>() != null)
-			// { ApplyHighlight(hit.collider.gameObject, _toolProfile); return; }
-
-			// → Phase I: DetonatorTrigger (if !HasTriggered) → _toolProfile
-			// → Phase I: DetonatorBuySign → _toolProfile
-
-			// → grabbable physics object (ore, cube, etc.)
-			if (hit.collider.HasTag(TagType.grabbable))
-			{
-				// → Phase C: skip ore already held by magnet (original source checks this)
-				// if (activeTool is ToolMagnet)
-				// {
-				//     var ore = hit.collider.GetComponentInParent<OrePiece>();
-				//     if (ore != null && ore.CurrentMagnetTool != null) return;
-				// }
-				ApplyHighlight(hit.collider.gameObject, _grabbableProfile);
-				return;
-			}
-		}
-
-		// ═══ RAYCAST 2: building layer (ONLY when holding Hammer or Wrench) ═══
-		// Uses separate layer mask (_buildingHighlightMask) + longer range (3m)
-		// Buildings are on BuildingObject layer — separate from Interact layer
-		// Phase D: uncomment when BuildingObject, ToolHammer, ToolSupportsWrench exist
-		// if (!Physics.Raycast(_cam.transform.position, _cam.transform.forward,
-		//     out RaycastHit buildingHit, _buildingHighlightRange, _buildingHighlightMask))
-		//     return;
-		// // → hammer: cyan outline on building
-		// if (activeTool is ToolHammer)
-		// {
-		//     var building = buildingHit.collider.GetComponentInParent<BuildingObject>();
-		//     if (building != null)
-		//     {
-		//         ApplyHighlight(building.gameObject, _buildingProfile);
-		//         return;
-		//     }
-		// }
-		// // → wrench: green/red based on supports state
-		// if (activeTool is ToolSupportsWrench)
-		// {
-		//     var building = buildingHit.collider.GetComponentInParent<BuildingObject>();
-		//     if (building != null && building.CanHaveBuildingSupports())
-		//     {
-		//         var profile = building.BuildingSupportsEnabled
-		//             ? _wrenchDisableProfile : _wrenchEnableProfile;
-		//         ApplyHighlight(building.gameObject, profile);
-		//     }
-		// }
-	}
-	/// <summary> Gets or adds a HighlightEffect on the target, loads the profile, and turns it on.
-	/// HighlightEffect is added at runtime (not pre-placed on prefabs) so any object can be highlighted.
-	/// effectGroup = Children ensures ALL child meshes get the outline (e.g. tool with multiple parts). </summary>
-	void ApplyHighlight(GameObject target, HighlightProfile profile)
-	{
-		if (profile == null) return;
-		// → get existing HighlightEffect or add one at runtime
-		HighlightEffect effect = target.GetComponent<HighlightEffect>();
-		if (effect == null)
-		{
-			effect = target.AddComponent<HighlightEffect>();
-			effect.effectGroup = TargetOptions.Children;
-		}
-		// → load profile settings (outline color, width, glow, etc.)
-		effect.ProfileLoad(profile);
-		// → turn on the highlight
-		effect.highlighted = true;
-		// → store reference for ClearCurrent next frame
-		currentHighlight = effect;
-		currentTarget = target;
-	}
-	#endregion
-
-	#region Unity Life Cycle
-	/// <summary> Subscribes to menu state (blocks highlight) and tool equip (tracks active tool
-	/// for building raycast — hammer uses _buildingProfile, wrench uses _wrenchEnable/DisableProfile). </summary>
-	private void Start()
-	{
-		// purpose: block highlight when menu is open (original source checks this)
-		GameEvents.OnMenuStateChanged += (open) => isMenuOpen = open;
-		// purpose: track active tool — Phase D building highlight depends on which tool is held
-		GameEvents.OnToolEquipped += (tool) => activeTool = tool;
-		// purpose: clear active tool when item is dropped
-		GameEvents.OnItemDropped += (tool) => { if (activeTool == tool) activeTool = null; };
-	}
-	/// <summary> Every frame: clears previous highlight, then raycasts (unless menu is open).
-	/// Two raycasts: interact layer (tools/grabbables) + building layer (hammer/wrench only). </summary>
-	private void Update()
-	{
-		ClearCurrent();
-		if (isMenuOpen) return;
-		OutlineLookedAtThing();
-	}
-	#endregion
 }
 
 <!-- ==== FILE: learn/phase-b(New)/Scripts/3-MonoBehaviours/Orchestrator/InventoryOrchestrator.cs ==== -->
@@ -12509,7 +12921,7 @@ public class InventoryOrchestrator : MonoBehaviour
 			// purpose: PlayerGrab sets tool.Owner = PlayerMovement via this event
 			GameEvents.RaiseToolEquipped(previousActiveTool);
 		}
-		// purpose: notify FresnelHighlighter and other systems about tool change
+		// purpose: notify ObjectHighlighterManager and other systems about tool change
 		GameEvents.RaiseToolSwitched(index);
 		RefreshAllSlots();
 	}
@@ -13628,6 +14040,7 @@ using System;
 using System.Linq;
 using System.Collections;
 using System.Collections.Generic;
+using HighlightPlus;
 
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -13648,7 +14061,7 @@ using SPACE_UTIL;
 /// Who uses me: InventoryOrchestrator (equip/drop/switch), PlayerGrab (sets Owner via event).
 /// Events I fire: RaiseToolPickupRequested (on "Take" interaction).
 /// </summary>
-public class BaseHeldTool : BaseSellableItem, IInteractable, ISaveLoadableObject, IIconItem
+public class BaseHeldTool : BaseSellableItem, IInteractable, ISaveLoadableObject, IIconItem, IHighlightable
 {
 	#region Inspector Fields
 	[SerializeField] SavableObjectID _savableObjectID;
@@ -13664,6 +14077,8 @@ public class BaseHeldTool : BaseSellableItem, IInteractable, ISaveLoadableObject
 	[SerializeField] protected GameObject _viewModel;
 	[SerializeField] protected Animator _viewModelAnimator;
 	[SerializeField] List<SO_InteractionOption> _interactions;
+	[Header("Highlight")]
+	[SerializeField] HighlightProfile _highlightProfile;
 	#endregion
 
 	#region private API
@@ -13753,6 +14168,11 @@ public class BaseHeldTool : BaseSellableItem, IInteractable, ISaveLoadableObject
 			Destroy(gameObject);
 		}
 	}
+	#endregion
+
+	#region public API — IHighlightable
+	/// <summary> Returns the tool's highlight profile (cyan). All tools use the same profile. </summary>
+	public virtual HighlightProfile GetHighlightProfile(BaseHeldTool activeTool) => _highlightProfile;
 	#endregion
 
 	#region public API — ISaveLoadableObject (stub)
@@ -14529,7 +14949,7 @@ O → log snapshot";
 - **Highlight Plus** package imported (URP version — Runtime/ + Editor/ + Demo/Profiles/)
 - URP Renderer Data → **Highlight Plus Renderer Feature** added
 - Player GO with PlayerMovement + PlayerCamera
-- FresnelHighlighter on Camera GO (or separate GO)
+- ObjectHighlighterManager on Camera GO (or separate GO)
 - 5 HighlightProfile assets created
 
 ---
@@ -14561,32 +14981,47 @@ O → log snapshot";
 | `Profile_WrenchEnable` | Green (0.3, 1, 0.3) | 0.5 | 1.5 | Green |
 | `Profile_WrenchDisable` | Red (1, 0.3, 0.3) | 0.5 | 1.5 | Red |
 
-**How to set values on each profile:**
+**How to set values on each profile (step-by-step):**
 1. Select the profile asset in Project panel
-2. In Inspector: check **Outline** → set Color + Width
-3. Check **Outer Glow** → set Intensity + Color + Width (0.4)
-4. Set **Constant Width** = true (outline stays same screen size regardless of distance)
+2. In Inspector, configure these sections:
 
-### Step 4 — FresnelHighlighter Component
+**Outline section:**
 
-1. Select Camera GO (or create separate GO)
-2. Add `FresnelHighlighter` component
-3. Wire:
+| Inspector Field | Set To | What It Does |
+|----------------|--------|-------------|
+| **Outline** | ✅ checked (1.0) | Enables the edge outline. 0 = off, 1 = full intensity |
+| **Color** | Per table above | The outline edge color — click the color box, enter RGB values |
+| **Width** | Per table above | How thick the outline is in screen pixels. 0.2 = thin, 1.0 = thick |
+| **Quality** | High | `Fastest` = jagged edges, `Medium` = decent, `High` = smooth |
+| **Constant Width** | ✅ checked | Outline stays same screen size at any distance. Uncheck = shrinks with distance |
 
-| Field | Assign |
-|-------|--------|
-| `_cam` | Camera component |
-| `_interactRange` | 2 |
-| `_interactLayerMask` | "Interact" layer |
-| `_toolProfile` | `Profile_Tool` asset |
-| `_grabbableProfile` | `Profile_Grabbable` asset |
-| `_buildingProfile` | `Profile_Building` asset (Phase D, leave empty for now) |
-| `_wrenchEnableProfile` | `Profile_WrenchEnable` asset (Phase D, leave empty) |
-| `_wrenchDisableProfile` | `Profile_WrenchDisable` asset (Phase D, leave empty) |
+**Outer Glow section:**
+
+| Inspector Field | Set To | What It Does |
+|----------------|--------|-------------|
+| **Glow** | Per table above | Soft halo intensity. 0 = no glow, 1.5 = visible |
+| **Width** | 0.4 | How far the glow extends from the object edge |
+| **Color** (HQ) | Match outline color | Glow color — use same as outline for cohesive look |
+| **Animation Speed** | 0 | 0 = static glow, 1+ = gentle pulse. Use 0 for hover highlight |
+
+**Leave OFF:** Overlay, Inner Glow, See-Through, Target FX, Hit FX — not needed for hover highlighting.
+
+### Step 4 — ObjectHighlighterManager Component
+
+1. On Camera GO → Add Component → `ObjectHighlighterManager`
+2. Wire in Inspector:
+
+| Inspector Field | Set To | What It Does |
+|----------------|--------|-------------|
+| **Cam** | Drag Camera component | Which camera to raycast from (player's eyes) |
+| **Interact Range** | 3 | Max distance in meters to detect highlightable objects |
+| **Interact Layer Mask** | Check only "Interact" | Which physics layers the raycast can hit |
+
+> ObjectHighlighterManager has NO profile fields — each object owns its own profile via IHighlightable.
 
 ### Step 5 — Player GO (if not already set up)
 
-Use the player setup from GrabRopeTest.md Steps 1-6. Key requirement: `PlayerMovement` with `_playerCam` wired to Camera child. FresnelHighlighter needs the Camera for raycasting.
+Use the player setup from GrabRopeTest.md Steps 1-6. Key requirement: `PlayerMovement` with `_playerCam` wired to Camera child. ObjectHighlighterManager needs the Camera for raycasting.
 
 ### Step 7 — Test Objects in Scene
 
@@ -14607,7 +15042,7 @@ Create 4 test objects. Place all in front of player spawn, within 2m reach:
 1. GameObject → 3D Object → Cube (scale up to 3,3,1)
 2. Layer: `"Default"` ← NOT "Interact"
 3. No tag, no Rigidbody
-4. Tests: FresnelHighlighter raycast won't hit this (wrong layer mask)
+4. Tests: ObjectHighlighterManager raycast won't hit this (wrong layer mask)
 
 **Object D — Interactable but no matching type:**
 1. GameObject → 3D Object → Cube
@@ -14620,7 +15055,7 @@ Create 4 test objects. Place all in front of player spawn, within 2m reach:
 ```
 Scene Root
 ├── Player (PlayerMovement, PlayerCamera)
-│   └── Camera (Camera, FresnelHighlighter)
+│   └── Camera (Camera, ObjectHighlighterManager)
 ├── UIManager (phase-All)
 ├── ToolPickaxe_01 (on ground, layer Interact — Object A)
 ├── GrabbableCube (Rigidbody, tag Grabbable, layer Interact — Object B)
@@ -14634,15 +15069,32 @@ Scene Root
 
 ## How It Works (System Flow)
 
-**Every frame:** `FresnelHighlighter.Update()` runs. First it calls `ClearCurrent()` — if a previous highlight exists, sets `currentHighlight.highlighted = false` (Highlight Plus turns off the outline effect on that object). Then `OutlineLookedAtThing()` raycasts from `_cam` forward using `_interactLayerMask`.
+**Every frame:** `ObjectHighlighterManager.Update()` runs. `ClearCurrent()` disables the previous
+frame's highlight (`currentHighlight.highlighted = false`). If `isMenuOpen` → returns early (no
+highlighting when menu is open). Then `OutlineLookedAtThing()` fires a single raycast from the
+camera forward, masked to the `_interactLayerMask`.
 
-**Tool detected:** If the raycast hits a collider, it checks `hit.collider.GetComponentInParent<BaseHeldTool>()`. If found → calls `ApplyHighlight(hit.collider.gameObject, _toolProfile)`. Inside: it gets or **adds a `HighlightEffect` component** at runtime on the hit object (Highlight Plus manages the rendering internally — no layers, no materials from our side). Then `effect.ProfileLoad(_toolProfile)` loads the cyan outline/glow settings from the HighlightProfile SO, and `effect.highlighted = true` turns on the visual outline. The reference is stored so `ClearCurrent` can disable it next frame.
+**IHighlightable found:** The raycast hits a collider. `GetComponentInParent<IHighlightable>()`
+searches the hit object and its parents. If found (e.g. `BaseHeldTool` on a ToolPickaxe, or
+`InteractableComputer` on the shop terminal), it calls `highlightable.GetHighlightProfile(activeTool)`.
+The **object itself** decides what profile to return:
+- `BaseHeldTool` → always returns `_highlightProfile` (cyan)
+- `InteractableComputer` → always returns `_highlightProfile` (cyan)
+- `OrePiece` (Phase C) → returns null if held by magnet, otherwise `_highlightProfile`
+- `BuildingObject` (Phase D) → checks `activeTool`: hammer → cyan, wrench → green/red
 
-**Grabbable detected:** If no tool found, checks `hit.collider.HasTag(TagType.grabbable)`. If true → `ApplyHighlight(go, _grabbableProfile)` — same pattern, different profile.
+**Inside ApplyHighlight:** Gets the returned profile. `target.GetComponent<HighlightEffect>()` — first
+time returns null, so `AddComponent<HighlightEffect>()` + `effectGroup = TargetOptions.Children`.
+Then `effect.ProfileLoad(profile)` loads the settings. `effect.highlighted = true` turns on the outline.
 
-**No match:** If raycast misses or hits something with no matching type → no highlight applied. `ClearCurrent()` already disabled last frame's highlight, so nothing is outlined.
+**Look away:** Next frame, `ClearCurrent()` sets `highlighted = false` → outline disappears. The
+`HighlightEffect` component stays on the GO (reused next time).
 
-**Result:** Exactly one object is outlined at a time (or zero). Highlight on/off happens within 1 frame — no fade, instant. Highlight Plus draws the outline via its own URP Renderer Feature — zero custom shaders, zero layers, zero materials from our side.
+**No IHighlightable:** Raycast hits something without the interface (floor, walls) → `GetComponentInParent`
+returns null → no highlight applied.
+
+**Result:** Exactly one object outlined at a time (or zero). ObjectHighlighterManager has **zero type checks** —
+it doesn't know what a tool or building is. Each object owns its own profile via `IHighlightable`.
 
 ---
 
@@ -14651,9 +15103,9 @@ Scene Root
 **DO:** Press Play, look at empty space (floor/sky)
 **EXPECT:**
 - No outlines visible anywhere
-- No console errors from FresnelHighlighter
+- No console errors from ObjectHighlighterManager
 
-**Behind the scenes:** `FresnelHighlighter.Update()` raycasts but hits nothing (floor is layer "Default") → `OutlineLookedAtThing` returns early. `ClearCurrent()` has nothing to clear (`currentHighlight == null`).
+**Behind the scenes:** `ObjectHighlighterManager.Update()` raycasts but hits nothing (floor is layer "Default") → `OutlineLookedAtThing` returns early. `ClearCurrent()` has nothing to clear (`currentHighlight == null`).
 
 ---
 
@@ -14717,7 +15169,7 @@ Scene Root
 
 **DO:** Aim at non-grabbable, non-tool cube (layer "Interact" but no tag, no BaseHeldTool)
 **EXPECT:**
-- No outline — FresnelHighlighter checks for `BaseHeldTool` component and "Grabbable" tag, neither matches
+- No outline — ObjectHighlighterManager checks for `BaseHeldTool` component and "Grabbable" tag, neither matches
 - Raycast hits but no highlight applied
 
 ---
@@ -14757,8 +15209,9 @@ Scene Root
 
 ## Summary Checklist
 
-- [ ] Tool on ground → cyan outline (HP_Tool profile)
-- [ ] Grabbable cube → cyan outline (HP_Grabbable profile, slightly thinner)
+- [ ] Tool on ground → cyan outline (Profile_Tool)
+- [ ] Grabbable cube → cyan outline (Profile_Grabbable)
+- [ ] InteractableComputer → cyan outline (Profile_Tool) — Phase A
 - [ ] Look away → outline clears within 1 frame
 - [ ] Only ONE object highlighted at a time
 - [ ] Out of range (>2m) → no outline
@@ -14766,8 +15219,42 @@ Scene Root
 - [ ] Correct layer but no matching type → no outline
 - [ ] Multiple child renderers → all outlined
 - [ ] Rapid switching → no stuck outlines
+- [ ] Menu open → highlight blocked
 - [ ] HighlightEffect added at runtime, reused on re-look
 - [ ] Zero console errors throughout
+
+---
+
+## Future Phases — How to Add New Highlightable Types
+
+> With `IHighlightable`, **ObjectHighlighterManager.cs never changes**. Each new phase just implements
+> the interface on its new scripts. Here's what each phase adds:
+
+| Phase | Script | Implement | GetHighlightProfile Logic |
+|-------|--------|-----------|--------------------------|
+| **A** | `InteractableComputer` | `IHighlightable` | `return _highlightProfile;` (cyan) |
+| **C** | `OrePiece` | `IHighlightable` | `return (CurrentMagnetTool != null) ? null : _highlightProfile;` |
+| **D** | `BuildingCrate` | `IHighlightable` | `return _highlightProfile;` (cyan) |
+| **D** | `BuildingObject` | `IHighlightable` | Check activeTool: hammer→cyan, wrench→green/red, else null |
+| **I** | `DetonatorTrigger` | `IHighlightable` | `return HasTriggered ? null : _highlightProfile;` |
+
+### Example: Adding IHighlightable to a New Script
+
+```csharp
+using HighlightPlus;
+
+public class MyNewInteractable : MonoBehaviour, IHighlightable
+{
+    [SerializeField] HighlightProfile _highlightProfile;
+
+    public HighlightProfile GetHighlightProfile(BaseHeldTool activeTool)
+    {
+        return _highlightProfile; // or null to skip highlighting
+    }
+}
+```
+
+No changes to ObjectHighlighterManager. No uncommenting. Just implement the interface + assign a profile in inspector.
 
 <!-- ==== FILE: learn/phase-b(New)/Scripts/5-Tests/Manual/GrabRopeTest.md ==== -->
 # Grab Rope — Manual Test Flow
@@ -17530,6 +18017,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using HighlightPlus;
 
 using SPACE_UTIL;
 
@@ -17547,7 +18035,7 @@ using SPACE_UTIL;
 ///   ToolPickaxe (TryConvertToCrushed), OrePiecePoolManager (pool lifecycle).
 /// Events I fire: OnOreSold (via DelayThenSell coroutine).
 /// </summary>
-public class OrePiece : BaseSellableItem
+public class OrePiece : BaseSellableItem, IHighlightable
 {
 	#region Inspector Fields
 	[SerializeField] ResourceType _resourceType;
@@ -17560,6 +18048,8 @@ public class OrePiece : BaseSellableItem
 	[SerializeField] bool _useRandomScale = true;
 	[SerializeField] Vector3 _scaleVariance = new Vector3(0.25f, 0.25f, 0.25f);
 	[SerializeField] Sprite _inventoryIcon;
+	[Header("Highlight")]
+	[SerializeField] HighlightProfile _highlightProfile;
 	[Header("Conversion Prefabs (Phase E)")]
 	[SerializeField] GameObject _crushedPrefab;
 	[SerializeField] GameObject _polishedPrefab;
@@ -17622,6 +18112,16 @@ public class OrePiece : BaseSellableItem
 		// Phase H: play crush sound
 		Delete();
 		return true;
+	}
+	#endregion
+
+	#region public API — IHighlightable
+	/// <summary> Returns cyan profile when on ground. Returns null if held by magnet — prevents
+	/// visual noise when the magnet is pulling 10+ pieces (they're already visually attached). </summary>
+	public HighlightProfile GetHighlightProfile(BaseHeldTool activeTool)
+	{
+		if (CurrentMagnetTool != null) return null;
+		return _highlightProfile;
 	}
 	#endregion
 
@@ -18311,6 +18811,38 @@ Scene Root
 
 ---
 
+## Highlight Integration (IHighlightable — Phase C addition)
+
+> When Phase C is hand-typed, `OrePiece` implements `IHighlightable`. ObjectHighlighterManager
+> from Phase B automatically finds ore pieces and highlights them when looked at.
+
+**OrePiece highlight:**
+- Look at ore piece on ground → **cyan outline** (Profile_Grabbable)
+- Look at ore piece held by ToolMagnet → **no outline** (GetHighlightProfile returns null — magnet-held skip)
+
+**Setup:** Add `IHighlightable` to `OrePiece.cs`:
+
+```csharp
+public class OrePiece : BaseSellableItem, IHighlightable
+{
+    [Header("Highlight")]
+    [SerializeField] HighlightProfile _highlightProfile;
+
+    public HighlightProfile GetHighlightProfile(BaseHeldTool activeTool)
+    {
+        // skip highlight if this ore is currently being pulled by a magnet
+        if (CurrentMagnetTool != null) return null;
+        return _highlightProfile;
+    }
+}
+```
+
+Assign `Profile_Grabbable.asset` to `_highlightProfile` on each OrePiece prefab.
+
+> Create profiles per instructions in `phase-b/Tests/Manual/FresnelHighlightTest.md` Step 3.
+
+---
+
 ## Summary Checklist
 
 - [ ] OreNode shows one random model variant on Start
@@ -18326,6 +18858,8 @@ Scene Root
 - [ ] Different node types produce matching ore types
 - [ ] Empty drops list → no crash, zero pieces
 - [ ] All ore pieces tagged "Grabbable", layer "Interact"
+- [ ] Ore on ground gets cyan outline when looked at
+- [ ] Ore held by magnet does NOT get outlined
 
 <!-- ==== FILE: learn/phase-c(New)/Scripts/5-Tests/Manual/SellerMachineTest.md ==== -->
 # Seller Machine — Manual Test
@@ -18672,7 +19206,7 @@ When ore **exits** the trigger, `OnTriggerExit` removes it from the belt's list 
 
 ## Flow 3 — Building Take/Pack
 
-The player equips **ToolHammer** and looks at a placed `BuildingObject`. `FresnelHighlighter` outlines it in cyan. The player presses E → `InteractionWheelUI` shows "Take" and "Pack" options.
+The player equips **ToolHammer** and looks at a placed `BuildingObject`. `ObjectHighlighterManager` outlines it in cyan. The player presses E → `InteractionWheelUI` shows "Take" and "Pack" options.
 
 **Take:** `BuildingObject.Interact(InteractionType.Take)` → `TryTakeOrPack()` → fires `GameEvents.RaiseBuildingTakeRequested(definition, qty)` → `InventoryOrchestrator` subscribes → creates a new `ToolBuilder` from the definition → adds to inventory. `OnBuildingRemoved` event fires. `GameEvents.RaiseBuildingRemoved(this)`. `Destroy(gameObject)` removes the building from the world.
 
@@ -18731,7 +19265,7 @@ Conveyor variants:
   - RoutingConveyor: interactable direction switch (IInteractable)
 
 Equip hammer → look at placed building:
-  - FresnelHighlighter outlines it in cyan
+  - ObjectHighlighterManager outlines it in cyan
   - Press E → interaction wheel: "Take" or "Pack"
   - Take → building goes back into inventory as ToolBuilder
   - Pack → building becomes a crate on the ground
@@ -19119,24 +19653,46 @@ public void RemoveTouchingConveyorBelt(ConveyorBelt belt)
 #endregion
 ```
 
-### 4. `FresnelHighlighter.cs` (Phase B) — UNCOMMENT building/wrench checks
+### 4. `BuildingObject.cs` — ADD IHighlightable (no ObjectHighlighterManager changes needed)
+
+> ObjectHighlighterManager uses `IHighlightable` interface — zero type checks. Just implement the
+> interface on BuildingObject and BuildingCrate. ObjectHighlighterManager finds them automatically.
 
 ```csharp
-// file: phase-b(New)/Scripts/3-MonoBehaviours/FresnelHighlighter.cs
-// In OutlineLookedAtThing(), UNCOMMENT the Phase D block:
+// file: phase-d(New)/Scripts/3-MonoBehaviours/Building/BuildingObject.cs
+// ADD: IHighlightable to class declaration + implementation
 
-// Phase D: check for placed building (when holding hammer or wrench)
-var building = hit.collider.GetComponentInParent<BuildingObject>();
-if (building != null && !building.IsGhost)
+using HighlightPlus;
+
+public class BuildingObject : MonoBehaviour, IInteractable, IHighlightable
 {
-    // → wrench tool: use green/red profile based on supports state
-    // → hammer tool: use building profile (cyan)
-    ApplyHighlight(building.gameObject, _buildingProfile);
-    return;
+    [Header("Highlight")]
+    [SerializeField] HighlightProfile _buildingProfile;       // cyan — when holding hammer
+    [SerializeField] HighlightProfile _wrenchEnableProfile;   // green — supports currently OFF
+    [SerializeField] HighlightProfile _wrenchDisableProfile;  // red — supports currently ON
+
+    public HighlightProfile GetHighlightProfile(BaseHeldTool activeTool)
+    {
+        if (IsGhost) return null;
+        if (activeTool is ToolHammer) return _buildingProfile;
+        if (activeTool is ToolSupportsWrench && CanHaveBuildingSupports())
+            return BuildingSupportsEnabled ? _wrenchDisableProfile : _wrenchEnableProfile;
+        return null; // no highlight if not holding hammer/wrench
+    }
 }
-// For wrench-specific green/red profiles, check active tool type:
-// if (activeToolIsWrench) ApplyHighlight(go, building.BuildingSupportsEnabled 
-//     ? _wrenchDisableProfile : _wrenchEnableProfile);
+```
+
+```csharp
+// file: phase-d(New)/Scripts/3-MonoBehaviours/Building/BuildingCrate.cs
+// ADD: IHighlightable to class declaration + implementation
+
+public class BuildingCrate : BaseSellableItem, IInteractable, IHighlightable
+{
+    [Header("Highlight")]
+    [SerializeField] HighlightProfile _highlightProfile;  // cyan
+
+    public HighlightProfile GetHighlightProfile(BaseHeldTool activeTool) => _highlightProfile;
+}
 ```
 
 ### 5. `SO_ShopItemDef.cs` (Phase A) — ADD building definition field
@@ -19771,16 +20327,19 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using HighlightPlus;
 
 /// <summary>
 /// packed building crate on the ground — Take creates ToolBuilder + fires RaiseBuildingTakeRequested.
 /// Shows icon + quantity text on world-space canvas.
 /// </summary>
-public class BuildingCrate : BaseSellableItem, IInteractable
+public class BuildingCrate : BaseSellableItem, IInteractable, IHighlightable
 {
 	#region Inspector Fields
 	[SerializeField] SavableObjectID _savableObjectID;
 	[SerializeField] List<SO_InteractionOption> _interactions;
+	[Header("Highlight")]
+	[SerializeField] HighlightProfile _highlightProfile;
 	#endregion
 
 	#region private API
@@ -19824,6 +20383,11 @@ public class BuildingCrate : BaseSellableItem, IInteractable
 	}
 	#endregion
 
+	#region public API — IHighlightable
+	/// <summary> Always returns cyan profile — crates are highlightable regardless of active tool. </summary>
+	public HighlightProfile GetHighlightProfile(BaseHeldTool activeTool) => _highlightProfile;
+	#endregion
+
 	#region Unity Life Cycle
 	/// <summary> Sets the world-space canvas images to the definition's icon and quantity text. </summary>
 	private void Start()
@@ -19845,6 +20409,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using HighlightPlus;
 
 /// <summary>
 /// I'm a placed building in the world. I implement IInteractable so the player can press E to
@@ -19867,7 +20432,7 @@ using UnityEngine;
 /// Events I fire: OnBuildingRemoved (local Action event), RaiseBuildingRemoved, RaiseBuildingTakeRequested.
 /// Phase G: implements ISaveLoadableBuildingObject for persistence.
 /// </summary>
-public class BuildingObject : MonoBehaviour, IInteractable
+public class BuildingObject : MonoBehaviour, IInteractable, IHighlightable
 {
 	#region Inspector Fields
 	[SerializeField] SavableObjectID _savableObjectID;
@@ -19882,6 +20447,10 @@ public class BuildingObject : MonoBehaviour, IInteractable
 	[SerializeField] GameObject _buildingPlacementColliderObject;
 	[SerializeField] GameObject _extraGhostRenderers;
 	[SerializeField] bool _rotatingShouldMirrorWhenSnapped;
+	[Header("Highlight")]
+	[SerializeField] HighlightProfile _buildingProfile;
+	[SerializeField] HighlightProfile _wrenchEnableProfile;
+	[SerializeField] HighlightProfile _wrenchDisableProfile;
 	#endregion
 
 	#region public API
@@ -19955,6 +20524,19 @@ public class BuildingObject : MonoBehaviour, IInteractable
 		if (IsGhost) return;
 		if (selectedOption.interactionType == InteractionType.Take) TryTakeOrPack();
 		// Phase D extra: InteractionType.Pack → Pack()
+	}
+	#endregion
+
+	#region public API — IHighlightable
+	/// <summary> Returns building profile if holding hammer, wrench enable/disable profile if holding
+	/// wrench (green when supports OFF, red when ON), or null if no relevant tool held. Ghost → null. </summary>
+	public HighlightProfile GetHighlightProfile(BaseHeldTool activeTool)
+	{
+		if (IsGhost) return null;
+		if (activeTool is ToolHammer) return _buildingProfile;
+		if (activeTool is ToolSupportsWrench && CanHaveBuildingSupports())
+			return BuildingSupportsEnabled ? _wrenchDisableProfile : _wrenchEnableProfile;
+		return null;
 	}
 	#endregion
 
@@ -21640,6 +22222,33 @@ ConveyorBelt_Prefab (root)
 
 ---
 
+## Highlight Integration (IHighlightable)
+
+> When Phase D is hand-typed, `BuildingObject` and `BuildingCrate` implement `IHighlightable`.
+> This means the highlight system (ObjectHighlighterManager from Phase B) automatically finds them.
+
+**BuildingObject highlight (requires hammer or wrench equipped):**
+- Equip ToolHammer → look at placed building → **cyan outline** (Profile_Building)
+- Equip ToolSupportsWrench → look at building with supports ON → **red outline** (Profile_WrenchDisable)
+- Equip ToolSupportsWrench → look at building with supports OFF → **green outline** (Profile_WrenchEnable)
+- Empty-handed or other tool → **no outline** (GetHighlightProfile returns null)
+
+**BuildingCrate highlight:**
+- Look at crate on ground → **cyan outline** (Profile_Tool) regardless of active tool
+
+**Setup:** Assign HighlightProfile assets on each prefab:
+
+| Prefab | Inspector Field | Profile Asset |
+|--------|----------------|--------------|
+| BuildingObject | `_buildingProfile` | `Profile_Building.asset` (cyan) |
+| BuildingObject | `_wrenchEnableProfile` | `Profile_WrenchEnable.asset` (green) |
+| BuildingObject | `_wrenchDisableProfile` | `Profile_WrenchDisable.asset` (red) |
+| BuildingCrate | `_highlightProfile` | `Profile_Tool.asset` (cyan) |
+
+> Create profiles per instructions in `phase-b/Tests/Manual/FresnelHighlightTest.md` Step 3.
+
+---
+
 ## Summary Checklist
 
 - [ ] Ghost appears at grid-snapped position (0.5 offset)
@@ -21650,6 +22259,9 @@ ConveyorBelt_Prefab (root)
 - [ ] Overlapping placement rejected
 - [ ] Take removes building, fires RaiseBuildingTakeRequested
 - [ ] Pack spawns crate with random velocity, fires RaiseBuildingRemoved
+- [ ] Building gets cyan outline when holding hammer
+- [ ] Building gets green/red outline when holding wrench
+- [ ] BuildingCrate gets cyan outline regardless of tool
 - [ ] Console logs every GameEvent fire
 - [ ] Zero errors
 
