@@ -2147,6 +2147,25 @@ These are purely hand-tested — no script automates them. The `.md` is the test
 
 ----
 
+## External Packages
+
+> These packages are imported into the Unity project alongside our scripts.
+> See `importedAssetsAnalysis/Documentation/` for comprehensive beginner guides per package.
+
+| Package | Phase | Purpose | Doc |
+|---------|-------|---------|-----|
+| **Highlight Plus** (URP) | B+ | Object outline/glow on hover — replaces custom fresnel shader | `HighlightPlus.md` |
+| **DOTween** (free) | A/D+ | Smooth property animation (gate slide, hatch rotate, UI) | `DOTween.md` |
+| **Feel** (MMFeedbacks) | B/C/D/H | Game juice — camera shake, screen flash, floating text, springs | `Feel-MMFeedbacks.md` |
+| **Text Animator** | A/F/H | Per-character TMP animation + typewriter | `TextAnimator.md` |
+
+**Integration rules:**
+- **Additive only** — packages ADD to existing scripts via `[SerializeField]` fields + one-liner calls. They never replace architecture (GameEvents, Singleton, DataService patterns stay).
+- **Null-safe** — all Feel calls use `_feedback?.PlayFeedbacks()` — does nothing if not wired. Game runs identically without Feel.
+- **Profile-based** — Highlight Plus uses `HighlightProfile` SOs, not hardcoded colors. DOTween uses `[SerializeField] Ease` for inspector control.
+
+---
+
 ## Hand-Typing Order
 
 1. `#region` blocks (empty skeleton)
@@ -5324,6 +5343,7 @@ using SPACE_UTIL;
 /// </summary>
 public static partial class GameEvents
 {
+	// (UIManager.cs)
 	// when a certain menu subManager is enable/disabled >>
 	public static event Action<bool> OnMenuStateChanged;
 	public static void RaiseMenuStateChanged(bool isAnyMenuOpen)
@@ -5333,6 +5353,17 @@ public static partial class GameEvents
 			.Invoke(isAnyMenuOpen);
 	}
 	// << when a certain menu subManager is enable/disabled
+
+	// (EconomyManager.cs)
+	// when money changed >>
+	public static event Action<float> OnMoneyChanged;
+	public static void RaiseMoneyChanged(float money)
+	{
+		LogSubscribersCount(nameof(OnMoneyChanged), OnMoneyChanged);
+		GameEvents.OnMoneyChanged? // if there is any subscribers
+			.Invoke(money);
+	}
+	// << when money changed
 
 	#region LogSubscribersCount
 	static void LogSubscribersCount(string name, Delegate anEvent)
@@ -5402,11 +5433,10 @@ public class EconomyManager : Singleton<EconomyManager>
 	[SerializeField] float _defaultMoney = 400f;
 	float currMoney;
 	#region public API
-	public float GetMoney() => this._defaultMoney;
+	public float GetMoney() => currMoney;
 	public void AddMoney(float deltaMoney)
 	{
 		currMoney += deltaMoney;
-		GameEvents.RaiseMoneyChanged(currMoney);
 	}
 	public bool CanAfford(float price)
 	{
@@ -5415,12 +5445,13 @@ public class EconomyManager : Singleton<EconomyManager>
 	#endregion
 
 	#region Unity Life Cycle
-	protected override void Awake()
+	// after moneyUI subscribed in onFIrstEnable
+	private void Start()
 	{
-		base.Awake();
-		Debug.Log(C.method(this));
 		currMoney = this._defaultMoney;
-	} 
+		// raise or notify in start or further in unity life cycle.
+		GameEvents.RaiseMoneyChanged(money: currMoney);
+	}
 	#endregion
 }
 
@@ -5440,6 +5471,7 @@ using SPACE_UTIL;
 /// <summary>
 /// reports menu state + closes all panels + routes keyboard input with priority
 /// </summary>
+[DefaultExecutionOrder(-100)] // just after INITManager
 public class UIManager : Singleton<UIManager>
 {
 	bool isAnyMenuOpen;
@@ -5458,13 +5490,26 @@ public class UIManager : Singleton<UIManager>
 	#endregion
 
 	#region Unity Life Cycle
+	bool isFirstEnable = true;
+	private void OnEnable()
+	{
+		if(isFirstEnable)
+		{
+			// subscription always done in onEnable
+			// raise is made in start on further in unity life cycle.
+			GameEvents.OnMenuStateChanged += (isAnyMenuOpen) => this.isAnyMenuOpen = isAnyMenuOpen;
+			isFirstEnable = false;
+		}
+	}
 	private void Update()
 	{
 		// esc: closeAllSubManagers/openPauseMenu
 		if (INPUT.K.InstantDown(KeyCode.Escape))
 		{
+			Debug.Log($"isAnyMenuOpen: {isAnyMenuOpen}".colorTag("cyan"));
 			if (isAnyMenuOpen)
 			{
+				Debug.Log("UIManager request close all".colorTag("orange"));
 				CloseAllSubManager();
 				return;
 			}
@@ -6150,16 +6195,6 @@ public static partial class GameEvents
 	}
 	// << when Somthng occured
 
-	// when money changed >>
-	public static event Action<float> OnMoneyChanged;
-	public static void RaiseMoneyChanged(float money)
-	{
-		LogSubscribersCount(nameof(OnMoneyChanged), OnMoneyChanged);
-		GameEvents.OnMoneyChanged? // if there is any subscribers
-			.Invoke(money);
-	}
-	// << when money changed
-
 	// when shop view is toggled >>
 	public static event Action OnOpenShopView;
 	public static void RaiseOpenShopView()
@@ -6246,6 +6281,7 @@ public class InteractionWheelUI : Singleton<InteractionWheelUI>
 			isFirstEnable = false;
 			return;
 		}
+		// future enable, so its alright to notify or raise here too.
 		GameEvents.RaiseMenuStateChanged(isAnyMenuOpen: true); // for cursorLock purpose
 	}
 	// not required for now
@@ -6426,8 +6462,9 @@ public class moneyUI : MonoBehaviour
 
 	void HandleMoneyChanged(float money)
 	{
+		Debug.Log("money changed gotta alter the UI".colorTag("lime"));
 		EconomyManager economyManager = Singleton<EconomyManager>.Ins;
-		_moneyText.SetText(economyManager.GetMoney().formatMoney());
+		this._moneyText.text = economyManager.GetMoney().formatMoney();
 	}
 	bool isFirstEnable = true;
 	private void OnEnable()
@@ -6447,7 +6484,7 @@ public class moneyUI : MonoBehaviour
 	*/
 }
 
-<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-a/2-Data/DataService/ShopDataService.cs ==== -->
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-a/2-Data/DataServices/ShopDataService.cs ==== -->
 ﻿using System;
 using System.Linq;
 using System.Collections;
@@ -6582,7 +6619,7 @@ public class ShopDataService
 	#endregion
 }
 
-<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-a/2-Data/DataWrapper/ShopDataWrapper.cs ==== -->
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-a/2-Data/DataWrappers/ShopDataWrapper.cs ==== -->
 using System;
 using System.Linq;
 using System.Collections;
@@ -6718,7 +6755,7 @@ public class Field_ShopItem : MonoBehaviour
 	}
 }
 
-<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-a/2-Data/Interface/IInteractable.cs ==== -->
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-a/2-Data/Interfaces/IInteractable.cs ==== -->
 ﻿using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
@@ -7306,6 +7343,211 @@ public static class UtilsPhaseA
 	}
 }
 
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-a/5-Tests/Manual/HighlightComputerTest.md ==== -->
+# Highlight Computer Terminal — Manual Test Flow
+
+> Verifies that InteractableComputer gets a cyan Highlight Plus outline when the player
+> looks at it, and that pressing E opens the shop. Tests the FresnelHighlighter integration
+> with Phase A's InteractableComputer.
+
+---
+
+## Prerequisites
+
+- **Phase A scripts** hand-typed (InteractableComputer, ShopUI, ShopUIOrchestrator, etc.)
+- **Phase B scripts** hand-typed (FresnelHighlighter, PlayerMovement, PlayerGrab)
+- **Highlight Plus** imported (URP version — Runtime/ + Editor/)
+- URP Renderer Data → **Highlight Plus Renderer Feature** added
+- `Profile_Tool` HighlightProfile asset created (cyan outline)
+- FresnelHighlighter `InteractableComputer` check **uncommented** (lines 99-100)
+
+---
+
+## Setup Guide
+
+### Step 1 — Scene Hierarchy
+
+> If you already have a Phase B test scene, add the computer to it. Otherwise create fresh:
+
+```
+Scene Root
+├── UIManager (singleton)
+├── EconomyManager (singleton, _defaultMoney = 400)
+├── Player
+│   ├── Camera
+│   │   └── FresnelHighlighter (component)
+│   ├── ViewModelContainer (empty)
+│   └── HoldPosition (empty)
+├── Floor (Plane, layer: Ground)
+├── ComputerTerminal (see Step 2)
+└── Canvas (for ShopUI — from Phase A setup)
+```
+
+### Step 2 — Create the Computer Terminal
+
+1. Create Empty GO → name `ComputerTerminal`
+2. Position at `(0, 0.5, 3)` — in front of player spawn, within 2m
+3. Add child: **Cube** (scale 0.5, 0.8, 0.3) → this is the "monitor" visual
+4. On the **root GO** (`ComputerTerminal`):
+   - Add `InteractableComputer` component
+   - Add `BoxCollider` (covers the cube child)
+   - Set **Layer** = `Interact`
+5. Wire `InteractableComputer`:
+
+| Field | Assign |
+|-------|--------|
+| `_OPTION` | Create SO_InteractionOption → name "OpenShop", interactionName = "openShopView" |
+| `_selectFirstOptionDefault` | ✅ true (auto-selects first option = no wheel) |
+
+### Step 3 — FresnelHighlighter Setup
+
+1. On Camera GO → ensure `FresnelHighlighter` component exists
+2. Wire:
+
+| Field | Assign |
+|-------|--------|
+| `_cam` | Camera component |
+| `_interactRange` | 2 |
+| `_interactLayerMask` | `Interact` layer |
+| `_toolProfile` | `Profile_Tool.asset` (cyan outline) |
+| `_grabbableProfile` | `Profile_Grabbable.asset` (or same as tool) |
+
+### Step 4 — Uncomment the InteractableComputer Check
+
+In `FresnelHighlighter.cs`, uncomment lines 99-100:
+
+```csharp
+// BEFORE (commented):
+// if (hit.collider.GetComponentInParent<InteractableComputer>() != null)
+// { ApplyHighlight(hit.collider.gameObject, _toolProfile); return; }
+
+// AFTER (uncommented):
+if (hit.collider.GetComponentInParent<InteractableComputer>() != null)
+{ ApplyHighlight(hit.collider.gameObject, _toolProfile); return; }
+```
+
+### Step 5 — Press Play
+
+---
+
+## How It Works (System Flow)
+
+**Every frame:** `FresnelHighlighter.Update()` runs. `ClearCurrent()` disables the previous
+frame's highlight (`currentHighlight.highlighted = false`). Then `OutlineLookedAtThing()` fires
+a raycast from the camera forward, masked to the `Interact` layer.
+
+**Computer detected:** The raycast hits the ComputerTerminal's BoxCollider (on Interact layer).
+The priority checks run: `BaseHeldTool`? No. `BuildingCrate`? No. `InteractableComputer`? **Yes.**
+`ApplyHighlight(hit.collider.gameObject, _toolProfile)` runs.
+
+**Inside ApplyHighlight:** It calls `target.GetComponent<HighlightEffect>()`. First time → returns
+null, so it does `target.AddComponent<HighlightEffect>()` and sets `effectGroup = TargetOptions.Children`
+(so the cube child mesh also gets outlined). Then `effect.ProfileLoad(_toolProfile)` loads the cyan
+outline/glow settings. `effect.highlighted = true` turns on the visual outline.
+
+**Look away:** Next frame, `ClearCurrent()` sets `currentHighlight.highlighted = false` → outline
+disappears. The `HighlightEffect` component stays on the GO (reused next time you look at it).
+
+**Press E to interact:** This is handled by `SimplePlayerInteraction` (Phase A), NOT by
+FresnelHighlighter. The interaction system does its own raycast, finds `IInteractable` on the
+computer, and calls `Interact(selectedOption)` → `GameEvents.RaiseOpenShopView()` → ShopUI opens.
+The highlight and the interaction are **fully independent systems** — they happen to look at the
+same object but don't communicate with each other.
+
+---
+
+## 1. Initial State
+
+**DO:** Press Play, look at empty floor
+**EXPECT:**
+- No outlines visible
+- No console errors
+
+**Behind the scenes:** FresnelHighlighter raycasts, hits floor (layer Ground, not in Interact mask) → no highlight applied.
+
+---
+
+## 2. Look At Computer
+
+**DO:** Walk toward ComputerTerminal, aim crosshair at the cube mesh (within 2m)
+**EXPECT:**
+- **Cyan outline appears** around the computer cube
+- Outline follows cube edges — visible border + subtle glow
+- Outline appears **instantly** (no fade-in)
+
+**Behind the scenes:** Raycast hits BoxCollider on Interact layer → `GetComponentInParent<InteractableComputer>()` returns the component → `ApplyHighlight(go, _toolProfile)` → `HighlightEffect` added → `ProfileLoad(Profile_Tool)` → cyan outline/glow → `highlighted = true`.
+
+---
+
+## 3. Look Away
+
+**DO:** Move crosshair away from computer (look at floor or sky)
+**EXPECT:**
+- Cyan outline **disappears instantly**
+- Computer returns to normal appearance
+
+**Behind the scenes:** `ClearCurrent()` → `currentHighlight.highlighted = false` → Highlight Plus removes the outline. The `HighlightEffect` component stays on the GO but is inactive.
+
+---
+
+## 4. Look Back (Reuse)
+
+**DO:** Look at computer again
+**EXPECT:**
+- Cyan outline appears again — same as step 2
+- No "double outline" or visual glitch
+
+**Behind the scenes:** `GetComponent<HighlightEffect>()` finds the existing one (added in step 2) → `ProfileLoad` reloads settings → `highlighted = true`. No `AddComponent` this time — reuses existing.
+
+---
+
+## 5. Interact (E key)
+
+**DO:** While looking at computer (outline visible), press E
+**EXPECT:**
+- Shop UI opens (Phase A ShopUI panel becomes active)
+- Outline may disappear (menu opens → `isMenuOpen = true` → Update skips raycasting)
+
+**Behind the scenes:** `SimplePlayerInteraction` raycasts independently, finds `IInteractable` on computer → calls `Interact(openShopView)` → `GameEvents.RaiseOpenShopView()` → ShopUI subscribes and opens. Meanwhile `GameEvents.RaiseMenuStateChanged(true)` fires → FresnelHighlighter sets `isMenuOpen = true` → next Update calls `ClearCurrent()` and returns early.
+
+---
+
+## 6. Close Shop, Look Again
+
+**DO:** Close shop (ESC or Tab), look at computer
+**EXPECT:**
+- Outline appears again
+- Can interact again with E
+
+**Behind the scenes:** `GameEvents.RaiseMenuStateChanged(false)` → `isMenuOpen = false` → FresnelHighlighter resumes raycasting.
+
+---
+
+## 7. Multiple Objects — Priority Check
+
+**DO:** Place a ToolPickaxe on the ground NEXT to the computer. Look at the pickaxe (both within 2m).
+**EXPECT:**
+- **Pickaxe gets outline** (not computer) — `BaseHeldTool` check is BEFORE `InteractableComputer` in priority
+
+**DO:** Move crosshair from pickaxe → computer
+**EXPECT:**
+- Pickaxe outline disappears, computer outline appears
+
+**Behind the scenes:** Priority order in `OutlineLookedAtThing`: BaseHeldTool → BuildingCrate → InteractableComputer → Grabbable. First match wins.
+
+---
+
+## Summary Checklist
+
+- [ ] Computer gets cyan outline when looked at within 2m
+- [ ] Outline disappears when looking away
+- [ ] Outline reappears without visual glitches
+- [ ] E key opens shop (interaction works independently of highlight)
+- [ ] Outline clears when menu opens
+- [ ] Outline resumes when menu closes
+- [ ] Tool takes priority over computer when both in view
+- [ ] Zero console errors throughout
+
 <!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-a/5-Tests/ShopUITest.cs ==== -->
 using System;
 using System.Linq;
@@ -7405,7 +7647,7 @@ public class InventoryUI : MonoBehaviour
    
 }
 
-<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/2-Data/DataService/InventoryDataService.cs ==== -->
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/2-Data/DataServices/InventoryDataService.cs ==== -->
 using System;
 using System.Linq;
 using System.Collections;
@@ -9000,106 +9242,51 @@ In Unity 6000.3+, Shader Graph uses the **URP** target by default:
 
 ---
 
-## Phase B — Fresnel Highlight
+## Phase B — Object Highlight (Highlight Plus Package)
 
-### Shader Graph: `Highlight_Fresnel_Additive`
+> **NO custom Shader Graph, material, or layer needed.** Highlight Plus handles everything.
+> The old "Highlight_Fresnel_Additive" Shader Graph + "Highlighted" layer approach is **deleted**.
 
-> Creates a cyan rim glow on object edges. Used by FresnelHighlighter to outline
-> whatever the player looks at (tools, grabbables, buildings).
+### What Highlight Plus Replaces
 
-**Create the Shader Graph:**
-1. Project panel → Create → Shader Graph → URP → **Unlit Shader Graph**
-2. Name it `Highlight_Fresnel_Additive`
-3. Open the graph → add these **Properties** (Blackboard, left panel):
+| Old (deleted) | Highlight Plus (new) |
+|---|---|
+| `Highlight_Fresnel_Additive` Shader Graph | HP's internal shaders (in Resources/) |
+| `M_Highlight_Fresnel` material | HP generates materials internally |
+| `Highlighted` layer (slot 31) | Not needed — no layer swapping |
+| `FresnelHighlight` Renderer Feature (Render Objects) | **Highlight Plus Renderer Feature** (one add) |
+| `MaterialPropertyBlock` per renderer | `HighlightProfile` SO per type |
 
-| Property | Type | Default | Range |
-|----------|------|---------|-------|
-| `_Color` | Color | Cyan `(0.25, 0.85, 1, 1)` | — |
-| `_Power` | Float | `2` | 0.5 – 8 |
-| `_Intensity` | Float | `1.2` | 0 – 3 |
+### Setup (one-time)
 
-4. **Build the node graph:**
-```
-[_Power property] ──────► Fresnel Effect (Power input)
-                                │
-                          Fresnel output
-                                │
-                                ▼
-                          Multiply (A)
-[_Intensity property] ──► Multiply (B)
-                                │
-                          result
-                                │
-                                ▼
-                          Multiply (A)
-[_Color property] ────► Multiply (B)
-                                │
-                          final color
-                                │
-                                ▼
-                     Fragment → Emission
-```
+1. **Import Highlight Plus** (URP version) — keep Runtime/, Editor/, Demo/Profiles/
+2. **URP Renderer Data** → Add Renderer Feature → **Highlight Plus** (auto-detected)
+3. **Delete:** `Highlighted` layer, `Highlight_Fresnel_Additive` Shader Graph, `M_Highlight_Fresnel` material, the old Render Objects feature
+4. **Create HighlightProfile assets** (Project → Create → Highlight Plus → Profile):
 
-5. **Graph Inspector** (gear icon, top-right):
-   - Surface Type: **Transparent**
-   - Blending Mode: **Additive**
-   - Render Face: **Both**
-   - ZWrite: **Off**
-   - ZTest: **LessEqual**
-6. Save the Shader Graph
+| Profile Asset Name | Outline Color | Outline Width | Glow | Used By |
+|-------------------|--------------|---------------|------|---------|
+| `Profile_Tool` | Cyan (0.25, 0.85, 1) | 0.5 | 1.5 | Tools, terminals, crates |
+| `Profile_Grabbable` | Cyan (0.25, 0.85, 1) | 0.4 | 1.0 | Grabbable physics objects |
+| `Profile_Building` | Cyan (0.25, 0.85, 1) | 0.6 | 1.5 | Phase D — buildings (hammer) |
+| `Profile_WrenchEnable` | Green (0.3, 1, 0.3) | 0.5 | 1.5 | Phase D — enable supports (wrench) |
+| `Profile_WrenchDisable` | Red (1, 0.3, 0.3) | 0.5 | 1.5 | Phase D — disable supports (wrench) |
 
-### Material: `M_Highlight_Fresnel`
+5. **Wire profiles** to `FresnelHighlighter` inspector:
 
-| Property | Value |
-|----------|-------|
-| Shader | `Highlight_Fresnel_Additive` |
-| `_Color` | Cyan `(0.25, 0.85, 1, 1)` |
-| `_Power` | `2` |
-| `_Intensity` | `1.2` |
-
-### URP Renderer Feature Setup (Unity 6000.3+)
-
-> **Render Objects** Renderer Feature is confirmed available in Unity 6000.3 LTS.
-> It renders objects on a specific layer with an override material — perfect for our highlight.
-
-1. Project Settings → Graphics → click your **URP Renderer Data** asset (e.g. `URP-HighFidelity-Renderer`)
-2. Scroll to bottom → **Add Renderer Feature** → select **Render Objects** (NOT "Full Screen Pass")
-3. A new "Render Objects" entry appears. Configure it:
-
-| Setting | Where to find it | Value |
-|---------|-----------------|-------|
-| Name | Top of the feature | `FresnelHighlight` |
-| Event | Event dropdown | **AfterRenderingOpaques** |
-| Filters → Queue | Filters section | **Opaque** |
-| Filters → Layer Mask | Filters section | **Highlighted** only (uncheck everything else) |
-| Overrides → Material | Overrides section, check "Material" | `M_Highlight_Fresnel` (drag from Project) |
-| Overrides → Depth | Overrides section, check "Depth" | Write = **Off**, Test = **LessEqual** |
-
-> **Important:** The Layer Mask in Filters must ONLY have "Highlighted" checked. If you leave "Default" or other layers checked, ALL objects will render with the fresnel material.
-
-4. **Verify it works:** Enter Play mode with FresnelHighlighter active. Look at a Grabbable object. You should see cyan rim glow. If not:
-   - Check the "Highlighted" layer exists at slot 31
-   - Check `FresnelHighlighter._highlightLayer` is set to 31
-   - Check `M_Highlight_Fresnel` material is assigned in the Render Objects feature
-   - Check the URP Renderer Data asset is assigned in Project Settings → Graphics
-
-### URP Renderer Data — Opaque Layer Mask Note
-
-> **Critical:** On the same URP Renderer Data asset, find the **Opaque Layer Mask** setting (near the top). Make sure "Highlighted" is **UNCHECKED** here. This prevents the highlighted objects from rendering TWICE in the normal opaque pass. The Render Objects feature handles their rendering with the fresnel material instead.
-
-### Layer Required
-
-| Layer Name | Slot | Purpose |
-|-----------|------|---------|
-| `Highlighted` | 31 (or any free) | FresnelHighlighter swaps objects to this layer on raycast hit. URP Renderer Feature renders them with fresnel material. |
-
-**Create:** Edit → Project Settings → Tags and Layers → User Layer 31 → type `Highlighted`
+| Field | Drag From |
+|-------|-----------|
+| `_toolProfile` | `Profile_Tool.asset` |
+| `_grabbableProfile` | `Profile_Grabbable.asset` |
+| `_buildingProfile` | `Profile_Building.asset` (Phase D, can leave empty for now) |
+| `_wrenchEnableProfile` | `Profile_WrenchEnable.asset` (Phase D) |
+| `_wrenchDisableProfile` | `Profile_WrenchDisable.asset` (Phase D) |
 
 ### Used By
 
-| Script | Field | Phase |
-|--------|-------|-------|
-| `FresnelHighlighter.cs` | `_highlightLayer` = 31 | B |
+| Script | Fields | Phase |
+|--------|--------|-------|
+| `FresnelHighlighter.cs` | 5 HighlightProfile fields + _cam + _interactLayerMask | B+D |
 
 ---
 
@@ -9298,9 +9485,10 @@ In Unity 6000.3+, Shader Graph uses the **URP** target by default:
 |-------|------|-----------|---------|
 | `Ground` | (default or custom) | B | PlayerMovement ground check |
 | `Interact` | (custom) | B | FresnelHighlighter + InteractionSystem raycast |
-| `Highlighted` | 31 | B | URP Renderer Feature renders fresnel outline |
 | `BuildingGhost` | (custom) | D | Ghost preview during building placement |
 | `BuildingObject` | (custom) | D | Placed buildings' physical colliders |
+
+> **Note:** The old `Highlighted` layer (slot 31) is **deleted** — Highlight Plus doesn't use layers.
 
 ---
 
@@ -9325,13 +9513,12 @@ In Unity 6000.3+, Shader Graph uses the **URP** target by default:
 | Opaque Texture | ✅ enabled | Scene Color node (if used) |
 | Rendering Path | Forward+ | Default in Unity 6000.3 |
 | Post Processing | ✅ enabled | Bloom for emissive glow |
-| Opaque Layer Mask | **UNCHECK "Highlighted"** | Prevents double-render with Renderer Feature |
 
 ### Renderer Features
 
-| # | Feature Name | Event | Layer Mask | Override Material | Depth Write | Phase |
-|---|-------------|-------|-----------|-------------------|-------------|-------|
-| 1 | `FresnelHighlight` | AfterRenderingOpaques | Highlighted (only) | `M_Highlight_Fresnel` | Off | B |
+| # | Feature Name | Config | Phase |
+|---|-------------|--------|-------|
+| 1 | **Highlight Plus** | Auto-configured on import — no manual layer/material setup | B |
 
 ### Post-Processing Volume
 
@@ -11294,70 +11481,26 @@ ToolMagnet_Controller: optional — Attack1 = subtle pulse. Or skip entirely.
 
 > All marked as `// Phase H:` stubs in scripts. No AudioSource/SoundManager needed until Phase H.
 
-### Fresnel Highlight (URP — temporary, replace with Highlight Plus later)
+### Object Highlight (Highlight Plus Package)
 
-> This is a **temporary** URP-native fresnel highlight using Shader Graph + Renderer Feature.
-> When Highlight Plus is imported, replace the layer-swap logic in `FresnelHighlighter.cs`
-> with `HighlightEffect.SetHighlighted(true/false)` per object.
+> Uses **Highlight Plus** (URP) for all object outlines. No custom Shader Graph, no layers,
+> no materials needed. See `phase-All/6-Shaders/ShaderGuide.md` for full setup.
 
-**Step 1 — Create "Highlighted" layer:**
-1. Edit → Project Settings → Tags and Layers
-2. Add a new layer at slot 31 (or any free slot) → name it `"Highlighted"`
+**Setup:**
+1. Import Highlight Plus (URP) — keep Runtime/, Editor/, Demo/Profiles/
+2. URP Renderer Data → Add Renderer Feature → **Highlight Plus**
+3. Create 5 `HighlightProfile` assets (see ShaderGuide.md for values)
+4. Wire profiles to `FresnelHighlighter` inspector
 
-**Step 2 — Create Shader Graph: `Highlight_Fresnel_Additive`:**
-1. Project panel → Create → Shader Graph → URP → Unlit Shader Graph
-2. Name it `Highlight_Fresnel_Additive`
-3. Add these properties (Blackboard):
-   - `_Color` (Color, default cyan `0.25, 0.85, 1, 1`)
-   - `_Power` (Float, default `2`, range 0.5–8)
-   - `_Intensity` (Float, default `1.2`, range 0–3)
-4. Build the graph:
-   ```
-   Fresnel Effect (Power = _Power)
-       ↓
-   Multiply (A = Fresnel output, B = _Intensity)
-       ↓
-   Multiply (A = above, B = _Color)
-       ↓
-   → Emission (on Fragment output)
-   ```
-5. Graph Inspector settings:
-   - Surface Type: **Transparent**
-   - Blending Mode: **Additive**
-   - Render Face: **Both**
-   - ZWrite: **Off**
-   - ZTest: **LessEqual** (change to Always for xray in future)
-6. Save the Shader Graph
+**Profiles** (set on `FresnelHighlighter` inspector):
 
-**Step 3 — Create Material:**
-1. Project panel → Create → Material
-2. Name it `M_Highlight_Fresnel`
-3. Assign the `Highlight_Fresnel_Additive` shader
-4. Set defaults: Color = cyan (0.25, 0.85, 1), Power = 2, Intensity = 1.2
-
-**Step 4 — URP Renderer Feature:**
-1. Find your URP Renderer Data asset (Project Settings → Graphics → Scriptable Render Pipeline → click the renderer)
-2. Add Renderer Feature → **Render Objects**
-3. Configure:
-   - Name: `FresnelHighlight`
-   - Event: **AfterRenderingOpaques**
-   - Filters → Queue: Opaque
-   - Filters → Layer Mask: **Highlighted** (the layer from Step 1)
-   - Overrides → Material: `M_Highlight_Fresnel`
-   - Overrides → Depth → Write Depth: **Off**
-   - Overrides → Depth → Depth Test: **LessEqual**
-
-**Result:** Any object on the "Highlighted" layer gets a second render pass with the fresnel additive material — cyan rim glow on edges. `FresnelHighlighter.cs` swaps layers on raycast hit and restores them each frame.
-
-**Color presets** (set on `FresnelHighlighter` inspector):
-
-| Preset | Color | Used By |
-|--------|-------|---------|
-| `_toolColor` | Cyan (0.25, 0.85, 1) | Tools, terminals, crates |
-| `_grabbableColor` | Cyan (0.25, 0.85, 1) | Grabbable physics objects |
-| Phase D: `_buildingColor` | Cyan (0.25, 0.85, 1) | Buildings when holding hammer |
-| Phase D: `_wrenchEnableColor` | Green (0.3, 1, 0.3) | Building supports can be enabled |
-| Phase D: `_wrenchDisableColor` | Red (1, 0.3, 0.3) | Building supports can be disabled |
+| Profile | Outline Color | Used By |
+|---------|--------------|---------|
+| `_toolProfile` → `Profile_Tool` | Cyan (0.25, 0.85, 1) | Tools, terminals, crates |
+| `_grabbableProfile` → `Profile_Grabbable` | Cyan (0.25, 0.85, 1) | Grabbable physics objects |
+| `_buildingProfile` → `Profile_Building` | Cyan (0.25, 0.85, 1) | Phase D — buildings (hammer) |
+| `_wrenchEnableProfile` → `Profile_WrenchEnable` | Green (0.3, 1, 0.3) | Phase D — enable supports |
+| `_wrenchDisableProfile` → `Profile_WrenchDisable` | Red (1, 0.3, 0.3) | Phase D — disable supports |
 
 ### Tool Prefabs (per tool type)
 
@@ -12036,30 +12179,30 @@ public class SO_FootstepSoundDefinition : ScriptableObject
 }
 
 <!-- ==== FILE: learn/phase-b(New)/Scripts/3-MonoBehaviours/FresnelHighlighter.cs ==== -->
-using System.Collections.Generic;
 using UnityEngine;
-// ──────────────────────────────────────────────────────────────
-// TEMPORARY: URP Renderer Feature + Shader Graph fresnel approach.
-// When Highlight Plus is imported, replace the layer-swap logic
-// with HighlightEffect.SetHighlighted(true/false) per object.
-// ──────────────────────────────────────────────────────────────
+using HighlightPlus;
 
 /// <summary>
-/// I outline whatever the player looks at with a fresnel rim glow. Every Update I raycast
-/// from the camera. If I hit a tool/grabbable, I swap its layer to "Highlighted" — the URP
-/// Renderer Feature renders it a second time with the additive fresnel material.
-/// ClearAll restores original layers each frame. Phase D adds building + wrench colors.
+/// I outline whatever the player looks at using Highlight Plus. Every Update I do TWO raycasts:
+/// 1. Interact raycast (_interactLayerMask) — tools, crates, terminals, detonators, grabbables
+/// 2. Building raycast (_buildingHighlightMask) — buildings ONLY when holding Hammer or Wrench
+///
+/// For each hit type, I get or add a HighlightEffect component and load the matching
+/// HighlightProfile (cyan for tools/grabbables, green/red for wrench enable/disable).
+/// ClearCurrent disables the previous highlight each frame — exactly one outline at a time.
+///
+/// The original source has this logic in PlayerController.OutlineLookedAtThing() calling
+/// _fresnel.HighlightObject() and _fresnel.ClearAll(). We keep the logic HERE (decoupled
+/// from PlayerMovement) but expose public API so external scripts can also highlight objects.
 ///
 /// SETUP REQUIRED:
-///   1. Create "Highlighted" layer in Unity (Edit → Project Settings → Tags and Layers)
-///   2. Create Shader Graph: Highlight_Fresnel_Additive (see GUIDE.md Art section)
-///   3. Create Material M_Highlight_Fresnel from that shader
-///   4. URP Renderer Data → Add Renderer Feature → Render Objects:
-///      Event=AfterRenderingOpaques, Layer="Highlighted", Override Material=M_Highlight_Fresnel
-///   5. Assign _highlightLayer in inspector → "Highlighted"
+///   1. Import Highlight Plus package (Runtime + Editor + Demo/Profiles)
+///   2. URP Renderer Data → Add Renderer Feature → Highlight Plus
+///   3. Create 5 HighlightProfile assets (see ShaderGuide.md)
+///   4. Assign _cam, layer masks, profiles in inspector
 ///
-/// Who uses me: Self (Update raycasts from camera). No external callers.
-/// Events I fire: none. Events I subscribe to: none.
+/// Who uses me: Self (Update raycasts). External: PauseMenu (ClearCurrent), tutorial (HighlightObject).
+/// Events I fire: none. Events I subscribe to: OnMenuStateChanged, OnToolEquipped, OnItemDropped.
 /// </summary>
 public class FresnelHighlighter : MonoBehaviour
 {
@@ -12068,67 +12211,162 @@ public class FresnelHighlighter : MonoBehaviour
 	[SerializeField] Camera _cam;
 	[SerializeField] float _interactRange = 2f;
 	[SerializeField] LayerMask _interactLayerMask;
-	[Header("Highlight Layer (URP Renderer Feature renders this layer with fresnel material)")]
-	[SerializeField] int _highlightLayer = 31;
-	[Header("Color Overrides (via MaterialPropertyBlock on highlighted renderers)")]
-	[SerializeField] Color _toolColor = new Color(0.25f, 0.85f, 1f, 1f);
-	[SerializeField] Color _grabbableColor = new Color(0.25f, 0.85f, 1f, 1f);
-	// Phase D: [SerializeField] Color _buildingColor, _wrenchEnableColor, _wrenchDisableColor
+	[SerializeField] float _buildingHighlightRange = 3f;
+	[SerializeField] LayerMask _buildingHighlightMask;
+	[Header("Highlight Profiles (Create → Highlight Plus → Profile)")]
+	[SerializeField] HighlightProfile _toolProfile;
+	[SerializeField] HighlightProfile _grabbableProfile;
+	[SerializeField] HighlightProfile _buildingProfile;
+	[SerializeField] HighlightProfile _wrenchEnableProfile;
+	[SerializeField] HighlightProfile _wrenchDisableProfile;
 	#endregion
 
 	#region private API
-	struct HighlightedEntry { public GameObject Go; public int OriginalLayer; }
-	readonly List<HighlightedEntry> highlighted = new List<HighlightedEntry>();
-	static readonly int ColorID = Shader.PropertyToID("_Color");
-	MaterialPropertyBlock mpb;
+	HighlightEffect currentHighlight;
+	GameObject currentTarget;
+	bool isMenuOpen;
+	BaseHeldTool activeTool;
+	#endregion
 
-	void HighlightObject(GameObject obj, Color color)
+	#region public API
+	/// <summary> Disables the current highlight. External scripts (PauseMenu, tutorial) can call
+	/// this to force-clear when needed (e.g. menu opens, tutorial step changes). </summary>
+	public void ClearCurrent()
 	{
-		int origLayer = obj.layer;
-		UtilsPhaseB.SetLayerRecursively(obj, _highlightLayer);
-		highlighted.Add(new HighlightedEntry { Go = obj, OriginalLayer = origLayer });
-		if (mpb == null) mpb = new MaterialPropertyBlock();
-		foreach (var r in obj.GetComponentsInChildren<Renderer>(false))
+		if (currentHighlight != null)
 		{
-			if (r is ParticleSystemRenderer || !r.enabled) continue;
-			mpb.SetColor(ColorID, color);
-			r.SetPropertyBlock(mpb);
+			currentHighlight.highlighted = false;
+			currentHighlight = null;
+			currentTarget = null;
 		}
 	}
-	void ClearAll()
+	/// <summary> Highlights a specific object with the given profile. External scripts can call this
+	/// to programmatically highlight objects (e.g. tutorial highlighting a specific tool). The highlight
+	/// stays until ClearCurrent is called (which happens every frame in Update). </summary>
+	public void HighlightObject(GameObject target, HighlightProfile profile)
 	{
-		foreach (var entry in highlighted)
-		{
-			if (entry.Go == null) continue;
-			UtilsPhaseB.SetLayerRecursively(entry.Go, entry.OriginalLayer);
-			foreach (var r in entry.Go.GetComponentsInChildren<Renderer>(false))
-				r.SetPropertyBlock(null);
-		}
-		highlighted.Clear();
+		ApplyHighlight(target, profile);
 	}
+	public HighlightProfile GetToolProfile() => _toolProfile;
+	public HighlightProfile GetGrabbableProfile() => _grabbableProfile;
+	public HighlightProfile GetBuildingProfile() => _buildingProfile;
+	public HighlightProfile GetWrenchEnableProfile() => _wrenchEnableProfile;
+	public HighlightProfile GetWrenchDisableProfile() => _wrenchDisableProfile;
+	#endregion
+
+	#region private API — raycast + apply
+	/// <summary> Two raycasts matching original PlayerController.OutlineLookedAtThing():
+	/// 1. Interact layer — tools, crates, terminals, detonators, grabbables (priority order)
+	/// 2. Building layer — buildings ONLY when holding Hammer or Wrench (different profile per tool) </summary>
 	void OutlineLookedAtThing()
 	{
-		if (!Physics.Raycast(_cam.transform.position, _cam.transform.forward, out RaycastHit hit, _interactRange, _interactLayerMask))
-			return;
-		if (hit.collider.GetComponentInParent<BaseHeldTool>() != null)
+		// ═══ RAYCAST 1: interact layer (tools, crates, terminals, grabbables) ═══
+		if (Physics.Raycast(_cam.transform.position, _cam.transform.forward,
+			out RaycastHit hit, _interactRange, _interactLayerMask))
 		{
-			HighlightObject(hit.collider.gameObject, _toolColor);
-			return;
+			// → tool on ground (pickaxe, magnet, hammer, etc.)
+			if (hit.collider.GetComponentInParent<BaseHeldTool>() != null)
+			{
+				ApplyHighlight(hit.collider.gameObject, _toolProfile);
+				return;
+			}
+			// → Phase D: building crate on ground
+			// if (hit.collider.GetComponentInParent<BuildingCrate>() != null)
+			// { ApplyHighlight(hit.collider.gameObject, _toolProfile); return; }
+
+			// → Phase A: InteractableComputer (shop terminal, contracts terminal)
+			// NOTE: can't use generic IInteractable check — BaseHeldTool and BuildingObject
+			// also implement IInteractable but need different profiles. Check specific types.
+			// if (hit.collider.GetComponentInParent<InteractableComputer>() != null)
+			// { ApplyHighlight(hit.collider.gameObject, _toolProfile); return; }
+
+			// → Phase I: DetonatorTrigger (if !HasTriggered) → _toolProfile
+			// → Phase I: DetonatorBuySign → _toolProfile
+
+			// → grabbable physics object (ore, cube, etc.)
+			if (hit.collider.HasTag(TagType.grabbable))
+			{
+				// → Phase C: skip ore already held by magnet (original source checks this)
+				// if (activeTool is ToolMagnet)
+				// {
+				//     var ore = hit.collider.GetComponentInParent<OrePiece>();
+				//     if (ore != null && ore.CurrentMagnetTool != null) return;
+				// }
+				ApplyHighlight(hit.collider.gameObject, _grabbableProfile);
+				return;
+			}
 		}
-		if (hit.collider.HasTag(TagType.Grabbable))
+
+		// ═══ RAYCAST 2: building layer (ONLY when holding Hammer or Wrench) ═══
+		// Uses separate layer mask (_buildingHighlightMask) + longer range (3m)
+		// Buildings are on BuildingObject layer — separate from Interact layer
+		// Phase D: uncomment when BuildingObject, ToolHammer, ToolSupportsWrench exist
+		// if (!Physics.Raycast(_cam.transform.position, _cam.transform.forward,
+		//     out RaycastHit buildingHit, _buildingHighlightRange, _buildingHighlightMask))
+		//     return;
+		// // → hammer: cyan outline on building
+		// if (activeTool is ToolHammer)
+		// {
+		//     var building = buildingHit.collider.GetComponentInParent<BuildingObject>();
+		//     if (building != null)
+		//     {
+		//         ApplyHighlight(building.gameObject, _buildingProfile);
+		//         return;
+		//     }
+		// }
+		// // → wrench: green/red based on supports state
+		// if (activeTool is ToolSupportsWrench)
+		// {
+		//     var building = buildingHit.collider.GetComponentInParent<BuildingObject>();
+		//     if (building != null && building.CanHaveBuildingSupports())
+		//     {
+		//         var profile = building.BuildingSupportsEnabled
+		//             ? _wrenchDisableProfile : _wrenchEnableProfile;
+		//         ApplyHighlight(building.gameObject, profile);
+		//     }
+		// }
+	}
+	/// <summary> Gets or adds a HighlightEffect on the target, loads the profile, and turns it on.
+	/// HighlightEffect is added at runtime (not pre-placed on prefabs) so any object can be highlighted.
+	/// effectGroup = Children ensures ALL child meshes get the outline (e.g. tool with multiple parts). </summary>
+	void ApplyHighlight(GameObject target, HighlightProfile profile)
+	{
+		if (profile == null) return;
+		// → get existing HighlightEffect or add one at runtime
+		HighlightEffect effect = target.GetComponent<HighlightEffect>();
+		if (effect == null)
 		{
-			HighlightObject(hit.collider.gameObject, _grabbableColor);
-			return;
+			effect = target.AddComponent<HighlightEffect>();
+			effect.effectGroup = TargetOptions.Children;
 		}
-		// Phase A: ComputerTerminal, ContractsTerminal → _toolColor
-		// Phase D: BuildingObject (ToolHammer → _buildingColor, ToolSupportsWrench → _wrenchEnable/_wrenchDisableColor)
+		// → load profile settings (outline color, width, glow, etc.)
+		effect.ProfileLoad(profile);
+		// → turn on the highlight
+		effect.highlighted = true;
+		// → store reference for ClearCurrent next frame
+		currentHighlight = effect;
+		currentTarget = target;
 	}
 	#endregion
 
 	#region Unity Life Cycle
+	/// <summary> Subscribes to menu state (blocks highlight) and tool equip (tracks active tool
+	/// for building raycast — hammer uses _buildingProfile, wrench uses _wrenchEnable/DisableProfile). </summary>
+	private void Start()
+	{
+		// purpose: block highlight when menu is open (original source checks this)
+		GameEvents.OnMenuStateChanged += (open) => isMenuOpen = open;
+		// purpose: track active tool — Phase D building highlight depends on which tool is held
+		GameEvents.OnToolEquipped += (tool) => activeTool = tool;
+		// purpose: clear active tool when item is dropped
+		GameEvents.OnItemDropped += (tool) => { if (activeTool == tool) activeTool = null; };
+	}
+	/// <summary> Every frame: clears previous highlight, then raycasts (unless menu is open).
+	/// Two raycasts: interact layer (tools/grabbables) + building layer (hammer/wrench only). </summary>
 	private void Update()
 	{
-		ClearAll();
+		ClearCurrent();
+		if (isMenuOpen) return;
 		OutlineLookedAtThing();
 	}
 	#endregion
@@ -14280,60 +14518,56 @@ O → log snapshot";
 }
 
 <!-- ==== FILE: learn/phase-b(New)/Scripts/5-Tests/Manual/FresnelHighlightTest.md ==== -->
-# Fresnel Highlight — Manual Test Flow
+# Object Highlight — Manual Test Flow (Highlight Plus)
 
-> Verifies URP fresnel outlines appear on hover, correct color per object type, clears on look away.
-> Temporary URP approach — will be replaced with Highlight Plus later.
+> Verifies Highlight Plus outlines appear on hover, correct profile per object type, clears on look away.
 
 ---
 
 ## Prerequisites
 
-- URP project with Shader Graph support
+- **Highlight Plus** package imported (URP version — Runtime/ + Editor/ + Demo/Profiles/)
+- URP Renderer Data → **Highlight Plus Renderer Feature** added
 - Player GO with PlayerMovement + PlayerCamera
 - FresnelHighlighter on Camera GO (or separate GO)
-- Shader Graph + Renderer Feature configured (see setup below)
+- 5 HighlightProfile assets created
 
 ---
 
 ## Setup Guide
 
-### Step 1 — "Highlighted" Layer
+### Step 1 — Import Highlight Plus
 
-1. Edit → Project Settings → Tags and Layers
-2. Add layer at slot 31 → name `"Highlighted"`
+1. Import the Highlight Plus (URP) `.unitypackage`
+2. Keep: `Runtime/`, `Editor/`, `Demo/Profiles/`
+3. Skip: `Demo/` scenes/materials/textures, `Documentation/`
 
-### Step 2 — Shader Graph: `Highlight_Fresnel_Additive`
+### Step 2 — URP Renderer Feature
 
-1. Create → Shader Graph → URP → Unlit Shader Graph → name `Highlight_Fresnel_Additive`
-2. Blackboard properties:
-   - `_Color` (Color, default cyan `0.25, 0.85, 1, 1`)
-   - `_Power` (Float, default `2`, range 0.5–8)
-   - `_Intensity` (Float, default `1.2`, range 0–3)
-3. Graph:
-   ```
-   Fresnel Effect (Power = _Power) → Multiply (_Intensity) → Multiply (_Color) → Emission
-   ```
-4. Graph Inspector: Surface = Transparent, Blend = Additive, Render Face = Both, ZWrite = Off
-5. Save
+1. Project Settings → Graphics → click your URP Renderer Data asset
+2. Scroll to bottom → **Add Renderer Feature** → select **Highlight Plus**
+3. That is it — Highlight Plus auto-configures everything else
 
-### Step 3 — Material: `M_Highlight_Fresnel`
+### Step 3 — Create HighlightProfile Assets
 
-1. Create → Material → name `M_Highlight_Fresnel`
-2. Shader: `Highlight_Fresnel_Additive`
-3. Defaults: Color = cyan, Power = 2, Intensity = 1.2
+1. Project panel → Create → **Highlight Plus → Profile**
+2. Create 5 profiles:
 
-### Step 4 — URP Renderer Feature
+| Profile Name | Outline Color | Outline Width | Glow Intensity | Glow Color |
+|-------------|--------------|---------------|----------------|------------|
+| `Profile_Tool` | Cyan (0.25, 0.85, 1) | 0.5 | 1.5 | Cyan |
+| `Profile_Grabbable` | Cyan (0.25, 0.85, 1) | 0.4 | 1.0 | Cyan |
+| `Profile_Building` | Cyan (0.25, 0.85, 1) | 0.6 | 1.5 | Cyan |
+| `Profile_WrenchEnable` | Green (0.3, 1, 0.3) | 0.5 | 1.5 | Green |
+| `Profile_WrenchDisable` | Red (1, 0.3, 0.3) | 0.5 | 1.5 | Red |
 
-1. Project Settings → Graphics → click URP Renderer Data asset
-2. Add Renderer Feature → **Render Objects**
-3. Name: `FresnelHighlight`
-4. Event: **AfterRenderingOpaques**
-5. Filters → Layer Mask: **Highlighted**
-6. Overrides → Material: `M_Highlight_Fresnel`
-7. Overrides → Depth → Write: Off, Test: LessEqual
+**How to set values on each profile:**
+1. Select the profile asset in Project panel
+2. In Inspector: check **Outline** → set Color + Width
+3. Check **Outer Glow** → set Intensity + Color + Width (0.4)
+4. Set **Constant Width** = true (outline stays same screen size regardless of distance)
 
-### Step 5 — FresnelHighlighter Component
+### Step 4 — FresnelHighlighter Component
 
 1. Select Camera GO (or create separate GO)
 2. Add `FresnelHighlighter` component
@@ -14344,11 +14578,13 @@ O → log snapshot";
 | `_cam` | Camera component |
 | `_interactRange` | 2 |
 | `_interactLayerMask` | "Interact" layer |
-| `_highlightLayer` | 31 (or whichever slot "Highlighted" is at) |
-| `_toolColor` | Cyan (0.25, 0.85, 1) |
-| `_grabbableColor` | Cyan (0.25, 0.85, 1) |
+| `_toolProfile` | `Profile_Tool` asset |
+| `_grabbableProfile` | `Profile_Grabbable` asset |
+| `_buildingProfile` | `Profile_Building` asset (Phase D, leave empty for now) |
+| `_wrenchEnableProfile` | `Profile_WrenchEnable` asset (Phase D, leave empty) |
+| `_wrenchDisableProfile` | `Profile_WrenchDisable` asset (Phase D, leave empty) |
 
-### Step 6 — Player GO (if not already set up)
+### Step 5 — Player GO (if not already set up)
 
 Use the player setup from GrabRopeTest.md Steps 1-6. Key requirement: `PlayerMovement` with `_playerCam` wired to Camera child. FresnelHighlighter needs the Camera for raycasting.
 
@@ -14398,17 +14634,15 @@ Scene Root
 
 ## How It Works (System Flow)
 
-**Every frame:** `FresnelHighlighter.Update()` runs. First it calls `ClearAll()` — loops through all previously highlighted objects, **restores their original layer** via `UtilsPhaseB.SetLayerRecursively(go, originalLayer)`, and clears `MaterialPropertyBlock` on all renderers. Then `OutlineLookedAtThing()` raycasts from `_cam` forward using `_interactLayerMask`.
+**Every frame:** `FresnelHighlighter.Update()` runs. First it calls `ClearCurrent()` — if a previous highlight exists, sets `currentHighlight.highlighted = false` (Highlight Plus turns off the outline effect on that object). Then `OutlineLookedAtThing()` raycasts from `_cam` forward using `_interactLayerMask`.
 
-**Tool detected:** If the raycast hits a collider, it checks `hit.collider.GetComponentInParent<BaseHeldTool>()`. If found → calls `HighlightObject(hit.collider.gameObject, _toolColor)`. Inside: the object's **layer is swapped** to `_highlightLayer` (layer 31 = "Highlighted") via `UtilsPhaseB.SetLayerRecursively()`. The URP Renderer Feature is configured to render this layer with the **additive fresnel material** (`M_Highlight_Fresnel`) — so the object gets a second render pass with cyan rim glow. A `MaterialPropertyBlock` sets `_Color` on each renderer for per-object color control. The entry (GO + original layer) is stored for cleanup next frame.
+**Tool detected:** If the raycast hits a collider, it checks `hit.collider.GetComponentInParent<BaseHeldTool>()`. If found → calls `ApplyHighlight(hit.collider.gameObject, _toolProfile)`. Inside: it gets or **adds a `HighlightEffect` component** at runtime on the hit object (Highlight Plus manages the rendering internally — no layers, no materials from our side). Then `effect.ProfileLoad(_toolProfile)` loads the cyan outline/glow settings from the HighlightProfile SO, and `effect.highlighted = true` turns on the visual outline. The reference is stored so `ClearCurrent` can disable it next frame.
 
-**Grabbable detected:** If no tool found, checks `hit.collider.HasTag(TagType.Grabbable)`. If true → `HighlightObject(go, _grabbableColor)` — same layer-swap process, same or different color.
+**Grabbable detected:** If no tool found, checks `hit.collider.HasTag(TagType.grabbable)`. If true → `ApplyHighlight(go, _grabbableProfile)` — same pattern, different profile.
 
-**No match:** If raycast misses or hits something with no matching type → no highlight applied. `ClearAll()` already restored last frame's layers, so nothing is on the "Highlighted" layer — no outline.
+**No match:** If raycast misses or hits something with no matching type → no highlight applied. `ClearCurrent()` already disabled last frame's highlight, so nothing is outlined.
 
-**Result:** Exactly one object is outlined at a time (or zero). Layer swap + restore happens within 1 frame — no fade, instant.
-
-> **Note:** This is a **temporary** URP-native approach using Shader Graph + Renderer Feature. When Highlight Plus is imported, replace the layer-swap logic with `HighlightEffect.SetHighlighted(true/false)` per object.
+**Result:** Exactly one object is outlined at a time (or zero). Highlight on/off happens within 1 frame — no fade, instant. Highlight Plus draws the outline via its own URP Renderer Feature — zero custom shaders, zero layers, zero materials from our side.
 
 ---
 
@@ -14419,7 +14653,7 @@ Scene Root
 - No outlines visible anywhere
 - No console errors from FresnelHighlighter
 
-**Behind the scenes:** `FresnelHighlighter.Update()` raycasts but hits nothing (floor is layer "Default") → `OutlineLookedAtThing` returns early. `ClearAll()` has nothing to clear (empty list).
+**Behind the scenes:** `FresnelHighlighter.Update()` raycasts but hits nothing (floor is layer "Default") → `OutlineLookedAtThing` returns early. `ClearCurrent()` has nothing to clear (`currentHighlight == null`).
 
 ---
 
@@ -18885,20 +19119,24 @@ public void RemoveTouchingConveyorBelt(ConveyorBelt belt)
 #endregion
 ```
 
-### 4. `FresnelHighlighter.cs` (Phase B) — ADD building/wrench checks
+### 4. `FresnelHighlighter.cs` (Phase B) — UNCOMMENT building/wrench checks
 
 ```csharp
 // file: phase-b(New)/Scripts/3-MonoBehaviours/FresnelHighlighter.cs
-// In OutlineLookedAtThing(), AFTER the Grabbable check, ADD:
+// In OutlineLookedAtThing(), UNCOMMENT the Phase D block:
 
-// Phase D: building highlight when holding hammer
+// Phase D: check for placed building (when holding hammer or wrench)
 var building = hit.collider.GetComponentInParent<BuildingObject>();
 if (building != null && !building.IsGhost)
 {
-    // → if holding ToolHammer: outline building in cyan
-    HighlightObject(hit.collider.gameObject, _toolColor);
+    // → wrench tool: use green/red profile based on supports state
+    // → hammer tool: use building profile (cyan)
+    ApplyHighlight(building.gameObject, _buildingProfile);
     return;
 }
+// For wrench-specific green/red profiles, check active tool type:
+// if (activeToolIsWrench) ApplyHighlight(go, building.BuildingSupportsEnabled 
+//     ? _wrenchDisableProfile : _wrenchEnableProfile);
 ```
 
 ### 5. `SO_ShopItemDef.cs` (Phase A) — ADD building definition field
@@ -22425,4 +22663,34 @@ The PlayerController is a textbook God Object but splitting it would be a refact
 - **WORLD.md with ASCII maps is surprisingly useful.** Top-down map + legend + prefab placement table + "what the player sees" narrative gives spatial context that script code alone can't provide.
 - **Cross-phase modifications documented:** Phase D needs 5 modifications to earlier phases: InteractionType enum (add pack/switchDirection), BasePhysicsObject conveyor stubs, FresnelHighlighter building/wrench checks, SO_ShopItemDef building definition field, AutoMiner.SetResourceDefinition method.
 - **Test scripts enriched:** BuildingTest now has Take (U) and Pack (I) keys + FindNearestBuilding raycast helper + OnBuildingTakeRequested subscription. ConveyorTest now has OnOreSold + OnOreLimitChanged subscriptions + P key for snapshot. Both have README TextArea + comprehensive class summaries.
+
+---
+
+## Prompt: "Build minemgl-graph.html — interactive dependency graph for all phases"
+
+**What I thought:**
+- User wants a comprehensive, interactive, standalone HTML tool that visualizes how every `.cs` file depends on every other across all 6 phases (All, A, A-1, B, C, D).
+- **Read every single script** (~100 files) to extract actual dependencies — not inferred, not guessed. Every edge in the graph corresponds to a real code reference I verified.
+- **9 edge types identified:** Inherits, Implements (interface), Get...() read, Set...() write, Event subscribe, Event raise, Singleton read, Creates/owns (new DataService()), Utils call. These cover every coupling pattern in the codebase.
+- **D3.js force layout** was the right choice — nodes can be dragged, graph self-organizes, zoom/pan works naturally. Considered vis.js and cytoscape.js but D3 gives the most control over edge styling (dashed, dotted, colored arrows per type).
+- **Claude AI theme:** dark background (#1a1a1a), JetBrains Mono (monospace), amber accent (#d97706), muted phase colors matching the legend. Not gaudy — functional and readable.
+- **Interaction features:** phase toggles (hide/show entire phases), edge type toggles (show only inheritance, only events, etc.), search box with fuzzy matching + neighbor highlighting, click-to-inspect panel showing all incoming/outgoing dependencies with labels.
+- **Node radius scales by connection count** — GameEvents, BaseHeldTool, PlayerMovement are visually larger because they have more connections. This immediately reveals hub nodes.
+- **Curved edges (arc paths)** prevent overlapping parallel edges between the same pair of nodes (e.g., a script that both subscribes to AND raises events on GameEvents).
+- **Tradeoff:** hardcoded node/link data vs dynamic parsing. Chose hardcoded because: (1) the scripts use SPACE_UTIL extensions and Unity APIs that a parser wouldn't understand, (2) I already read every file so the data is accurate, (3) a JS parser would be fragile and bloated.
+- **Deliberate omissions:** didn't include handTyped(latest) folder separately — those are the same scripts the user is typing from the phase templates. Also didn't include test scripts' internal dependencies (they're leaf nodes).
+
+---
+
+## Prompt: "Analyse importedAssetsAnalysis and create comprehensive documentation + make Feel more comprehensive + add Phase B/D Highlight Plus migration"
+
+**What I thought:**
+
+- **Scope assessment first:** 4 code packages (Highlight Plus, Feel/MMFeedbacks, Mesh Animator, Text Animator) + 5 art-only GUI packs. The code packages need API-level docs; the art packs just need import guides.
+- **Read actual source code, not just READMEs.** The README.txt files were sparse. I dove into `HighlightEffect.cs` (157KB!), `MeshAnimatorBase.cs`, `MMF_Player.cs`, `MMF_Feedback.cs`, `TAnimPlayerBase.cs`, etc. to extract real public APIs, enums, field lists, and events.
+- **Feel is MASSIVE.** MMFeedbacks alone has 80+ feedback types, 24 shakers, 31 spring components, floating text system, sequencing. MMTools adds singletons, object pooling, event system, save/load, sound manager, scene loading, time manager, state machine, tweens, 19 extension files, MMMaths (24KB). Nice Vibrations adds haptic presets + HapticController + HapticSource. First pass was too shallow — expanded with 10 deep-dive sections covering every subsystem with code examples.
+- **Phase B/D integration was the key insight for Highlight Plus.** Found `FresnelHighlighter.cs` — a 97-line temporary system using layer swapping + Shader Graph + URP Render Objects. The GUIDE.md explicitly says "replace with HighlightEffect when Highlight Plus is imported." Wrote a complete replacement script showing the exact migration path, with color mapping table, profile-based approach, and see-through bonus feature.
+- **Tradeoffs considered:** Could have generated one massive document vs per-package docs. Chose per-package because: (1) each package is independent, (2) different team members might only need one, (3) INDEX.md provides the cross-reference and use-case navigation.
+- **What I deliberately avoided:** Didn't include the Phase B/D scripts verbatim — referenced them and showed the diff. Didn't document every single one of the 80+ feedbacks in detail (listed them in tables instead). Didn't create docs for each GUI ZIP's internal contents since they're just PNG sprites.
+- **Quality gates:** Every API example uses the correct namespace, correct class name, correct method signature verified from source. No hallucinated APIs.
 
