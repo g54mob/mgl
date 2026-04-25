@@ -1,3 +1,751 @@
+<!-- ==== FILE: Documentation/DOTween.md ==== -->
+# DOTween (HOTween v2) — Complete Beginner Guide
+
+> **Package:** DOTween + DOTween Pro by Demigiant  
+> **Purpose:** High-performance tween engine — animate any property smoothly  
+> **Namespace:** `DG.Tweening`  
+> **Pipeline:** Any (not render-pipeline dependent)  
+> **Size:** ~500KB (tiny)  
+> **Website:** [dotween.demigiant.com](https://dotween.demigiant.com)
+>
+> **Already in the original MineMGL game:** `DOTween.dll` + `DOTweenPro.dll` ship in `Assemblies/`.
+
+---
+
+## Table of Contents
+
+1. [What Is DOTween?](#1-what-is-dotween)
+2. [When Would You Use It?](#2-when-would-you-use-it)
+3. [Installation and Setup](#3-installation-and-setup)
+4. [Core Concepts](#4-core-concepts)
+5. [Shortcut Methods — The Most Common API](#5-shortcut-methods--the-most-common-api)
+6. [Ease Types — How Motion Feels](#6-ease-types--how-motion-feels)
+7. [Sequences — Chain Multiple Tweens](#7-sequences--chain-multiple-tweens)
+8. [Settings and Callbacks](#8-settings-and-callbacks)
+9. [Controlling Tweens](#9-controlling-tweens)
+10. [Common Recipes](#10-common-recipes)
+11. [Performance Tips](#11-performance-tips)
+12. [DOTween vs Alternatives](#12-dotween-vs-alternatives)
+**APPENDIX** (MineMGL-specific): [Original Usage](#a-where-the-original-minemgl-author-uses-dotween) | [Phase Mapping](#b-phase-mapping--where-to-use-dotween) | [Feel Coexistence](#c-dotween--feel--how-they-coexist) | [Package Contents](#d-package-contents--what-to-import)
+
+---
+
+## 1. What Is DOTween?
+
+DOTween is a **tween engine** — it smoothly animates values from A to B over time. Instead of writing `Mathf.Lerp` in Update with timers and elapsed counters, you write one line:
+
+```csharp
+// This single line moves the transform to (5, 0, 0) over 1 second
+transform.DOMove(new Vector3(5, 0, 0), 1f);
+```
+
+DOTween handles the interpolation, easing, timing, callbacks, and cleanup automatically. When the tween finishes, it self-destructs (unless you tell it not to).
+
+**Think of it as:** "I want this thing to go there, taking this long, feeling like this."
+
+---
+
+## 2. When Would You Use It?
+
+| Situation | DOTween Call | Duration |
+|-----------|-------------|----------|
+| Slide a UI panel in from the side | `panel.DOAnchorPos(targetPos, 0.3f)` | 0.3s |
+| Fade a material to transparent | `material.DOFade(0f, 0.5f)` | 0.5s |
+| Rotate a machine part smoothly | `part.DOLocalRotate(targetEuler, 0.35f)` | 0.35s |
+| Scale bounce on pickup | `icon.DOPunchScale(Vector3.one * 0.3f, 0.2f)` | 0.2s |
+| Move a gate to closed position | `gate.DOLocalMove(closedPos, 0.35f)` | 0.35s |
+| Color flash on hit | `renderer.material.DOColor(Color.red, 0.1f)` | 0.1s |
+| Audio fade out | `audioSource.DOFade(0f, 1f)` | 1s |
+| Camera field-of-view punch | `camera.DOFieldOfView(70f, 0.2f)` | 0.2s |
+
+**The alternative without DOTween:**
+
+```csharp
+// WITHOUT DOTween — 15 lines, manual timer, runs every frame
+float elapsed = 0f;
+Vector3 startPos;
+Vector3 endPos = new Vector3(5, 0, 0);
+bool isTweening = false;
+
+void StartMove() { startPos = transform.position; elapsed = 0f; isTweening = true; }
+void Update()
+{
+    if (!isTweening) return;
+    elapsed += Time.deltaTime;
+    float t = Mathf.Clamp01(elapsed / 1f);
+    transform.position = Vector3.Lerp(startPos, endPos, t);
+    if (t >= 1f) isTweening = false;
+}
+
+// WITH DOTween — 1 line, same result
+transform.DOMove(new Vector3(5, 0, 0), 1f);
+```
+
+---
+
+## 3. Installation and Setup
+
+### 3.1 Import Options
+
+**Option A — From Asset Store (free):**
+1. Unity Asset Store: search "DOTween" by Demigiant
+2. Download and Import
+3. Tools > Demigiant > DOTween Utility Panel > **Setup DOTween**
+
+**Option B — From DLLs (already in this project):**
+1. Copy `Assemblies/DOTween.dll` and `Assemblies/DOTweenPro.dll` to `Assets/Plugins/`
+2. Unity will detect them automatically
+
+### 3.2 First Usage
+
+```csharp
+using DG.Tweening;  // add this at the top of any script that uses DOTween
+
+public class MyScript : MonoBehaviour
+{
+    void Start()
+    {
+        // That is it. This moves the object to (5,0,0) over 1 second.
+        transform.DOMove(new Vector3(5, 0, 0), 1f);
+    }
+}
+```
+
+No singletons. No managers. No scene setup. Just `using DG.Tweening` and call methods.
+
+---
+
+## 4. Core Concepts
+
+### 4.1 What Is a Tween?
+
+A tween is a **running animation** that changes a value over time. DOTween has two types:
+
+| Type | What | Example |
+|------|------|---------|
+| **Tweener** | Animates ONE property from A to B | `transform.DOMove(target, 1f)` |
+| **Sequence** | Groups multiple tweens into a timeline | `Append` + `Join` + `Insert` |
+
+Both are called "Tween" in code — `Tween myTween;` can hold either.
+
+### 4.2 The Chaining Pattern
+
+Every DOTween call returns the tween, so you can chain settings:
+
+```csharp
+transform.DOMove(target, 1f)         // WHAT to animate
+    .SetEase(Ease.OutCubic)           // HOW it feels (fast start, slow end)
+    .SetDelay(0.5f)                   // WHEN to start (wait 0.5s)
+    .SetLoops(2, LoopType.Yoyo)       // HOW MANY times (2x, ping-pong)
+    .OnComplete(() => Debug.Log("Done!"));  // WHAT HAPPENS after
+```
+
+### 4.3 TO vs FROM
+
+```csharp
+// TO: object is at current position, moves TO target
+transform.DOMove(new Vector3(5, 0, 0), 1f);
+
+// FROM: object STARTS at target, moves back to current position
+transform.DOMove(new Vector3(5, 0, 0), 1f).From();
+
+// FROM is great for "slide in" effects:
+// panel starts offscreen, slides to its natural position
+_panel.DOAnchorPos(Vector2.zero, 0.3f).From(new Vector2(-500, 0));
+```
+
+### 4.4 Killing Tweens
+
+**Always kill tweens when you are done** — especially on objects that get destroyed:
+
+```csharp
+Tween moveTween;
+
+void MoveGate(bool closed)
+{
+    // Kill the previous tween before starting a new one
+    // (prevents overlapping animations fighting each other)
+    moveTween?.Kill();
+    moveTween = _movingPart.DOLocalMove(
+        closed ? _closedPosition : _openPosition, 0.35f);
+}
+
+void OnDestroy()
+{
+    // Cleanup: prevent "target destroyed" errors
+    moveTween?.Kill();
+}
+```
+
+**Or use SetLink for auto-cleanup:**
+
+```csharp
+// Auto-kills the tween when the gameObject is destroyed
+transform.DOMove(target, 1f).SetLink(gameObject);
+```
+
+---
+
+## 5. Shortcut Methods — The Most Common API
+
+### Transform (Movement, Rotation, Scale)
+
+```csharp
+// MOVE
+transform.DOMove(new Vector3(5, 0, 0), 1f);           // world position
+transform.DOLocalMove(new Vector3(0, 1, 0), 0.5f);     // local position
+transform.DOMoveX(5f, 1f);                              // single axis
+transform.DOMoveY(3f, 0.5f);
+
+// ROTATE
+transform.DORotate(new Vector3(0, 180, 0), 1f);         // world euler
+transform.DOLocalRotate(new Vector3(0, 90, 0), 0.35f);  // local euler
+transform.DORotateQuaternion(targetQuat, 1f);            // quaternion
+
+// SCALE
+transform.DOScale(Vector3.one * 1.5f, 0.3f);            // uniform scale
+transform.DOScale(0f, 0.5f);                             // scale to zero (disappear)
+transform.DOScaleX(2f, 0.3f);                            // single axis
+
+// PUNCH (overshoot then return to original)
+transform.DOPunchPosition(Vector3.up * 0.5f, 0.3f);     // position bounce
+transform.DOPunchScale(Vector3.one * 0.3f, 0.2f);       // scale bounce
+transform.DOPunchRotation(Vector3.forward * 30f, 0.3f);  // rotation bounce
+
+// SHAKE (random oscillation)
+transform.DOShakePosition(0.3f, 0.5f);  // duration, strength
+transform.DOShakeRotation(0.3f, 30f);
+transform.DOShakeScale(0.3f, 0.5f);
+```
+
+### Material
+
+```csharp
+// COLOR
+material.DOColor(Color.red, 0.1f);                    // change base color
+material.DOColor(Color.green, "_SpecColor", 0.5f);    // change specific property
+material.DOFade(0f, 0.5f);                             // fade alpha to 0
+
+// TEXTURE OFFSET (scrolling textures)
+material.DOOffset(new Vector2(1, 0), 1f);              // scroll texture
+```
+
+### UI (RectTransform, CanvasGroup, Image, TMP)
+
+```csharp
+// POSITION
+rectTransform.DOAnchorPos(new Vector2(0, 100), 0.3f);   // move UI element
+rectTransform.DOAnchorPosY(0f, 0.3f);                   // slide vertically
+
+// ALPHA
+canvasGroup.DOFade(1f, 0.2f);    // fade in
+canvasGroup.DOFade(0f, 0.2f);    // fade out
+
+// COLOR
+image.DOColor(Color.green, 0.1f);
+image.DOFade(0.5f, 0.3f);
+
+// SIZE
+rectTransform.DOSizeDelta(new Vector2(300, 200), 0.3f);
+```
+
+### Audio
+
+```csharp
+audioSource.DOFade(0f, 1f);       // fade volume to 0
+audioSource.DOFade(1f, 0.5f);     // fade volume to 1
+audioSource.DOPitch(0.5f, 0.3f);  // slow down pitch
+```
+
+### Camera
+
+```csharp
+camera.DOFieldOfView(70f, 0.2f);           // FOV punch
+camera.DOOrthoSize(10f, 0.5f);             // ortho zoom
+camera.DOShakePosition(0.3f, 0.5f);        // camera shake
+```
+
+### Generic (any value)
+
+```csharp
+// Tween ANY float, int, Vector3, Color, etc.
+float myValue = 0f;
+DOTween.To(() => myValue, x => myValue = x, 10f, 1f);
+// myValue goes from 0 to 10 over 1 second
+```
+
+---
+
+## 6. Ease Types — How Motion Feels
+
+The ease curve controls acceleration and deceleration. Without ease, motion looks robotic.
+
+```
+Linear:       ________________  constant speed (boring, mechanical)
+
+InQuad:       ___________/----  slow start, fast end
+OutQuad:      ----\___________ fast start, slow end
+InOutQuad:    _____/\_______  slow-fast-slow (most natural)
+
+OutCubic:     ---\____________  fast start, very slow end (UI slide-in)
+OutBack:      ---\__/________  overshoot then settle (button pop)
+OutElastic:   --\__/\_/______  bouncy spring (playful)
+OutBounce:    --\_/\_/\_/____  bouncing ball
+```
+
+### Setting Ease
+
+```csharp
+// Chain .SetEase() to any tween:
+transform.DOMove(target, 1f).SetEase(Ease.OutCubic);
+transform.DOScale(1.5f, 0.3f).SetEase(Ease.OutBack);
+transform.DOLocalRotate(euler, 0.35f).SetEase(Ease.OutCubic);
+
+// Or use an AnimationCurve for custom easing:
+[SerializeField] AnimationCurve _customCurve;
+transform.DOMove(target, 1f).SetEase(_customCurve);
+```
+
+### Recommended Eases by Use Case
+
+| Use Case | Ease | Why |
+|----------|------|-----|
+| Gate slide / panel slide | `Ease.OutCubic` | Fast start, gentle stop — feels like sliding |
+| Scale punch (pickup icon) | `Ease.OutBack` | Overshoot gives a "pop" feeling |
+| Camera movement | `Ease.InOutQuad` | Smooth acceleration and deceleration |
+| Progress bar fill | `Ease.Linear` | Constant rate — shows real progress |
+| Playful UI bounce | `Ease.OutElastic` | Springy, fun, attention-grabbing |
+| Hatch/door rotation | `Ease.OutCubic` | Mechanical feel — fast swing, gentle settle |
+
+---
+
+## 7. Sequences — Chain Multiple Tweens
+
+A Sequence is a **timeline** — you add tweens to it, and they play in order (or simultaneously).
+
+```csharp
+// Create a sequence
+Sequence seq = DOTween.Sequence();
+
+// Append: plays AFTER the previous tween finishes
+seq.Append(transform.DOMoveX(5, 1f));                    // 0s-1s: move right
+seq.Append(transform.DORotate(new Vector3(0, 180, 0), 0.5f)); // 1s-1.5s: rotate
+
+// Join: plays AT THE SAME TIME as the previous Append
+seq.Join(transform.DOScale(1.5f, 0.5f));                 // 1s-1.5s: also scale up
+
+// Insert: plays at a SPECIFIC time regardless of other tweens
+seq.Insert(0.5f, material.DOColor(Color.red, 0.3f));     // 0.5s: flash red
+
+// AppendInterval: add a pause
+seq.AppendInterval(0.5f);                                 // 1.5s-2s: wait
+
+// AppendCallback: run code at this point in the timeline
+seq.AppendCallback(() => Debug.Log("Sequence done!"));
+
+// The whole sequence plays automatically
+```
+
+**Visual timeline of the above:**
+```
+Time:  0s        0.5s       1s        1.5s       2s
+       |----------|----------|----------|----------|
+Move:  |>>>>>>>>>>>>>>>>>>>>>>|          |          |
+Flash: |          |>>>        |          |          |
+Rotate:|          |          |>>>>>>>>>>|          |
+Scale: |          |          |>>>>>>>>>>|          |
+Wait:  |          |          |          |>>>>>>>>>>|
+                                                   ^ "Sequence done!"
+```
+
+### Sequence Example: Shop Button Hover
+
+```csharp
+Sequence hoverSeq = DOTween.Sequence();
+hoverSeq.Append(_buttonTransform.DOScale(1.1f, 0.1f).SetEase(Ease.OutBack));
+hoverSeq.Join(_buttonImage.DOColor(_hoverColor, 0.1f));
+// Button scales up and changes color simultaneously on hover
+```
+
+---
+
+## 8. Settings and Callbacks
+
+### All Chainable Settings
+
+```csharp
+transform.DOMove(target, 1f)
+    .SetEase(Ease.OutCubic)                     // easing curve
+    .SetDelay(0.5f)                              // wait before starting
+    .SetLoops(3, LoopType.Yoyo)                  // repeat 3 times, ping-pong
+    .SetAutoKill(false)                          // keep alive after completion
+    .SetRelative()                               // target is offset, not absolute
+    .SetLink(gameObject)                         // auto-kill when GO destroyed
+    .SetUpdate(UpdateType.Late, true)            // use LateUpdate, ignore timeScale
+    .SetId("myTween");                           // name for DOTween.Kill("myTween")
+```
+
+### Loop Types
+
+```csharp
+// Restart: A->B, A->B, A->B (resets each time)
+transform.DOMove(target, 1f).SetLoops(3, LoopType.Restart);
+
+// Yoyo: A->B->A->B->A (ping-pong)
+transform.DOMove(target, 1f).SetLoops(3, LoopType.Yoyo);
+
+// Incremental: A->B, B->C, C->D (keeps adding)
+transform.DOMoveX(2f, 1f).SetLoops(3, LoopType.Incremental);
+
+// Infinite loop:
+transform.DORotate(new Vector3(0, 360, 0), 2f)
+    .SetLoops(-1, LoopType.Restart)
+    .SetEase(Ease.Linear);
+```
+
+### All Callbacks
+
+```csharp
+transform.DOMove(target, 1f)
+    .OnStart(() => Debug.Log("Tween started"))         // first play
+    .OnPlay(() => Debug.Log("Playing"))                 // play or resume
+    .OnPause(() => Debug.Log("Paused"))                 // paused
+    .OnUpdate(() => Debug.Log("Frame update"))          // every frame while running
+    .OnStepComplete(() => Debug.Log("Loop step done"))  // each loop iteration
+    .OnComplete(() => Debug.Log("All done"))            // final completion
+    .OnKill(() => Debug.Log("Tween killed"));           // destroyed
+```
+
+---
+
+## 9. Controlling Tweens
+
+```csharp
+// Store a reference
+Tween myTween = transform.DOMove(target, 1f);
+
+// Control it:
+myTween.Pause();         // freeze in place
+myTween.Play();          // resume from paused
+myTween.Restart();       // go back to start and play
+myTween.Rewind();        // go back to start and pause
+myTween.Kill();          // destroy completely
+myTween.Complete();      // jump to end value instantly
+myTween.Flip();          // reverse direction
+myTween.PlayForward();   // play A->B
+myTween.PlayBackwards(); // play B->A
+
+// Check state:
+bool isPlaying = myTween.IsPlaying();
+bool isComplete = myTween.IsComplete();
+float elapsed = myTween.Elapsed();
+
+// Global controls (affect ALL tweens):
+DOTween.PauseAll();
+DOTween.PlayAll();
+DOTween.KillAll();
+DOTween.CompleteAll();
+
+// Kill by ID:
+DOTween.Kill("myTween");
+```
+
+---
+
+## 10. Common Recipes
+
+### UI Panel Slide In From Bottom
+
+```csharp
+void ShowPanel()
+{
+    // Start at y=-500 (offscreen), slide to y=0 (natural position)
+    _panel.gameObject.SetActive(true);
+    _panelRect.anchoredPosition = new Vector2(0, -500);
+    _panelRect.DOAnchorPos(Vector2.zero, 0.3f).SetEase(Ease.OutCubic);
+}
+
+void HidePanel()
+{
+    _panelRect.DOAnchorPos(new Vector2(0, -500), 0.2f)
+        .SetEase(Ease.InCubic)
+        .OnComplete(() => _panel.gameObject.SetActive(false));
+}
+```
+
+### Scale Punch on Pickup
+
+```csharp
+void OnItemPickedUp()
+{
+    // Hotbar slot icon "pops" then returns to normal size
+    _slotIcon.DOPunchScale(Vector3.one * 0.3f, 0.2f, 10, 1f);
+}
+```
+
+### Smooth Gate Toggle (exact MineMGL pattern)
+
+```csharp
+[SerializeField] Transform _movingPart;
+[SerializeField] Vector3 _closedPosition;
+[SerializeField] Vector3 _openPosition;
+[SerializeField] float _moveDuration = 0.35f;
+[SerializeField] Ease _moveEase = Ease.OutCubic;
+Tween moveTween;
+
+void SetClosed(bool closed)
+{
+    moveTween?.Kill();  // always kill previous before starting new
+    moveTween = _movingPart.DOLocalMove(
+        closed ? _closedPosition : _openPosition,
+        _moveDuration
+    ).SetEase(_moveEase);
+}
+```
+
+### Smooth Dual-Hatch Rotation (exact MineMGL pattern)
+
+```csharp
+[SerializeField] Transform _rotatingPart;
+[SerializeField] Transform _rotatingPart2;
+[SerializeField] Vector3 _closedRotation;
+[SerializeField] Vector3 _openRotation;
+[SerializeField] Vector3 _closedRotation2;
+[SerializeField] Vector3 _openRotation2;
+[SerializeField] float _rotateDuration = 0.35f;
+[SerializeField] Ease _rotateEase = Ease.OutCubic;
+Tween rotTween;
+Tween rotTween2;
+
+void SetDirection(bool closed)
+{
+    rotTween?.Kill();
+    rotTween2?.Kill();
+    Vector3 target1 = closed ? _closedRotation : _openRotation;
+    Vector3 target2 = closed ? _closedRotation2 : _openRotation2;
+    rotTween = _rotatingPart.DOLocalRotate(target1, _rotateDuration).SetEase(_rotateEase);
+    rotTween2 = _rotatingPart2.DOLocalRotate(target2, _rotateDuration).SetEase(_rotateEase);
+}
+```
+
+### Material Flash (hit feedback)
+
+```csharp
+void FlashRed()
+{
+    Sequence flash = DOTween.Sequence();
+    flash.Append(_renderer.material.DOColor(Color.red, 0.05f));
+    flash.Append(_renderer.material.DOColor(_originalColor, 0.15f));
+}
+```
+
+### Infinite Rotation (drill, fan, spinner)
+
+```csharp
+void Start()
+{
+    // Rotate 360 degrees every 2 seconds, forever, constant speed
+    transform.DORotate(new Vector3(0, 360, 0), 2f, RotateMode.FastBeyond360)
+        .SetLoops(-1, LoopType.Restart)
+        .SetEase(Ease.Linear);
+}
+```
+
+### Audio Fade Out
+
+```csharp
+void FadeOutMusic(float duration = 1f)
+{
+    _musicSource.DOFade(0f, duration).OnComplete(() => _musicSource.Stop());
+}
+```
+
+---
+
+## 11. Performance Tips
+
+| Tip | Why |
+|-----|-----|
+| **Always Kill on destroy** | Orphaned tweens cause `MissingReferenceException`. Use `.SetLink(gameObject)` or manual `.Kill()` in `OnDestroy`. |
+| **Kill before creating new** | `_tween?.Kill(); _tween = transform.DOMove(...)` prevents two tweens fighting over the same property. |
+| **Cache tween references** | `Tween _tween;` as a class field, not a local variable. You need the reference to Kill/Pause/check state. |
+| **Never tween in Update** | Create the tween ONCE (in a method called by an event), not every frame. DOTween runs the animation internally. |
+| **SetAutoKill(false) for reuse** | If you replay the same tween often (e.g. button hover), create once, then `.Restart()` each time instead of creating new ones. |
+| **Set capacity at startup** | `DOTween.SetTweensCapacity(200, 50)` if you know your max — avoids runtime list resizing. |
+| **Use SetLink** | `transform.DOMove(target, 1f).SetLink(gameObject)` auto-kills when the GO is destroyed — safest pattern. |
+
+---
+
+## 12. DOTween vs Alternatives
+
+| Feature | DOTween | Coroutine + Lerp | Feel MMSpring | AnimationClip |
+|---------|---------|------------------|---------------|---------------|
+| Lines of code | 1 line | 10-15 lines | 1 line | 0 (inspector) |
+| Ease curves | 40+ built-in | Manual math | Spring only | Via curves |
+| Sequences | Full timeline | Nested coroutines | No | Limited |
+| Kill/Pause/Rewind | Built-in | Manual flags | No | Via Animator |
+| Performance | Fastest (pooled) | GC from coroutines | Good | Good |
+| Overshoot/bounce | Via Ease.OutBack | Manual | Natural spring | Via curves |
+| Any value type | Float, Vector3, Color, etc. | Manual per type | Position/Scale/Rotation | Transform only |
+
+**DOTween is the industry standard.** Used in thousands of shipped Unity games. The free version covers everything you need. Pro adds path tweens and visual editor (nice but not required).
+
+---
+
+## A. Where the Original MineMGL Author Uses DOTween
+
+The original game ships `DOTween.dll` + `DOTweenPro.dll` in `Assemblies/`. Here is every script that uses it:
+
+| Script | What DOTween Does | DOTween Method | Lines |
+|--------|-------------------|----------------|-------|
+| `ChuteHatch.cs` | Smooth dual-hatch rotation on toggle | `DOLocalRotate(euler, 0.35f).SetEase(OutCubic)` | 2 tweens |
+| `ConveyorBlockerT2.cs` | Smooth gate slide on toggle | `DOLocalMove(pos, 0.35f).SetEase(OutCubic)` | 1 tween |
+| `RoutingConveyor.cs` | Smooth direction switch rotation | `DOLocalRotate(euler, 0.35f).SetEase(OutCubic)` | 1 tween |
+| `ShopCategoryButton.cs` | UI category tab scale/color on select | Scale + color tween | ~3 lines |
+| `ShopItemButton.cs` | UI item hover scale animation | Scale tween on enter/exit | ~3 lines |
+| `TMPBounceEffect.cs` | Per-character text bounce + color cycle | DOTween per-vertex (92 lines) | Complex |
+| `RandomizeTweenDelay.cs` | Randomize tween start times for visual variety | Modifies delay values | ~15 lines |
+
+### The Toggleable Machine Pattern (used 3 times)
+
+Every toggleable machine in the original source follows this exact pattern:
+
+```csharp
+using DG.Tweening;
+
+public class ToggleableMachine : MonoBehaviour
+{
+    [SerializeField] float _duration = 0.35f;
+    [SerializeField] Ease _ease = Ease.OutCubic;
+    [SerializeField] Transform _movingPart;
+    [SerializeField] Vector3 _closedValue;
+    [SerializeField] Vector3 _openValue;
+    Tween tween;
+    bool isClosed;
+
+    public void Toggle()
+    {
+        tween?.Kill();
+        isClosed = !isClosed;
+        Vector3 target = isClosed ? _closedValue : _openValue;
+        
+        // For position-based (ConveyorBlockerT2):
+        tween = _movingPart.DOLocalMove(target, _duration).SetEase(_ease);
+        
+        // For rotation-based (RoutingConveyor, ChuteHatch):
+        // tween = _movingPart.DOLocalRotate(target, _duration).SetEase(_ease);
+    }
+}
+```
+
+---
+
+## B. Phase Mapping — Where to Use DOTween
+
+| Phase | Script | DOTween Usage | Replaces | Lines |
+|-------|--------|--------------|----------|-------|
+| **A** | `ShopCategoryButton` | Scale/color tween on tab select | Static instant change | ~3 |
+| **A** | `ShopItemButton` | Scale tween on hover enter/exit | Static instant change | ~3 |
+| **D** | `ConveyorBlockerT2.SetClosed()` | `DOLocalMove` gate slide | `_movingPart.localPosition = pos;` | ~3 |
+| **D** | `RoutingConveyor.SetDirection()` | `DOLocalRotate` direction switch | `_rotatingPart.localRotation = Quaternion.Euler(euler);` | ~3 |
+| **D** | `ChuteHatch.SetDirection()` | `DOLocalRotate` dual-hatch | Two instant `localRotation = ` sets | ~5 |
+| **H** | `TMPBounceEffect` | Per-character bounce animation | (or replace with Text Animator) | Keep or replace |
+| **H** | `RandomizeTweenDelay` | Visual variety on tween delays | No equivalent | ~10 |
+
+**Total: ~30 lines of DOTween across the entire project.**
+
+### What Changes in Phase D Scripts
+
+Currently our Phase D scripts have instant position/rotation sets with `// Phase H: DOTween` comments:
+
+```csharp
+// CURRENT (instant — no animation):
+_movingPart.localPosition = closed ? _closedPosition : _openPosition;
+
+// WITH DOTween (smooth animation):
+_moveTween?.Kill();
+_moveTween = _movingPart.DOLocalMove(
+    closed ? _closedPosition : _openPosition,
+    _moveDuration
+).SetEase(_moveEase);
+```
+
+Each machine needs:
+1. `using DG.Tweening;` at the top
+2. `Tween` field to cache the reference
+3. `[SerializeField] Ease _ease = Ease.OutCubic;` for inspector control
+4. Replace the instant set with `DOLocalMove` / `DOLocalRotate` + `.SetEase()`
+5. `?.Kill()` before starting new tween
+
+---
+
+## C. DOTween + Feel — How They Coexist
+
+DOTween and Feel serve **completely different purposes**:
+
+| DOTween Does | Feel Does |
+|-------------|-----------|
+| Smooth property animation (A to B) | Feedback orchestration (shake, flash, freeze, sound) |
+| Gate slides from open to closed | Camera shakes when ore breaks |
+| UI panel slides in | Screen flashes white on explosion |
+| Hatch rotates to new angle | Time freezes for 0.04s on hit |
+| Material fades to transparent | Floating sell price text appears |
+
+**They never overlap.** DOTween moves things. Feel reacts to events.
+
+**Together in one method:**
+
+```csharp
+void SetClosed(bool closed)
+{
+    // DOTween: smooth gate slide (the MOTION)
+    _moveTween?.Kill();
+    _moveTween = _movingPart.DOLocalMove(
+        closed ? _closedPosition : _openPosition, 0.35f
+    ).SetEase(Ease.OutCubic);
+    
+    // Feel: toggle feedback (the REACTION — sound + camera nudge)
+    _toggleFeedback?.PlayFeedbacks();
+    
+    // Phase H: play toggle sound
+    // Sound plays immediately while the gate is still sliding.
+    // DOTween handles the visual motion. Feel handles the auditory/haptic response.
+}
+```
+
+---
+
+## D. Package Contents — What to Import
+
+DOTween is tiny. **Import everything** — no selective import needed.
+
+| What | Size | Import? |
+|------|------|---------|
+| `DOTween/` core | ~400KB | Yes — the tween engine |
+| `DOTweenPro/` | ~100KB | Yes — extra shortcuts (path tweens, spiral, etc.) |
+| `DOTween/Modules/` | ~50KB | Yes — Unity module integrations (Physics, Audio, UI) |
+
+**Total: ~500KB.** No demos. No textures. No meshes. Just scripts.
+
+### After Import
+
+1. Tools > Demigiant > DOTween Utility Panel > **Setup DOTween** (one-time)
+2. This generates `DOTweenSettings.asset` and assembly definitions
+3. Check the boxes for modules you use (Physics, Audio, UI, TextMeshPro)
+4. Add `using DG.Tweening;` to any script that needs it
+5. Done — start tweening
+
+### Verification
+
+```csharp
+// If this compiles and runs, DOTween is working:
+void Start()
+{
+    transform.DOPunchScale(Vector3.one * 0.5f, 0.3f);
+    Debug.Log("DOTween works!");
+}
+```
+
 <!-- ==== FILE: Documentation/Feel-MMFeedbacks.md ==== -->
 # Feel (MMFeedbacks + MMTools + Nice Vibrations) — Complete Beginner Guide
 
@@ -3315,6 +4063,7 @@ HighlightPlus(URP unpacked)/
 | 3 | [MeshAnimator.md](MeshAnimator.md) | **Mesh Animator** (Massive Crowd) | ~550 | Snapshot vs Shader mode, Baking pipeline, MeshAnimatorBase API, LOD system, Exposed Transforms, Root Motion, Animation Events, Crossfading, MeshAnimatorManager, crowd spawning |
 | 4 | [TextAnimator.md](TextAnimator.md) | **Text Animator** by Febucci | ~500 | TMP per-character animation, 12 behavior effects, 8 appearance effects, Typewriter system, Action tags, rich-text tag syntax, custom effects via ScriptableObjects, dialogue system integration |
 | 5 | [GUI-Assets.md](GUI-Assets.md) | **GUI Art Packs** (5 packs) | ~200 | UI Bundle Free (7 themes), Animated Tree, Free Environment, Web Button, Retro Windows GUI, sprite import workflow, 9-slice setup |
+| 6 | [DOTween.md](DOTween.md) | **DOTween** (Tween Engine) | ~450 | Shortcut API (Move, Rotate, Scale, Color, UI), Ease types, Sequences, Settings/Callbacks, Control methods, **MineMGL usage mapping (8 scripts)**, Feel coexistence guide |
 
 ---
 
@@ -3347,6 +4096,15 @@ HighlightPlus(URP unpacked)/
 ### "I want haptic feedback on mobile"
 → **[Feel-MMFeedbacks.md](Feel-MMFeedbacks.md)** — Section 11 (Nice Vibrations)
 
+### "I want to smoothly animate position, rotation, scale, color"
+→ **[DOTween.md](DOTween.md)** — Section 5 (Shortcut Methods), Section 10 (Common Recipes)
+
+### "I want to chain animations into a timeline sequence"
+→ **[DOTween.md](DOTween.md)** — Section 7 (Sequences)
+
+### "I want smooth gate/hatch/machine toggle animations"
+→ **[DOTween.md](DOTween.md)** — Section 10 (Gate Toggle recipe), Appendix A (original MineMGL pattern)
+
 ### "I need UI sprites for my game"
 → **[GUI-Assets.md](GUI-Assets.md)** — Section 2-6 (Asset descriptions)
 
@@ -3370,6 +4128,9 @@ YOUR GAME CODE
     │
     ├── Mesh Animator ──────── Massive crowd rendering
     │   └── Custom shaders (Shader mode only)
+    │
+    ├── DOTween ──────────────── Smooth property animation (move, rotate, scale, color, UI)
+    │   └── Zero dependencies (standalone)
     │
     └── GUI Assets ─────────── Art sprites (no code)
 ```
