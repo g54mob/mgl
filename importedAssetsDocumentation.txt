@@ -1,1 +1,4368 @@
-nothing.
+<!-- ==== FILE: Documentation/Feel-MMFeedbacks.md ==== -->
+# Feel (MMFeedbacks + MMTools + Nice Vibrations) — Complete Beginner Guide
+
+> **Package:** Feel by More Mountains (Reuno Music)  
+> **Sub-packages:** MMFeedbacks, MMTools, Nice Vibrations v4.1.2  
+> **Pipeline:** Works with URP, HDRP, Built-in  
+> **Namespace:** `MoreMountains.Feedbacks`, `MoreMountains.Tools`, `Lofelt.NiceVibrations`
+
+---
+
+## Table of Contents
+
+1. [What Is Feel?](#1-what-is-feel)
+2. [The Three Sub-Packages](#2-the-three-sub-packages)
+3. [When Would You Use It?](#3-when-would-you-use-it)
+4. [Installation & Setup](#4-installation--setup)
+5. [Core Concept: MMF_Player + Feedbacks](#5-core-concept-mmf_player--feedbacks)
+6. [All Built-in Feedback Types](#6-all-built-in-feedback-types)
+7. [Scene Setup — Step by Step](#7-scene-setup--step-by-step)
+8. [Shakers (Receiving End)](#8-shakers-receiving-end)
+9. [Springs System](#9-springs-system)
+10. [MMTools Utilities](#10-mmtools-utilities)
+11. [Nice Vibrations (Mobile Haptics)](#11-nice-vibrations-mobile-haptics)
+12. [C# API Reference](#12-c-api-reference)
+13. [Channels & Events System](#13-channels--events-system)
+14. [Common Recipes](#14-common-recipes)
+15. [Performance Tips](#15-performance-tips)
+16. [Troubleshooting](#16-troubleshooting)
+17. [Folder Structure](#17-folder-structure)
+18. [Deep Dive: MMTools Core Utilities](#18-deep-dive-mmtools-core-utilities) — Singletons, Object Pooling, Events, Save/Load, Sound Manager, Scene Loading, Time Manager, State Machine, Tweens, Extensions, Math
+19. [Deep Dive: Floating Text System](#19-deep-dive-mmfeedbacks-floating-text-system) — Damage numbers with pooling
+20. [Deep Dive: Springs System](#20-deep-dive-springs-system-physics-based-animation) — 31 spring components, physics-based animation
+21. [Deep Dive: GUI Accessories](#21-deep-dive-mmtools-gui-accessories) — Health bars, progress bars, countdown, parallax
+22. [Deep Dive: MMVFX](#22-deep-dive-mmvfx-visual-effects) — Bloom, noise, ripple, particles
+23. [Deep Dive: Third-Party Integrations](#23-deep-dive-mmfeedbacks-third-party-integrations) — Cinemachine, Post Processing, TMP, Haptics
+24. [Complete Workflow](#24-complete-workflow-building-a-game-juice-system) — Full game architecture
+25. [MMF_Player Inspector Deep Dive](#25-mmf_player-inspector-deep-dive) — Every setting explained
+26. [Creating Custom Feedbacks](#26-advanced-creating-custom-feedbacks) — Extend the system
+27. [Quick Reference Card](#27-quick-reference-card) — Copy-paste API cheatsheet
+
+---
+
+## 1. What Is Feel?
+
+**Feel** is a **game juice / feedback framework**. It lets you orchestrate visual, audio, and haptic effects that fire in response to game events — like camera shakes on explosion, screen flash on damage, scale bounce on pickup, haptic vibration on mobile tap, etc.
+
+Instead of writing custom coroutines for every effect, you **compose feedback sequences** using a visual inspector (the MMF_Player), then trigger them with a single line of code.
+
+---
+
+## 2. The Three Sub-Packages
+
+| Sub-Package | Purpose | Key Classes |
+|---|---|---|
+| **MMFeedbacks** | The feedback system — players, feedbacks, shakers, springs | `MMF_Player`, `MMF_Feedback`, `MMShaker` |
+| **MMTools** | General Unity utilities — object pooling, save system, GUI helpers, debug tools, procedural meshes, camera rigs | Various utilities |
+| **Nice Vibrations** | Mobile haptic feedback (iOS & Android) + Gamepad rumble | `HapticPatterns`, `HapticController`, `HapticSource` |
+
+---
+
+## 3. When Would You Use It?
+
+| Situation | What Feel Does |
+|---|---|
+| Player takes damage | Camera shake + screen flash + haptic buzz + UI shake |
+| Coin pickup | Scale bounce + particle burst + sound effect |
+| Button press | UI scale spring + haptic tap |
+| Explosion | Camera shake + chromatic aberration + time freeze |
+| Level complete | Confetti particles + screen flash + haptic success |
+| Enemy death | Freeze frame + position shake + particle instantiation |
+
+---
+
+## 4. Installation & Setup
+
+### 4.1 Import
+
+1. Import the Feel `.unitypackage` into your project
+2. Three folders appear: `MMFeedbacks/`, `MMTools/`, `NiceVibrations/`
+
+### 4.2 Assembly Definitions
+
+Feel uses assembly definitions (`.asmdef` / `.asmref`). If your scripts need to reference Feel classes, either:
+- Add `MoreMountains.Feedbacks` and `MoreMountains.Tools` to your assembly definition references
+- Or place your scripts outside of any assembly definition
+
+### 4.3 No Special Scene Setup Required
+
+Unlike Highlight Plus, Feel doesn't need a renderer feature. Just:
+1. Create a GameObject
+2. Add `MMF_Player` component
+3. Add feedbacks to it
+4. Trigger via code or inspector
+
+---
+
+## 5. Core Concept: MMF_Player + Feedbacks
+
+### 5.1 The Mental Model
+
+```
+Game Event (e.g., "player got hit")
+    ↓
+Your Script calls: myFeedbackPlayer.PlayFeedbacks()
+    ↓
+MMF_Player iterates through its feedback list
+    ↓
+Each MMF_Feedback executes:
+  → Camera Shake feedback broadcasts shake event
+  → Flash feedback broadcasts flash event
+  → Scale feedback tweens object scale
+  → Sound feedback plays audio clip
+    ↓
+Shakers on target objects receive events and shake
+```
+
+### 5.2 MMF_Player
+
+The **container component** that holds a list of feedbacks.
+
+**Key Properties:**
+
+| Property | Type | Purpose |
+|---|---|---|
+| `FeedbacksList` | List<MMF_Feedback> | All feedbacks in this player |
+| `InitializationMode` | enum | `Awake`, `Start`, or `Script` |
+| `AutoPlayOnStart` | bool | Play immediately on Start |
+| `AutoPlayOnEnable` | bool | Play every time GameObject enables |
+| `Direction` | enum | `TopToBottom` or `BottomToTop` |
+| `DurationMultiplier` | float | Scale all durations |
+| `PerformanceMode` | bool | Skip inspector refresh during play |
+| `PlayCount` | int | How many times this player has played |
+
+**Direction Modes:**
+- `TopToBottom`: feedbacks play in list order
+- `BottomToTop`: feedbacks play in reverse
+
+### 5.3 MMF_Feedback (Base Class)
+
+Every feedback type inherits from `MMF_Feedback`. Common properties:
+
+| Property | Type | Purpose |
+|---|---|---|
+| `Active` | bool | Enable/disable this feedback |
+| `Label` | string | Custom display name |
+| `Timing` | MMFeedbackTiming | Delay, repeat, duration |
+| `Chance` | float | 0–100% probability of firing |
+| `Channel` | int | Which channel to broadcast on |
+| `MMChannelDefinition` | MMChannel | ScriptableObject channel (alternative to int) |
+| `UseRange` | bool | Only affect shakers within distance |
+| `RangeDistance` | float | Max range |
+| `RandomizeOutput` | bool | Randomize intensity each play |
+
+### 5.4 Timing (MMFeedbackTiming)
+
+Every feedback has a Timing section:
+
+| Property | Purpose |
+|---|---|
+| `InitialDelay` | Wait before starting |
+| `CooldownDuration` | Min time between triggers |
+| `RepeatForever` | Loop forever |
+| `NumberOfRepeats` | Loop N times |
+| `DelayBetweenRepeats` | Wait between loops |
+| `Quantized` | Snap to beat (for music sync) |
+
+---
+
+## 6. All Built-in Feedback Types
+
+### 6.1 Transform Feedbacks
+
+| Feedback Class | What It Does |
+|---|---|
+| `MMF_Position` | Moves object to a position over time (curve-driven) |
+| `MMF_PositionShake` | Shakes position randomly |
+| `MMF_PositionSpring` | Spring physics on position |
+| `MMF_Rotation` | Rotates object over time |
+| `MMF_RotationShake` | Shakes rotation |
+| `MMF_RotationSpring` | Spring physics on rotation |
+| `MMF_Scale` | Scales object over time (great for "punch" effects) |
+| `MMF_ScaleShake` | Shakes scale |
+| `MMF_ScaleSpring` | Spring physics on scale |
+| `MMF_SquashAndStretch` | Cartoon squash & stretch |
+| `MMF_SquashAndStretchSpring` | Spring-driven squash & stretch |
+| `MMF_DestinationTransform` | Move/rotate/scale to match a target transform |
+| `MMF_RotatePositionAround` | Orbits around a point |
+| `MMF_LookAt` | Rotates to look at a target |
+
+### 6.2 Camera Feedbacks
+
+| Feedback Class | What It Does |
+|---|---|
+| `MMF_CameraShake` | Shake the camera |
+| `MMF_CameraZoom` | Zoom in/out |
+| `MMF_CameraFieldOfView` | Animate FOV |
+| `MMF_CameraOrthographicSize` | Animate ortho size |
+| `MMF_CameraClippingPlanes` | Animate near/far clip |
+
+### 6.3 Visual Feedbacks
+
+| Feedback Class | What It Does |
+|---|---|
+| `MMF_Flash` | Full-screen color flash |
+| `MMF_Flicker` | Rapid on/off blinking |
+| `MMF_Light` | Animate light intensity/color/range |
+| `MMF_Material` | Swap materials |
+| `MMF_MaterialSetProperty` | Animate shader properties |
+| `MMF_Particles` | Play/stop particle systems |
+| `MMF_ParticlesInstantiation` | Spawn particle prefab |
+| `MMF_Sprite` | Swap sprite |
+| `MMF_SpriteRenderer` | Animate sprite color/flip |
+| `MMF_SpriteSheetAnimation` | Play sprite sheet animation |
+| `MMF_ShaderGlobal` | Set global shader properties |
+| `MMF_Skybox` | Swap skybox |
+
+### 6.4 UI Feedbacks
+
+| Feedback Class | What It Does |
+|---|---|
+| `MMF_Graphic` | Animate UI Graphic color |
+| `MMF_GraphicCrossFade` | Crossfade UI element |
+| `MMF_Image` | Animate Image color/fill |
+| `MMF_ImageRaycastTarget` | Toggle raycast target |
+| `MMF_ImageSprite` | Swap Image sprite |
+| `MMF_ImageTextureOffset` | Animate texture offset |
+| `MMF_ImageTextureScale` | Animate texture scale |
+| `MMF_ImageMaterial` | Swap Image material |
+| `MMF_Text` | Change text content |
+| `MMF_TextColor` | Animate text color |
+| `MMF_CanvasGroupBlocksRaycasts` | Toggle CanvasGroup blocking |
+
+### 6.5 Audio Feedbacks
+
+| Feedback Class | What It Does |
+|---|---|
+| `MMF_AudioSource` | Play audio clip |
+| `MMF_AudioSourcePitch` | Animate pitch |
+| `MMF_AudioSourceVolume` | Animate volume |
+| `MMF_AudioSourceStereoPan` | Animate stereo pan |
+| `MMF_AudioFilterDistortion` | Animate distortion filter |
+| `MMF_AudioFilterEcho` | Animate echo filter |
+| `MMF_AudioFilterHighPass` | Animate high-pass filter |
+| `MMF_AudioFilterLowPass` | Animate low-pass filter |
+| `MMF_AudioFilterReverb` | Animate reverb filter |
+| `MMF_AudioMixerSnapshotTransition` | Transition audio mixer |
+
+### 6.6 Animation Feedbacks
+
+| Feedback Class | What It Does |
+|---|---|
+| `MMF_Animation` | Set animator parameters |
+| `MMF_AnimationCrossfade` | Crossfade to animation state |
+| `MMF_AnimatorPlayState` | Play specific animator state |
+| `MMF_AnimatorSpeed` | Change animator speed |
+
+### 6.7 GameObject Feedbacks
+
+| Feedback Class | What It Does |
+|---|---|
+| `MMF_SetActive` | Enable/disable GameObjects |
+| `MMF_Enable` | Enable/disable components |
+| `MMF_Destroy` | Destroy objects |
+| `MMF_InstantiateObject` | Spawn prefabs |
+| `MMF_SetParent` | Reparent objects |
+| `MMF_Collider` | Toggle 3D colliders |
+| `MMF_Collider2D` | Toggle 2D colliders |
+
+### 6.8 Flow Control Feedbacks
+
+| Feedback Class | What It Does |
+|---|---|
+| `MMF_Pause` | Pause execution (wait) |
+| `MMF_HoldingPause` | Pause and wait for all previous feedbacks |
+| `MMF_Looper` | Loop back to a `MMF_LooperStart` |
+| `MMF_LooperStart` | Mark loop start point |
+| `MMF_Feedbacks` | Play another MMF_Player |
+| `MMF_PlayerChain` | Chain multiple players |
+| `MMF_PlayerControl` | Start/stop/pause other players |
+| `MMF_Events` | Invoke UnityEvents |
+
+### 6.9 Time & Physics Feedbacks
+
+| Feedback Class | What It Does |
+|---|---|
+| `MMF_FreezeFrame` | Freeze game for a moment (hit stop) |
+| `MMF_TimescaleModifier` | Slow-mo / speed-up |
+| `MMF_Rigidbody` | Add force to rigidbody |
+| `MMF_Rigidbody2D` | Add force to 2D rigidbody |
+| `MMF_Wiggle` | Continuous wiggle motion |
+
+### 6.10 Misc Feedbacks
+
+| Feedback Class | What It Does |
+|---|---|
+| `MMF_VideoPlayer` | Control video playback |
+| `MMF_UnloadScene` | Unload a scene |
+| `MMF_ReferenceHolder` | Hold references for other feedbacks |
+
+---
+
+## 7. Scene Setup — Step by Step
+
+### 7.1 Basic: Camera Shake on Button Press
+
+1. Create empty GameObject → name it "DamageFeedback"
+2. Add Component → `MMF Player`
+3. In the Inspector, click **"Add new feedback"** dropdown
+4. Select **Camera → Camera Shake**
+5. Configure: `ShakeDuration = 0.3`, `ShakeAmplitude = 2`, `ShakeFrequency = 20`
+6. **On your Camera:** Add Component → `MMCameraShaker`
+   - This is the **shaker** — it receives the shake event
+7. In your script:
+
+```csharp
+using MoreMountains.Feedbacks;
+
+public class DamageHandler : MonoBehaviour
+{
+    [SerializeField] MMF_Player damageFeedback;
+    
+    public void OnTakeDamage()
+    {
+        damageFeedback.PlayFeedbacks();
+    }
+}
+```
+
+8. Wire the `DamageFeedback` player into the `damageFeedback` field
+9. Press Play → call `OnTakeDamage()` → camera shakes!
+
+### 7.2 Scale Punch on Pickup
+
+1. Create MMF_Player on the pickup object
+2. Add feedback: **Transform → Scale**
+3. Set `AnimateScaleX/Y/Z` curves to a "punch" shape (scale up then back to 1)
+4. Set `AnimateScaleDuration = 0.3f`
+5. Set target to the pickup object itself
+6. Call `PlayFeedbacks()` on pickup
+
+### 7.3 Screen Flash on Damage
+
+1. Create a **full-screen UI Image** (Canvas → Image, stretch to fill)
+2. Set Image color to transparent
+3. Add `MMFlash` component to the Image
+4. Create MMF_Player on your damage handler
+5. Add feedback: **Camera → Flash**
+6. Set `FlashColor`, `FlashDuration`, `FlashAlpha`
+7. Call `PlayFeedbacks()`
+
+### 7.4 Freeze Frame (Hit Stop)
+
+1. Create MMF_Player
+2. Add feedback: **Time → Freeze Frame**
+3. Set `FreezeFrameDuration = 0.05f` (50ms)
+4. Trigger on enemy hit
+
+### 7.5 Combining Multiple Feedbacks
+
+One MMF_Player can hold **many feedbacks** that all play together:
+
+```
+MMF_Player "OnEnemyDeath":
+  1. MMF_CameraShake        → shake camera
+  2. MMF_FreezeFrame         → 50ms hit stop
+  3. MMF_Flash               → white flash
+  4. MMF_ParticlesInstantiation → spawn explosion VFX
+  5. MMF_Scale               → enemy squash
+  6. MMF_Destroy             → destroy enemy (with delay)
+```
+
+Use `Timing.InitialDelay` to stagger effects.
+
+---
+
+## 8. Shakers (Receiving End)
+
+Shakers are **receiver components** that listen for events broadcast by feedbacks.
+
+### How Shakers Work
+
+```
+MMF_CameraShake (feedback) → broadcasts "CameraShakeEvent" on channel 0
+    ↓
+MMCameraShaker (on camera) → listens for "CameraShakeEvent" on channel 0
+    ↓
+Camera shakes!
+```
+
+### Available Shakers
+
+| Shaker Component | Paired With Feedback | What It Shakes |
+|---|---|---|
+| `MMCameraShaker` | `MMF_CameraShake` | Camera position/rotation |
+| `MMCameraZoom` | `MMF_CameraZoom` | Camera FOV |
+| `MMFlash` | `MMF_Flash` | Full-screen flash Image |
+| `MMPositionShaker` | `MMF_PositionShake` | Transform position |
+| `MMRotationShaker` | `MMF_RotationShake` | Transform rotation |
+| `MMScaleShaker` | `MMF_ScaleShake` | Transform scale |
+| `MMLightShaker` | `MMF_Light` | Light properties |
+| `MMAudioSourcePitchShaker` | `MMF_AudioSourcePitch` | Audio pitch |
+| `MMAudioSourceVolumeShaker` | `MMF_AudioSourceVolume` | Audio volume |
+| `MMBlink` | `MMF_Flicker` | Object blinking |
+| `MMWiggle` | `MMF_Wiggle` | Continuous wiggle |
+
+### Channel Matching
+
+Shakers only respond to feedbacks on the **same channel**:
+- Feedback `Channel = 0` → Shaker `Channel = 0` ✅
+- Feedback `Channel = 0` → Shaker `Channel = 1` ❌
+
+Use `MMChannel` ScriptableObjects for cleaner channel management.
+
+---
+
+## 9. Springs System
+
+Springs provide physics-based bouncy motion. More natural than curve-based animation.
+
+### Key Spring Components
+
+Located in `MMFeedbacks/Springs/`:
+
+- `MMSpringPosition` — spring on position
+- `MMSpringRotation` — spring on rotation
+- `MMSpringScale` — spring on scale
+- `MMSpringColor` — spring on color
+- `MMSpringFloat` — spring on any float
+- `MMSpringTextureOffset` / `MMSpringTextureScale` — spring on material properties
+
+### Spring Feedbacks
+
+- `MMF_PositionSpring`
+- `MMF_RotationSpring`
+- `MMF_ScaleSpring`
+- `MMF_SquashAndStretchSpring`
+
+### Spring Parameters
+
+| Parameter | Purpose |
+|---|---|
+| `Damping` | How quickly oscillation dies (0 = never, 1 = instant) |
+| `Frequency` | Speed of oscillation |
+| `BumpAmount` | Initial displacement on trigger |
+
+---
+
+## 10. MMTools Utilities
+
+MMTools is a collection of general-purpose Unity utilities bundled with Feel:
+
+### Key Categories
+
+| Category | Contents |
+|---|---|
+| `MMActivation` | Component enabling/disabling helpers |
+| `MMCamera` | Camera shake, zoom, follow |
+| `MMCinemachine` | Cinemachine integration helpers |
+| `MMCurves` | Animation curve utilities |
+| `MMDebugMenu` | Runtime debug UI |
+| `MMGUI` | GUI elements (health bars, progress bars, faders) |
+| `MMInput` | Input helpers |
+| `MMInstantiation` | Object pooling, spawn helpers |
+| `MMMovement` | Movement controllers, path following |
+| `MMParticles` | Particle system helpers |
+| `MMPerformance` | FPS counter, performance monitoring |
+| `MMPhysics` | Physics raycasting helpers |
+| `MMProcedural` | Procedural mesh/grid generation |
+| `MMShaders` | Shader helpers |
+| `MMSprites` | Sprite animation helpers |
+| `MMUtilities` | General helpers (singleton, save system, etc.) |
+| `MMVFX` | Screen effects (blur, chromatic, etc.) |
+
+### Notable Classes
+
+- **`MMSingleton<T>`** — Singleton pattern base class
+- **`MMSimpleObjectPooler`** — Lightweight object pool
+- **`MMSaveLoadManager`** — Save/load system
+- **`MMHealthBar`** — Auto health bar above objects
+- **`MMProgressBar`** — Animated progress bar
+
+---
+
+## 11. Nice Vibrations (Mobile Haptics)
+
+### 11.1 What Is It?
+
+Nice Vibrations lets you play **haptic feedback** on iOS (Taptic Engine) and Android devices, plus gamepad rumble on consoles/PC.
+
+### 11.2 Key Classes
+
+| Class | Purpose |
+|---|---|
+| `HapticPatterns` | Static methods for quick haptic playback |
+| `HapticController` | Low-level haptic control |
+| `HapticSource` | MonoBehaviour for inspector-driven haptics |
+| `HapticReceiver` | Receives haptic events |
+| `HapticClip` | ScriptableObject holding haptic data |
+
+### 11.3 Preset Haptics (Simplest API)
+
+```csharp
+using Lofelt.NiceVibrations;
+
+// Play a preset haptic
+HapticPatterns.PlayPreset(HapticPatterns.PresetType.Selection);    // Light tap
+HapticPatterns.PlayPreset(HapticPatterns.PresetType.Success);      // Success feel
+HapticPatterns.PlayPreset(HapticPatterns.PresetType.Warning);      // Warning buzz
+HapticPatterns.PlayPreset(HapticPatterns.PresetType.Failure);      // Error rumble
+HapticPatterns.PlayPreset(HapticPatterns.PresetType.LightImpact);  // Light thump
+HapticPatterns.PlayPreset(HapticPatterns.PresetType.MediumImpact); // Medium thump
+HapticPatterns.PlayPreset(HapticPatterns.PresetType.HeavyImpact);  // Heavy thump
+HapticPatterns.PlayPreset(HapticPatterns.PresetType.RigidImpact);  // Hard impact
+HapticPatterns.PlayPreset(HapticPatterns.PresetType.SoftImpact);   // Soft impact
+```
+
+### 11.4 Available Presets
+
+| Preset | Feel | Best For |
+|---|---|---|
+| `Selection` | Very light tap | UI selection, menu navigation |
+| `Success` | Satisfying double-buzz | Task complete, achievement |
+| `Warning` | Alert buzz | Low health, timer warning |
+| `Failure` | Error rumble | Death, failed action |
+| `LightImpact` | Light thump | Small collision, footstep |
+| `MediumImpact` | Medium thump | Weapon hit, jump land |
+| `HeavyImpact` | Heavy thump | Explosion, big hit |
+| `RigidImpact` | Sharp hard tap | Metal collision |
+| `SoftImpact` | Dull soft tap | Soft landing |
+
+### 11.5 Custom Haptics with HapticClip
+
+1. Create a `.haptic` file (exported from Lofelt Studio or designed manually)
+2. Create `HapticClip` asset: Right-click → Create → Nice Vibrations → Haptic Clip
+3. Assign the `.haptic` file to the clip
+4. Play via code:
+
+```csharp
+HapticController.Load(myHapticClip.json);
+HapticController.Play();
+```
+
+### 11.6 MonoBehaviour API (HapticSource)
+
+1. Add `HapticSource` component to a GameObject
+2. Assign a `HapticClip`
+3. Call `Play()` from code or UnityEvent
+
+```csharp
+HapticSource source = GetComponent<HapticSource>();
+source.Play();
+source.Stop();
+```
+
+### 11.7 Haptic Samples
+
+The package includes pre-made haptic clips in `HapticSamples/` for common game effects — collision, UI, notification, etc.
+
+---
+
+## 12. C# API Reference
+
+### 12.1 MMF_Player
+
+```csharp
+using MoreMountains.Feedbacks;
+
+MMF_Player player = GetComponent<MMF_Player>();
+
+// Play all feedbacks
+player.PlayFeedbacks();
+
+// Play with a specific position (for range-based feedbacks)
+player.PlayFeedbacks(transform.position);
+
+// Play with intensity multiplier
+player.PlayFeedbacks(transform.position, feedbacksIntensity: 0.5f);
+
+// Stop all feedbacks
+player.StopFeedbacks();
+
+// Pause / Resume
+player.PauseFeedbacks();
+player.ResumeFeedbacks();
+
+// Reset
+player.ResetFeedbacks();
+
+// Restore initial values (undo all changes feedbacks made)
+player.RestoreInitialValues();
+
+// Skip to the end (instant completion)
+player.SkipToTheEnd();
+
+// Get total duration of all feedbacks
+float duration = player.TotalDuration;
+
+// Check if playing
+bool playing = player.IsPlaying;
+
+// Initialization
+player.Initialization();
+```
+
+### 12.2 Events on MMF_Player
+
+```csharp
+// Via Inspector: MMF_Player has Events section
+// OnPlay, OnPause, OnResume, OnRevert, OnComplete
+
+// Or via the Events class:
+player.Events.OnPlay.AddListener(() => Debug.Log("Started"));
+player.Events.OnComplete.AddListener(() => Debug.Log("Done"));
+```
+
+### 12.3 Individual Feedback Control
+
+```csharp
+// Get a specific feedback by label
+MMF_Feedback fb = player.FeedbacksList.Find(f => f.Label == "CameraShake");
+fb.Active = false; // disable it
+
+// Get by type
+MMF_Scale scaleFb = player.GetFeedbackOfType<MMF_Scale>();
+```
+
+### 12.4 Shaker Events (Manual Triggering)
+
+```csharp
+using MoreMountains.Feedbacks;
+
+// Trigger camera shake event directly (without MMF_Player)
+MMCameraShakeEvent.Trigger(
+    duration: 0.5f,
+    amplitude: 2f,
+    frequency: 20f,
+    amplitudeX: 0f, amplitudeY: 0f, amplitudeZ: 0f,
+    infinite: false,
+    channel: 0,
+    useUnscaledTime: false
+);
+```
+
+### 12.5 Nice Vibrations API
+
+```csharp
+using Lofelt.NiceVibrations;
+
+// Quick presets
+HapticPatterns.PlayPreset(HapticPatterns.PresetType.MediumImpact);
+
+// Emphasis (custom intensity + sharpness)
+HapticPatterns.PlayEmphasis(amplitude: 0.8f, frequency: 0.5f);
+
+// Constant vibration
+HapticPatterns.PlayConstant(amplitude: 0.5f, frequency: 0.3f, duration: 0.5f);
+
+// Control
+HapticController.Stop();
+HapticController.clipLevel = 0.5f; // global volume
+HapticController.clipFrequencyShift = 0.2f; // pitch shift
+
+// Check support
+bool supported = DeviceCapabilities.isVersionSupported;
+```
+
+---
+
+## 13. Channels & Events System
+
+### 13.1 Integer Channels
+
+Simplest approach — just use matching integers:
+- Feedback: `Channel = 0`
+- Shaker: `Channel = 0`
+
+### 13.2 MMChannel ScriptableObjects
+
+More scalable approach:
+1. Right-click → Create → More Mountains → MMChannel
+2. Name it (e.g., "PlayerDamageChannel")
+3. Assign to feedback: `ChannelMode = MMChannel`, `MMChannelDefinition = PlayerDamageChannel`
+4. Assign same channel to the shaker
+
+### 13.3 Range-Based Events
+
+Feedbacks can be distance-limited:
+- `UseRange = true` on the feedback
+- `RangeDistance = 10f`
+- Only shakers within 10 units will respond
+- `RangeFalloff` curve controls intensity falloff
+
+---
+
+## 14. Common Recipes
+
+### Recipe: Damage Juice
+
+```
+MMF_Player "OnDamage":
+  1. MMF_FreezeFrame         → Duration: 0.04s
+  2. MMF_CameraShake         → Amplitude: 3, Duration: 0.2s
+  3. MMF_Flash               → Color: Red, Duration: 0.1s
+  4. MMF_Scale               → Punch down to 0.8 then back to 1
+  5. MMF_Flicker             → 3 flickers, 0.1s apart
+```
+
+### Recipe: UI Button Press
+
+```
+MMF_Player "ButtonPress":
+  1. MMF_ScaleSpring         → BumpAmount: 0.9, Damping: 0.5, Freq: 4
+```
+
+### Recipe: Pickup Collected
+
+```
+MMF_Player "OnPickup":
+  1. MMF_Scale               → Scale up to 1.3, then back to 1
+  2. MMF_ParticlesInstantiation → Spawn sparkle VFX
+  3. MMF_AudioSource          → Play coin sound
+  4. MMF_Destroy              → Destroy pickup (delay 0.3s)
+```
+
+### Recipe: Slow Motion Hit
+
+```csharp
+// In your script
+[SerializeField] MMF_Player slowMoFeedback;
+
+void OnBigHit()
+{
+    slowMoFeedback.PlayFeedbacks();
+}
+
+// slowMoFeedback contains:
+// 1. MMF_TimescaleModifier → TimeScale: 0.1, Duration: 0.5s
+// 2. MMF_CameraZoom → Zoom in slightly
+```
+
+---
+
+## 15. Performance Tips
+
+1. **Reuse MMF_Players** — don't create new ones each frame
+2. **Object pool particles** — use `MMSimpleObjectPooler` with `MMF_ParticlesInstantiation`
+3. **Use `PerformanceMode = true`** in production builds
+4. **Channel matching** — shakers on wrong channels still consume CPU checking
+5. **Disable unused shakers** — remove shaker components you don't need
+6. **Use springs over curves** for procedural feel with less configuration
+7. **Nice Vibrations:** Only call on mobile builds with `#if UNITY_IOS || UNITY_ANDROID`
+
+---
+
+## 16. Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| Camera doesn't shake | Add `MMCameraShaker` to the Camera + match channel |
+| Flash doesn't show | Add `MMFlash` to a full-screen UI Image |
+| Feedback plays but nothing happens | Check if target is assigned on the feedback |
+| Scale feedback doesn't reset | Enable `RestoreInitialValuesOnDisable` on player |
+| Multiple cameras shake | Use different channels per camera |
+| Haptics don't work | Build on real device (not editor), check `DeviceCapabilities.isVersionSupported` |
+| Feedbacks play out of order | Check `Timing.InitialDelay` values and Direction mode |
+| "No feedback of type X" error | Missing assembly reference to `MoreMountains.Feedbacks` |
+
+---
+
+## 17. Folder Structure
+
+```
+Feel--unpackedURP/
+├── MMFeedbacks/
+│   ├── Authorizations/           → License files
+│   ├── Demos/                    → Example scenes
+│   ├── Editor/                   → Custom inspectors
+│   └── MMFeedbacks/
+│       ├── Core/
+│       │   ├── MMF_Player/
+│       │   │   ├── MMF_Player.cs        → Main feedback player
+│       │   │   └── MMF_Feedback.cs      → Base feedback class
+│       │   ├── MMChannels/              → Channel system
+│       │   ├── Legacy/                  → Old MMFeedbacks (pre v3)
+│       │   ├── MMShaker.cs              → Base shaker class
+│       │   ├── MMFeedbackTiming.cs      → Timing configuration
+│       │   └── MMFeedbacksEvents.cs     → Event definitions
+│       ├── Feedbacks/                   → All 80+ feedback types (MMF_*.cs)
+│       ├── Shakers/                     → All shaker types (MM*Shaker.cs)
+│       ├── Springs/                     → Spring system
+│       │   ├── Core/                    → MMSpringFloat, MMSpringVector3, etc.
+│       │   ├── Springs/                 → MMSpringPosition, MMSpringScale, etc.
+│       │   └── Feedbacks/               → Spring-based feedbacks
+│       ├── Sequencing/                  → Feedback sequencing tools
+│       └── MMFloatingText/              → Floating damage number system
+│
+├── MMTools/
+│   ├── Accessories/
+│   │   ├── MMActivation/               → Component enable/disable
+│   │   ├── MMCamera/                   → Camera utilities
+│   │   ├── MMGUI/                      → Health bars, progress bars, faders
+│   │   ├── MMInput/                    → Input helpers
+│   │   ├── MMInstantiation/            → Object pooling
+│   │   ├── MMMovement/                 → Movement controllers
+│   │   ├── MMParticles/                → Particle helpers
+│   │   ├── MMShaders/                  → Shader utilities
+│   │   └── MMVFX/                      → Screen effects
+│   ├── Core/                           → Singleton, events, extensions
+│   └── Foundation/                     → Base classes, attributes
+│
+└── NiceVibrations/
+    ├── Scripts/
+    │   └── Components/
+    │       ├── HapticPatterns.cs        → Quick haptic playback
+    │       ├── HapticController.cs      → Low-level control
+    │       ├── HapticSource.cs          → MonoBehaviour haptic player
+    │       ├── HapticReceiver.cs        → Haptic event receiver
+    │       ├── HapticClip.cs            → Haptic data ScriptableObject
+    │       ├── DeviceCapabilities.cs    → Device support check
+    │       ├── Gamepad.cs               → Gamepad rumble
+    │       └── LofeltHaptics.cs         → Native plugin bridge
+    ├── HapticSamples/                   → Pre-made haptic clips
+    ├── Demo/                            → Demo scene
+    └── Plugins/                         → Native iOS/Android libraries
+```
+
+---
+
+## 18. Deep Dive: MMTools Core Utilities
+
+MMTools is a treasure chest of reusable utilities. Here's every subsystem explained.
+
+### 18.1 Singletons (`MMTools/Core/MMSingletons/`)
+
+Four singleton patterns for different needs:
+
+| Class | Behavior | Use For |
+|---|---|---|
+| `MMSingleton<T>` | Basic singleton, destroyed on scene load | Scene-specific managers |
+| `MMPersistentSingleton<T>` | Survives scene loads (`DontDestroyOnLoad`) | Audio manager, save system |
+| `MMPersistentHumbleSingleton<T>` | Persistent, but yields to existing instances | Fallback managers |
+| `MMReferencedScriptableObject` | Singleton for ScriptableObjects | Global data assets |
+
+**Usage:**
+
+```csharp
+using MoreMountains.Tools;
+
+public class GameManager : MMSingleton<GameManager>
+{
+    // Access anywhere: GameManager.Instance.DoSomething();
+    
+    public int Score { get; private set; }
+    
+    public void AddScore(int amount) { Score += amount; }
+}
+
+// Persistent version:
+public class AudioManager : MMPersistentSingleton<AudioManager>
+{
+    // Survives scene loads automatically
+}
+```
+
+### 18.2 Object Pooling (`MMTools/Core/MMObjectPool/`)
+
+Pre-instantiate objects to avoid runtime Instantiate/Destroy GC spikes.
+
+| Class | Purpose |
+|---|---|
+| `MMSimpleObjectPooler` | Pool one type of prefab |
+| `MMMultipleObjectPooler` | Pool multiple prefab types |
+| `MMPoolableObject` | Base class for pooled objects |
+| `MMObjectBounds` | Bounds calculation helper |
+
+**Scene Setup:**
+
+1. Create empty GameObject → name "BulletPool"
+2. Add `MMSimpleObjectPooler`
+3. Set `GameObjectToPool` → your bullet prefab
+4. Set `PoolSize` → 20
+5. In code:
+
+```csharp
+using MoreMountains.Tools;
+
+public class Weapon : MonoBehaviour
+{
+    [SerializeField] MMSimpleObjectPooler bulletPool;
+    
+    void Fire()
+    {
+        // → Get from pool (instead of Instantiate)
+        GameObject bullet = bulletPool.GetPooledGameObject();
+        if (bullet == null) return; // pool exhausted
+        
+        bullet.transform.position = firePoint.position;
+        bullet.transform.rotation = firePoint.rotation;
+        bullet.SetActive(true);
+    }
+}
+
+// On the bullet prefab:
+public class Bullet : MMPoolableObject
+{
+    float lifeTime = 3f;
+    
+    void OnEnable()
+    {
+        Invoke(nameof(ReturnToPool), lifeTime);
+    }
+    
+    void ReturnToPool()
+    {
+        gameObject.SetActive(false); // returns to pool
+    }
+}
+```
+
+### 18.3 Event System (`MMTools/Core/MMEvents/`)
+
+A global event manager for decoupled communication.
+
+```csharp
+using MoreMountains.Tools;
+
+// Define an event
+public struct EnemyDeathEvent
+{
+    public Vector3 Position;
+    public int PointsValue;
+    
+    public EnemyDeathEvent(Vector3 position, int points)
+    {
+        Position = position;
+        PointsValue = points;
+    }
+    
+    static EnemyDeathEvent e;
+    public static void Trigger(Vector3 position, int points)
+    {
+        e.Position = position;
+        e.PointsValue = points;
+        MMEventManager.TriggerEvent(e);
+    }
+}
+
+// Listen:
+public class ScoreManager : MonoBehaviour, MMEventListener<EnemyDeathEvent>
+{
+    void OnEnable() => this.MMEventStartListening<EnemyDeathEvent>();
+    void OnDisable() => this.MMEventStopListening<EnemyDeathEvent>();
+    
+    public void OnMMEvent(EnemyDeathEvent e)
+    {
+        AddScore(e.PointsValue);
+    }
+}
+
+// Fire:
+EnemyDeathEvent.Trigger(transform.position, 100);
+```
+
+### 18.4 Save/Load System (`MMTools/Core/MMSaveLoad/`)
+
+JSON-based save/load with encryption support.
+
+```csharp
+using MoreMountains.Tools;
+
+[System.Serializable]
+public class GameSaveData
+{
+    public int Level;
+    public float PlayTime;
+    public List<string> UnlockedItems;
+}
+
+// Save
+GameSaveData data = new GameSaveData { Level = 5, PlayTime = 120f };
+MMSaveLoadManager.Save(data, "savegame.dat", "SaveFolder");
+
+// Load
+GameSaveData loaded = (GameSaveData)MMSaveLoadManager.Load(
+    typeof(GameSaveData), "savegame.dat", "SaveFolder");
+
+// Delete
+MMSaveLoadManager.DeleteSave("savegame.dat", "SaveFolder");
+```
+
+### 18.5 Sound Manager (`MMTools/Core/MMAudio/MMSoundManager/`)
+
+A complete audio management system with:
+
+- **Multiple tracks** (Music, SFX, UI, Master)
+- **Audio pooling** (pre-instantiated AudioSources)
+- **Playlists** (sequential/shuffle/loop music)
+- **Solo/mute per track**
+- **Volume per track**
+- **Fade in/out**
+- **Save/load audio settings**
+
+```csharp
+using MoreMountains.Tools;
+
+// Play a sound effect
+MMSoundManagerPlayOptions options = MMSoundManagerPlayOptions.Default;
+options.MmSoundManagerTrack = MMSoundManager.MMSoundManagerTracks.Sfx;
+options.Volume = 0.8f;
+MMSoundManagerSoundPlayEvent.Trigger(myAudioClip, options);
+
+// Control tracks
+MMSoundManagerTrackEvent.Trigger(
+    MMSoundManagerTrackEvent.ControlTypes.Mute,
+    MMSoundManager.MMSoundManagerTracks.Music);
+```
+
+### 18.6 Scene Loading (`MMTools/Core/MMSceneLoading/`)
+
+Async scene loading with progress bars, loading screens, and transitions.
+
+```csharp
+using MoreMountains.Tools;
+
+// Load with loading screen
+MMSceneLoadingManager.LoadScene("GameLevel02");
+
+// Or additively
+MMAdditiveSceneLoadingManager.LoadScene("GameLevel02");
+```
+
+### 18.7 Time Manager (`MMTools/Core/MMTimeManager/`)
+
+Control game time scale with stack-based freeze/slow-mo.
+
+```csharp
+using MoreMountains.Tools;
+
+// Freeze for 0.1 seconds
+MMTimeScaleEvent.Trigger(
+    MMTimeScaleEvent.TimeScaleMethods.For,
+    0f,     // time scale
+    0.1f,   // duration
+    false,  // lerp?
+    0f,     // lerp speed
+    false   // infinite?
+);
+
+// Slow motion for 2 seconds
+MMTimeScaleEvent.Trigger(
+    MMTimeScaleEvent.TimeScaleMethods.For,
+    0.2f,   // 20% speed
+    2f,     // 2 seconds
+    true,   // smooth lerp
+    5f,     // lerp speed
+    false
+);
+```
+
+### 18.8 State Machine (`MMTools/Core/MMStateMachine/`)
+
+Generic state machine with events on state change.
+
+```csharp
+using MoreMountains.Tools;
+
+public enum CharacterStates { Idle, Walking, Running, Jumping, Falling }
+
+public class CharacterController : MonoBehaviour
+{
+    public MMStateMachine<CharacterStates> MovementState;
+    
+    void Awake()
+    {
+        MovementState = new MMStateMachine<CharacterStates>(gameObject, true);
+    }
+    
+    void Update()
+    {
+        if (isGrounded && inputMoving)
+            MovementState.ChangeState(CharacterStates.Walking);
+    }
+}
+
+// Listen to state changes:
+public class AnimationController : MonoBehaviour,
+    MMEventListener<MMStateChangeEvent<CharacterStates>>
+{
+    void OnEnable() => this.MMEventStartListening<MMStateChangeEvent<CharacterStates>>();
+    void OnDisable() => this.MMEventStopListening<MMStateChangeEvent<CharacterStates>>();
+    
+    public void OnMMEvent(MMStateChangeEvent<CharacterStates> e)
+    {
+        // e.NewState, e.PreviousState, e.Target
+    }
+}
+```
+
+### 18.9 Tween Engine (`MMTools/Core/MMTween/`)
+
+Curve-based tweening utilities.
+
+```csharp
+using MoreMountains.Tools;
+
+// Evaluate a tween curve at a point
+float value = MMTween.Tween(
+    currentTime,        // current time
+    0f,                 // start time  
+    duration,           // end time
+    0f,                 // start value
+    1f,                 // end value
+    MMTween.MMTweenCurve.EaseInOutCubic
+);
+```
+
+### 18.10 Extensions (`MMTools/Core/MMExtensions/`)
+
+Tons of extension methods for common Unity types:
+
+| Extension File | Key Methods |
+|---|---|
+| `MMVector3Extensions` | `MMRandomVector3()`, `MMSetX/Y/Z()`, `MMRound()` |
+| `MMVector2Extensions` | `MMRotate()`, `MMRandomVector2()` |
+| `MMColorExtensions` | `MMRandomBrightness()`, `MMToHex()` |
+| `MMTransformExtensions` | `MMDestroyAllChildren()`, `MMSetX/Y/Z()` |
+| `MMGameObjectExtensions` | `MMGetOrAddComponent<T>()`, `MMIsInLayerMask()` |
+| `MMAnimatorExtensions` | `MMHasParameterOfType()`, `MMAddAnimatorParameterIfExists()` |
+| `MMRendererExtensions` | `MMIsVisibleFrom()` |
+| `MMListExtensions` | `MMShuffle()`, `MMRandomItem()` |
+| `MMArrayExtensions` | `Contains()` |
+
+**Example:**
+
+```csharp
+using MoreMountains.Tools;
+
+// Random vector in range
+Vector3 randomPos = MMVector3Extensions.MMRandomVector3(
+    new Vector3(-10, 0, -10), new Vector3(10, 5, 10));
+
+// Destroy all children
+transform.MMDestroyAllChildren();
+
+// Get or add component
+Rigidbody rb = gameObject.MMGetOrAddComponent<Rigidbody>();
+
+// Check if visible
+bool visible = renderer.MMIsVisibleFrom(Camera.main);
+```
+
+### 18.11 Math Helpers (`MMTools/Core/MMHelpers/MMMaths.cs`)
+
+Huge math utility library (24KB):
+
+```csharp
+using MoreMountains.Tools;
+
+// Remap value from one range to another
+float mapped = MMMaths.Remap(0.5f, 0f, 1f, -100f, 100f); // → 0
+
+// Distance between objects
+float dist = MMMaths.DistanceBetween(objA, objB);
+
+// Rotation towards direction
+Quaternion rot = MMMaths.DirectionToQuaternion2D(direction);
+
+// Spring damping
+float springValue = MMMaths.Spring(current, target, ref velocity, damping, frequency, dt);
+
+// Round to decimal places
+float rounded = MMMaths.RoundToDecimal(3.14159f, 2); // → 3.14
+
+// Angle between vectors
+float angle = MMMaths.AngleBetween(vectorA, vectorB);
+```
+
+---
+
+## 19. Deep Dive: MMFeedbacks Floating Text System
+
+A complete **damage number / floating text system** with pooling, animation, and color control.
+
+### 19.1 Setup
+
+1. Create `MMFloatingText` prefab:
+   - TextMeshPro text in a Canvas (World Space)
+   - Add `MMFloatingText` component
+   - Configure animation curves for movement, scale, opacity
+
+2. Create spawner in scene:
+   - Empty GameObject → Add `MMFloatingTextSpawner`
+   - Assign the floating text prefab
+   - Set `PoolSize` (e.g., 20)
+
+3. Add feedback to player:
+   - In MMF_Player, add "UI → Floating Text" feedback
+   - Match the channel
+
+### 19.2 Code Trigger
+
+```csharp
+// Via MMF_Player (recommended)
+damageFeedbackPlayer.PlayFeedbacks(hitPosition);
+
+// Via event (direct)
+MMFloatingTextSpawnEvent.Trigger(
+    channelData,
+    spawnPosition: hitPoint,
+    value: "-50",
+    direction: Vector3.up,
+    intensity: 1f,
+    forceColor: true,
+    animateColorGradient: myDamageGradient
+);
+```
+
+### 19.3 Spawner Configuration
+
+| Property | Purpose |
+|---|---|
+| `PoolSize` | Pre-allocated text instances |
+| `AlignmentMode` | Fixed, MatchInitialDirection, MatchMovementDirection |
+| `AnimateMovement` | Curves for X/Y/Z motion |
+| `AnimateScale` | Curve for scale over lifetime |
+| `AnimateOpacity` | Curve for fade over lifetime |
+| `AnimateColor` | Gradient for color over lifetime |
+| `Lifetime` | How long text lives |
+| `SpawnOffset` | Random position offset |
+| `IntensityMultiplier` | Scale based on damage amount |
+
+---
+
+## 20. Deep Dive: Springs System (Physics-Based Animation)
+
+### 20.1 How Springs Work
+
+A spring is a physics simulation that moves a value toward a target with **overshoot and oscillation** — like a real spring bouncing.
+
+```
+                  overshoot
+                    ╱╲
+Target → ─────────╱──╲──────── settles at target
+                       ╲╱
+```
+
+Two parameters control everything:
+- **Damping** (0–1): How fast oscillation dies. Low = bouncy, High = stiff
+- **Frequency** (0.1–40): How fast it oscillates. Higher = faster bounce
+
+### 20.2 Spring Types
+
+| Spring Type | Value Type | Use For |
+|---|---|---|
+| `MMSpringFloat` | float | Any single value (scale, alpha, fill) |
+| `MMSpringVector2` | Vector2 | UV offsets, 2D positions |
+| `MMSpringVector3` | Vector3 | 3D position, rotation, scale |
+| `MMSpringVector4` | Vector4 | Advanced shader properties |
+| `MMSpringColor` | Color | Color transitions |
+
+### 20.3 All Spring Components (31 total!)
+
+**Transform springs:**
+- `MMSpringPosition` — Spring on transform.position
+- `MMSpringRotation` — Spring on transform.rotation
+- `MMSpringScale` — Spring on transform.localScale
+- `MMSpringRotationAround` — Spring orbit around point
+- `MMSpringSquashAndStretch` — Cartoon deformation
+
+**UI springs:**
+- `MMSpringImageAlpha` — Image transparency
+- `MMSpringImageColor` — Image color
+- `MMSpringImageFillAmount` — Image fill (health bars!)
+- `MMSpringRectTransformPosition` — RectTransform position
+- `MMSpringRectTransformSizeDelta` — RectTransform size
+
+**TMP springs:**
+- `MMSpringTMPAlpha` — Text alpha
+- `MMSpringTMPTextColor` — Text color
+- `MMSpringTMPFontSize` — Text size
+- `MMSpringTMPCharacterSpacing` — Letter spacing
+- `MMSpringTMPLineSpacing` — Line spacing
+- `MMSpringTMPWordSpacing` — Word spacing
+- `MMSpringTMPDilate` — Text dilation
+- `MMSpringTMPSoftness` — Text softness
+
+**Audio springs:**
+- `MMSpringAudioSourcePitch` — Audio pitch
+- `MMSpringAudioSourceVolume` — Audio volume
+
+**Camera springs:**
+- `MMSpringCameraFieldOfView` — Camera FOV
+- `MMSpringCameraOrthographicSize` — Ortho camera size
+
+**Rendering springs:**
+- `MMSpringLightColor` — Light color
+- `MMSpringLightIntensity` — Light brightness
+- `MMSpringLightRange` — Light range
+- `MMSpringSpriteColor` — SpriteRenderer color
+- `MMSpringAnimatorSpeed` — Animator speed
+- `MMSpringShaderController` — Shader property
+- `MMSpringTextureOffset` — Material texture offset
+- `MMSpringTextureScale` — Material texture scale
+
+**Time:**
+- `MMSpringMMTimeScale` — Time.timeScale with spring feel
+
+### 20.4 Using Springs in Code
+
+```csharp
+using MoreMountains.Feedbacks;
+
+// Via component
+MMSpringScale springScale = GetComponent<MMSpringScale>();
+springScale.BumpRandom(); // random bump
+springScale.MoveTo(new Vector3(1.5f, 1.5f, 1.5f)); // spring to target
+
+// Via spring data directly
+MMSpringFloat mySpring = new MMSpringFloat();
+mySpring.Damping = 0.5f;
+mySpring.Frequency = 6f;
+mySpring.SetCurrentValueAsInitialValue();
+
+// In Update:
+mySpring.TargetValue = desiredValue;
+mySpring.UpdateSpringValue(Time.deltaTime);
+float animated = mySpring.CurrentValue;
+```
+
+### 20.5 Scene Setup: Bouncy Health Bar
+
+1. Create UI Image → set as health bar fill
+2. Add `MMSpringImageFillAmount` component
+3. Set `Damping = 0.3f`, `Frequency = 4f`
+4. In code when health changes:
+
+```csharp
+MMSpringImageFillAmount spring = healthBarFill.GetComponent<MMSpringImageFillAmount>();
+spring.MoveTo(newHealthNormalized);
+// Health bar bounces to the new value!
+```
+
+---
+
+## 21. Deep Dive: MMTools GUI Accessories
+
+### 21.1 Health Bar (`MMHealthBar`)
+
+Auto-generates a UI health bar above any 3D object. 20KB of customization.
+
+**Setup:**
+1. Add `MMHealthBar` to any 3D object (enemy, player, etc.)
+2. It auto-creates a Canvas + Image above the object
+3. Call `UpdateBar(currentHealth, minHealth, maxHealth)` when health changes
+
+```csharp
+MMHealthBar healthBar = GetComponent<MMHealthBar>();
+healthBar.UpdateBar(currentHP, 0f, maxHP, show: true);
+```
+
+**Key Properties:**
+- `HealthBarType` — Drawn (auto-generated) or Prefab (your custom UI)
+- `BackgroundColor`, `ForegroundColor`, `DelayedColor`
+- `Size`, `BackgroundPadding`
+- `FollowTargetMode` — how bar follows 3D object
+- `BillboardMode` — always face camera
+- `BumpOnHit` — scale bounce when damaged
+
+### 21.2 Progress Bar (`MMProgressBar`)
+
+Animated progress bar with delayed "damage" bar (like Souls games).
+
+**Features:**
+- Primary bar (instant)
+- Delayed bar (slowly catches up — "previous value" visual)
+- Configurable animation curves
+- Event callbacks on complete
+
+### 21.3 Countdown Timer (`MMCountdown`)
+
+In-game countdown display with events.
+
+### 21.4 Parallax UI (`MMParallaxUI`)
+
+Mouse-reactive parallax layers for UI menus.
+
+---
+
+## 22. Deep Dive: MMVFX (Visual Effects)
+
+### 22.1 Available VFX
+
+Located in `MMTools/Accessories/MMVFX/`:
+
+| Subsystem | What It Does |
+|---|---|
+| `MMBloomDirt` | Bloom + dirt overlay |
+| `MMBrushes` | Procedural brush textures |
+| `MMNoise` | Perlin/Simplex noise generators |
+| `MMPalette` | Color palette management |
+| `MMParticles` | Particle system utilities |
+| `MMRamps` | Color ramp/gradient textures |
+| `MMRipple` | Screen ripple/distortion effect |
+
+### 22.2 Screen Ripple
+
+A post-processing ripple effect for impacts:
+
+```csharp
+// Trigger ripple at screen position
+MMRippleEvent.Trigger(screenPosition);
+```
+
+---
+
+## 23. Deep Dive: MMFeedbacks Third-Party Integrations
+
+Located in `MMFeedbacks/MMFeedbacksForThirdParty/` — 226 files of integrations.
+
+These are **additional feedbacks** for popular Unity assets:
+
+| Integration | Feedbacks Added |
+|---|---|
+| **Cinemachine** | Camera impulse, virtual camera transitions, noise |
+| **Post Processing** | Bloom, chromatic aberration, vignette, color grading, DOF, lens distortion, motion blur |
+| **URP Post Processing** | Same as above but for URP Volume system |
+| **HDRP** | HDRP-specific post processing |
+| **TextMeshPro** | Text alpha, color, character spacing, dilation, font size, line/word/paragraph spacing, softness, text change |
+| **Nicevibrations** | Haptic feedback as a feedback type |
+
+### 23.1 Cinemachine Integration (Very Common)
+
+```
+MMF_Player "OnExplosion":
+  1. MMF_CinemachineImpulse  → Camera impulse shake (Cinemachine)
+  2. MMF_CinemachineTransition → Switch virtual cameras
+```
+
+### 23.2 Post Processing Integration (Very Common)
+
+Animate any post-processing effect as a feedback:
+
+```
+MMF_Player "OnDamage":
+  1. MMF_Vignette            → Red vignette pulse
+  2. MMF_ChromaticAberration → Brief glitch effect
+  3. MMF_Bloom               → Bloom intensity spike
+  4. MMF_LensDistortion      → Brief distortion
+```
+
+**Setup:**
+1. Create Post Processing Volume in scene
+2. Add the shaker component matching your feedback (e.g., `MMVignetteShaker`)
+3. The feedback broadcasts to the shaker
+
+### 23.3 TMP Integration
+
+Animate TextMeshPro properties as feedbacks:
+
+```
+MMF_Player "OnLevelUp":
+  1. MMF_TMPFontSize         → Text grows then shrinks
+  2. MMF_TMPColor            → Flash gold
+  3. MMF_TMPCharacterSpacing → Letters spread then compress
+```
+
+---
+
+## 24. Complete Workflow: Building a "Game Juice" System
+
+Here's how a full game would structure its Feel usage:
+
+### 24.1 Architecture
+
+```
+Assets/
+├── Prefabs/
+│   ├── Feedbacks/
+│   │   ├── FB_PlayerDamage.prefab     → MMF_Player with all damage effects
+│   │   ├── FB_EnemyDeath.prefab       → MMF_Player with death effects
+│   │   ├── FB_Pickup.prefab           → MMF_Player with pickup effects
+│   │   ├── FB_ButtonPress.prefab      → MMF_Player with UI press effects
+│   │   └── FB_Explosion.prefab        → MMF_Player with explosion effects
+│   └── VFX/
+│       ├── VFX_Explosion.prefab       → Particle system
+│       └── VFX_Sparkle.prefab         → Particle system
+├── Data/
+│   └── Channels/
+│       ├── CH_CameraShake.asset       → MMChannel
+│       ├── CH_ScreenFlash.asset       → MMChannel
+│       └── CH_UIFeedback.asset        → MMChannel
+└── Scenes/
+    └── GameScene
+        ├── Camera                     → MMCameraShaker, MMCameraZoom
+        ├── Canvas/ScreenFlash         → MMFlash (full-screen Image)
+        ├── Canvas/FloatingTextSpawner → MMFloatingTextSpawner
+        └── PostProcessVolume          → Shakers for vignette, bloom, etc.
+```
+
+### 24.2 The Pattern
+
+1. **Create feedback prefabs** for each game event
+2. **Place shakers** on scene objects (camera, canvas, lights)
+3. **Use channels** to route feedbacks to specific shakers
+4. **Reference feedback prefabs** in your game scripts
+5. **Call `PlayFeedbacks()`** when events happen
+
+```csharp
+public class Enemy : MonoBehaviour
+{
+    [SerializeField] MMF_Player deathFeedback;
+    [SerializeField] MMF_Player hitFeedback;
+    
+    public void TakeDamage(int amount, Vector3 hitPoint)
+    {
+        health -= amount;
+        hitFeedback.PlayFeedbacks(hitPoint, amount / 100f);
+        
+        if (health <= 0)
+            deathFeedback.PlayFeedbacks(transform.position);
+    }
+}
+```
+
+---
+
+## 25. MMF_Player Inspector Deep Dive
+
+The MMF_Player inspector is where you spend most of your time. Here's every section:
+
+### 25.1 Settings Panel
+
+| Section | Properties |
+|---|---|
+| **Initialization** | `InitializationMode` (Awake/Start/Script), `AutoPlayOnStart`, `AutoPlayOnEnable` |
+| **Direction** | `Direction` (TopToBottom/BottomToTop), affects play order |
+| **Intensity** | `FeedbacksIntensity` (global multiplier for all feedbacks) |
+| **Timing** | `DurationMultiplier`, `DisplayFullDurationDetails` |
+| **Play Settings** | `CanPlay`, `CanPlayWhileAlreadyPlaying` |
+| **Events** | `OnPlay`, `OnPause`, `OnResume`, `OnRevert`, `OnComplete` (UnityEvents) |
+| **Performance** | `PerformanceMode`, `StopFeedbacksOnDisable`, `RestoreInitialValuesOnDisable` |
+
+### 25.2 Adding Feedbacks
+
+1. Click **"Add new feedback..."** dropdown at bottom of feedback list
+2. Browse categories: Audio, Camera, Debug, Feedbacks, GameObject, Light, Loop, Particles, Post Process, Renderer, Time, Transform, UI
+3. Select one → it appears in the list
+4. Configure its properties
+5. **Drag to reorder** feedbacks in the list
+
+### 25.3 Per-Feedback Controls
+
+Each feedback in the list has:
+- **Enable/Disable toggle** (checkbox)
+- **Label** (custom name)
+- **Timing** section (delay, repeat, cooldown)
+- **Channel** (which shaker to target)
+- **Chance** (probability %)
+- **Target** (which object the feedback affects)
+
+---
+
+## 26. Advanced: Creating Custom Feedbacks
+
+You can create your own feedback types:
+
+```csharp
+using MoreMountains.Feedbacks;
+using UnityEngine;
+
+[AddComponentMenu("")]
+[FeedbackHelp("This feedback does something custom")]
+[FeedbackPath("Custom/My Custom Feedback")]
+public class MMF_MyCustom : MMF_Feedback
+{
+    // This appears in the feedback dropdown under "Custom" category
+    
+    [MMFInspectorGroup("Custom Settings", true, 12)]
+    public float MyValue = 1f;
+    public AnimationCurve MyCurve = AnimationCurve.Linear(0, 0, 1, 1);
+    
+    protected override void CustomPlayFeedback(Vector3 position, float feedbacksIntensity = 1.0f)
+    {
+        // Your effect logic here
+        float intensity = MyValue * feedbacksIntensity;
+        Debug.Log($"Custom feedback played with intensity {intensity}!");
+    }
+    
+    protected override void CustomStopFeedback(Vector3 position, float feedbacksIntensity = 1.0f)
+    {
+        // Cleanup logic
+    }
+    
+    protected override void CustomRestoreInitialValues()
+    {
+        // Undo any changes made
+    }
+}
+```
+
+After creating this script, it automatically appears in the "Add new feedback" dropdown under `Custom → My Custom Feedback`.
+
+---
+
+## 27. Quick Reference Card
+
+### Player API
+
+```csharp
+player.PlayFeedbacks();                          // Play all
+player.PlayFeedbacks(position);                  // Play at position
+player.PlayFeedbacks(position, intensity);       // Play with intensity
+player.StopFeedbacks();                          // Stop all
+player.PauseFeedbacks();                         // Pause
+player.ResumeFeedbacks();                        // Resume
+player.ResetFeedbacks();                         // Reset state
+player.RestoreInitialValues();                   // Undo changes
+player.SkipToTheEnd();                           // Instant complete
+player.Initialization();                         // Manual init
+bool playing = player.IsPlaying;                 // Check state
+float dur = player.TotalDuration;                // Get duration
+```
+
+### Shaker Events (Fire Directly)
+
+```csharp
+MMCameraShakeEvent.Trigger(duration, amplitude, frequency, ...);
+MMFlashEvent.Trigger(duration, alpha, flashID, color, ...);
+MMTimeScaleEvent.Trigger(method, timeScale, duration, lerp, ...);
+MMFreezeFrameEvent.Trigger(duration);
+MMFloatingTextSpawnEvent.Trigger(channel, position, text, ...);
+```
+
+### Nice Vibrations
+
+```csharp
+HapticPatterns.PlayPreset(HapticPatterns.PresetType.Success);
+HapticPatterns.PlayEmphasis(amplitude, frequency);
+HapticPatterns.PlayConstant(amplitude, frequency, duration);
+HapticController.Stop();
+HapticController.clipLevel = 0.5f;
+```
+
+### Springs
+
+```csharp
+springComponent.BumpRandom();
+springComponent.MoveTo(targetValue);
+springComponent.MoveToAdditive(additionalValue);
+springComponent.Finish(); // instant arrive at target
+springComponent.RestoreInitialValue();
+springComponent.Stop();
+```
+
+### Object Pooling
+
+```csharp
+GameObject obj = pooler.GetPooledGameObject();
+obj.SetActive(true);   // use it
+obj.SetActive(false);  // return to pool
+```
+
+### Singleton
+
+```csharp
+MyManager.Instance.DoSomething();
+bool exists = MyManager.HasInstance;
+```
+
+<!-- ==== FILE: Documentation/GUI-Assets.md ==== -->
+# GUI & Art Assets — Complete Beginner Guide
+
+> **Location:** `importedAssetsAnalysis/assetsAnalysis-main/GUI/`  
+> **Type:** Sprite/texture art packs (no code)  
+> **Purpose:** Free UI sprites, environment art, buttons, decorations
+
+---
+
+## Table of Contents
+
+1. [Overview](#1-overview)
+2. [UI Bundle Free](#2-ui-bundle-free)
+3. [Animated Tree Free](#3-animated-tree-free)
+4. [Free Environment](#4-free-environment)
+5. [Web Button Ver 2](#5-web-button-ver-2)
+6. [Retro Windows GUI](#6-retro-windows-gui)
+7. [How to Use Sprite Assets in Unity](#7-how-to-use-sprite-assets-in-unity)
+8. [Scene Setup — Step by Step](#8-scene-setup--step-by-step)
+
+---
+
+## 1. Overview
+
+These are **free art asset packs** — they contain PNG images, sprite sheets, and pixel art that you can use for UI elements, environment decoration, and buttons. They have **no scripts or code**.
+
+| Asset Pack | Type | Contents |
+|---|---|---|
+| **UI Bundle Free** | UI Sprites | 7 themed UI sets (Fantasy, Horror, Medieval, Pastel, Cozy, Demo) |
+| **Animated Tree Free** | Environment Art | Autumn tree sprites, decorations |
+| **Free Environment** | Environment Art | Environment background/decoration sprites |
+| **Web Button Ver 2** | UI Buttons | Animated button sprites (Aseprite + PNG + GIF) |
+| **Retro Windows GUI** | UI Framework | Retro Windows-style GUI elements (ZIP only) |
+
+---
+
+## 2. UI Bundle Free
+
+### What's Inside
+
+7 themed UI sprite sets, each a single PNG atlas:
+
+| File | Theme | Visual Style |
+|---|---|---|
+| `FreeDemo.png` | Demo/Sample | General UI elements |
+| `FreeHorrorUi.png` | Horror | Dark, grungy UI frames and buttons |
+| `FreeUI.png` | Generic | Clean UI elements |
+| `MediavelFree.png` | Medieval | Stone/wood themed RPG UI |
+| `PastelUIFree.png` | Pastel | Soft pastel colored UI |
+| `UiCozyFree.png` | Cozy | Warm, rounded UI elements |
+| `freefantasy.png` | Fantasy | Fantasy RPG styled UI |
+
+### How to Use
+
+1. Import the PNG files into your Unity project's `Assets/UI/` folder
+2. Select each PNG in Unity
+3. In the Import Settings:
+   - Set **Texture Type** → `Sprite (2D and UI)`
+   - Set **Sprite Mode** → `Multiple` (if it's a sprite sheet)
+   - Click **Sprite Editor** → slice the sprites
+4. Use sliced sprites on UI Image components
+
+### Best For
+
+- Rapid prototyping game UI
+- Indie game menus, inventory screens, dialogue boxes
+- Placeholder art during development
+
+---
+
+## 3. Animated Tree Free
+
+### What's Inside
+
+| File | Description |
+|---|---|
+| `AnimatedAutum.png` | Autumn-themed tree sprite/spritesheet |
+| `Freedecorations.png` | Decorative elements (leaves, branches, etc.) |
+
+### How to Use
+
+1. Import PNGs into `Assets/Environment/`
+2. Set Texture Type → `Sprite (2D and UI)`
+3. For animated sprites:
+   - Set Sprite Mode → `Multiple`
+   - Open Sprite Editor → Slice into frames
+   - Create Animation from sprite sequence
+
+### Best For
+
+- 2D game environments
+- Background decorations
+- Seasonal/autumn themed games
+
+---
+
+## 4. Free Environment
+
+### What's Inside
+
+Environment art assets (background elements, terrain sprites, decorations).
+
+### How to Use
+
+Same as above — import as Sprites, slice if needed, use on SpriteRenderers or UI Images.
+
+---
+
+## 5. Web Button Ver 2
+
+### What's Inside
+
+| File | Format | Description |
+|---|---|---|
+| `web button.png` | PNG | Static button sprite |
+| `web button.aseprite` | Aseprite | Source file (editable in Aseprite) |
+| `web button gif.gif` | GIF | Animated button preview |
+| `web button gif (ok).aseprite` | Aseprite | Animated button source |
+
+### What Is Aseprite?
+
+Aseprite (`.aseprite`) is a pixel art editor format. You need **Aseprite** software to edit these files. The PNG/GIF versions are ready to use.
+
+### How to Use in Unity
+
+1. Use the `.png` file directly as a UI button sprite
+2. For animated button: extract GIF frames or use the Aseprite file
+3. Import → Texture Type → `Sprite (2D and UI)`
+4. Assign to a UI Button's Image component
+
+### Best For
+
+- Pixel art game UI buttons
+- Web-style game interfaces
+
+---
+
+## 6. Retro Windows GUI
+
+### What's Inside
+
+A `.zip` archive containing retro Windows 95/98 style GUI elements — window frames, buttons, checkboxes, scrollbars, title bars, etc.
+
+### How to Use
+
+1. Extract `RetroWindowsGUI.zip`
+2. Import the sprite sheets into Unity
+3. Slice and use for nostalgic/retro UI designs
+
+### Best For
+
+- Retro-themed games
+- Desktop simulation games
+- Nostalgic UI (Undertale-style, retro RPGs)
+
+---
+
+## 7. How to Use Sprite Assets in Unity
+
+### 7.1 Import Settings
+
+For ALL sprite/UI art:
+
+1. Select the PNG in Unity Project window
+2. In Inspector, set:
+   - **Texture Type:** `Sprite (2D and UI)`
+   - **Sprite Mode:**
+     - `Single` if it's one sprite
+     - `Multiple` if it's a sprite sheet (atlas)
+   - **Pixels Per Unit:** 100 (default, adjust to fit your game scale)
+   - **Filter Mode:** `Point (no filter)` for pixel art, `Bilinear` for smooth art
+   - **Compression:** `None` for pixel-perfect, or `Normal Quality` for smaller builds
+3. Click **Apply**
+
+### 7.2 Slicing a Sprite Sheet
+
+1. With Sprite Mode set to `Multiple`, click **Sprite Editor**
+2. In Sprite Editor:
+   - Click **Slice** (top-left dropdown)
+   - Choose method:
+     - **Automatic** — Unity detects individual sprites
+     - **Grid By Cell Size** — specify exact cell dimensions
+     - **Grid By Cell Count** — specify rows × columns
+   - Click **Slice**
+   - Click **Apply** (top-right)
+3. Now you have individual sprites from the sheet
+
+### 7.3 9-Slice for UI Panels
+
+For UI frames/panels that need to scale without stretching corners:
+
+1. Open Sprite Editor on the sprite
+2. Drag the green **border lines** to define the 9-slice region
+3. The corners stay fixed, edges stretch horizontally/vertically, center tiles
+4. On your UI Image component, set **Image Type** → `Sliced`
+
+### 7.4 Using in UI
+
+1. Create Canvas: `GameObject → UI → Canvas`
+2. Create Image: Right-click Canvas → `UI → Image`
+3. Drag your sprite into the Image's **Source Image** field
+4. For buttons: Right-click Canvas → `UI → Button`, then swap the Image sprite
+
+### 7.5 Using in 2D World Space
+
+1. Create: `GameObject → 2D Object → Sprite`
+2. Drag your sprite into the SpriteRenderer's **Sprite** field
+3. Position in scene as needed
+
+---
+
+## 8. Scene Setup — Step by Step
+
+### 8.1 Creating a UI Panel with UI Bundle
+
+1. Import `MediavelFree.png` → Sprite Mode `Multiple` → Slice
+2. Create Canvas + Panel:
+   ```
+   Canvas
+   └── Panel (Image component)
+       ├── TitleBar (Image)
+       ├── CloseButton (Button)
+       └── ContentArea (Image)
+   ```
+3. Assign sliced sprites to each Image
+4. Set Image Type → `Sliced` for 9-slice panels
+5. Add LayoutGroups for auto-arrangement
+
+### 8.2 Creating an Animated Button
+
+1. Import `web button.png` as sprite
+2. Create: `UI → Button`
+3. Assign the sprite to the Button's Image
+4. Set Button colors:
+   - Normal: White
+   - Highlighted: Slightly brighter
+   - Pressed: Slightly darker
+   - Selected: Accent color
+5. For animated: import GIF frames, create Animation Clip, add Animator to Button
+
+### 8.3 Creating Environment Decorations
+
+1. Import tree/environment PNGs as sprites
+2. Create `2D Object → Sprite` for each decoration
+3. Position in scene
+4. Set **Sorting Layer** and **Order in Layer** for proper depth
+5. For animated sprites: create Animation from frame sequence
+
+---
+
+## Asset Comparison Table
+
+| Asset | Sprite Count | Art Style | Best Use |
+|---|---|---|---|
+| UI Bundle Free | ~7 atlas sheets | Various themed | Game menus, HUD, inventory |
+| Animated Tree Free | 2 sheets | Nature/autumn | 2D environment decoration |
+| Free Environment | 1+ sheets | Environment | 2D backgrounds |
+| Web Button Ver 2 | 1 button + anim | Pixel art | Clickable UI buttons |
+| Retro Windows GUI | Many (zipped) | Retro/Windows 95 | Retro-themed game UI |
+
+<!-- ==== FILE: Documentation/HighlightPlus.md ==== -->
+# Highlight Plus (URP) — Complete Beginner Guide
+
+> **Package:** Highlight Plus v22.1 by Kronnect  
+> **Pipeline:** Universal Render Pipeline (URP) only  
+> **Min Unity:** 2021.3+  
+> **Namespace:** `HighlightPlus`
+
+---
+
+## Table of Contents
+
+1. [What Is Highlight Plus?](#1-what-is-highlight-plus)
+2. [When Would You Use It?](#2-when-would-you-use-it)
+3. [Installation & URP Setup](#3-installation--urp-setup)
+4. [Core Concepts](#4-core-concepts)
+5. [Key Components](#5-key-components)
+6. [All Available Effects](#6-all-available-effects)
+7. [Scene Setup — Step by Step](#7-scene-setup--step-by-step)
+8. [Profiles (Reusable Presets)](#8-profiles-reusable-presets)
+9. [C# API Reference](#9-c-api-reference)
+10. [Common Recipes](#10-common-recipes)
+11. [Performance Tips](#11-performance-tips)
+12. [Troubleshooting](#12-troubleshooting)
+13. [Folder Structure](#13-folder-structure)
+14. [Real-World Example: Replacing FresnelHighlighter (Phase B/D)](#14-real-world-example-replacing-a-custom-fresnel-highlighter) — Full migration from custom shader to Highlight Plus
+
+---
+
+## 1. What Is Highlight Plus?
+
+Highlight Plus is a **visual feedback system** that draws outlines, glows, overlays, see-through effects, hit flashes, target markers, and icons around 3D objects in your Unity scene. Think of it as "the glowing outline you see in every game when you hover over something you can pick up."
+
+It works entirely through **URP Renderer Features** + **MonoBehaviour components** — no shader replacement needed on your existing materials.
+
+---
+
+## 2. When Would You Use It?
+
+| Use Case | Example |
+|---|---|
+| **Hover highlight** | Glow around an interactable object when the mouse is over it |
+| **Selection indicator** | Outline stays on a clicked object |
+| **See-through walls** | X-ray silhouette of a player behind obstacles |
+| **Hit feedback** | Flash overlay when an enemy takes damage |
+| **Target marker** | Animated crosshair/circle on the ground below a selected unit |
+| **Icon marker** | Floating 3D icon above a quest NPC |
+
+---
+
+## 3. Installation & URP Setup
+
+### 3.1 Prerequisites
+
+- Unity 2021.3 or later
+- URP package installed via Package Manager
+
+### 3.2 Step-by-Step Installation
+
+1. **Import the package** into your Unity project (Assets → Import Package or drag `.unitypackage`).
+
+2. **Open Project Settings → Graphics**  
+   - You will see a field called **Scriptable Render Pipeline Settings** with your URP Asset assigned.
+
+3. **Double-click the URP Asset** (e.g., `UniversalRenderPipelineAsset`).  
+   - This selects it in the Inspector.
+
+4. **Find the Renderer List** on the URP Asset.  
+   - It shows one or more **Forward Renderer** assets (e.g., `UniversalRenderer`).
+
+5. **Double-click the Forward Renderer** asset to select it.
+
+6. **Click the "+" button** under **Renderer Features**.
+
+7. **Select "Highlight Plus"** from the dropdown list.  
+   - This adds `HighlightPlusRenderPassFeature` to the renderer.
+
+8. **IMPORTANT:** Also check **Settings → Quality**. Each quality level can have its own URP Asset. Repeat steps 3–7 for every URP Asset referenced there.
+
+> **Without this Renderer Feature, nothing will render!** This is the #1 setup mistake.
+
+### 3.3 Renderer Feature Options
+
+Once added, the Highlight Plus Renderer Feature has these settings:
+
+| Setting | What It Does |
+|---|---|
+| **Show In Preview Camera** | Renders effects in Scene view preview cameras |
+| **Clear Stencil** | Fixes conflicts with other stencil-based assets |
+
+---
+
+## 4. Core Concepts
+
+### 4.1 How It Works Internally
+
+```
+Your Object (MeshRenderer)
+    ↓
+HighlightEffect component reads mesh data
+    ↓
+HighlightPlusRenderPassFeature (URP Renderer Feature)
+    ↓
+Custom shader passes draw outline/glow/overlay/etc.
+    ↓
+Final composited image on screen
+```
+
+- **No material changes** — your object's original material is untouched.
+- Effects are rendered via **extra draw passes** injected by the URP Renderer Feature.
+- The component caches mesh data for performance.
+
+### 4.2 Effect Group (Who Gets Highlighted?)
+
+The `effectGroup` property on `HighlightEffect` controls scope:
+
+| Value | Meaning |
+|---|---|
+| `OnlyThisObject` | Only this exact GameObject |
+| `Children` | This object + all children (default) |
+| `RootToChildren` | From the topmost parent down to all children |
+| `LayerInScene` | All objects in a specific layer |
+| `LayerInChildren` | All children in a specific layer |
+| `Scripting` | You manually assign renderers via code |
+
+### 4.3 Visibility Modes
+
+Many effects have a `Visibility` setting:
+
+| Value | Meaning |
+|---|---|
+| `Normal` | Effect only visible when object is visible |
+| `AlwaysOnTop` | Effect renders on top of everything |
+| `OnlyWhenOccluded` | Effect only shows when object is behind something |
+
+---
+
+## 5. Key Components
+
+### 5.1 `HighlightEffect` (The Main Component)
+
+**What:** The core component you add to any GameObject to make it highlightable.  
+**Location:** `Runtime/Scripts/HighlightEffect.cs` (157KB — it's big!)
+
+**How to add:**
+1. Select your GameObject in the Hierarchy
+2. Inspector → Add Component → search "Highlight Effect"
+
+**Key Inspector Sections:**
+
+| Section | Controls |
+|---|---|
+| **Include** | Which objects are affected (`effectGroup`) |
+| **Overlay** | Color wash pulsing over the mesh surface |
+| **Outline** | Edge outline around the object |
+| **Outer Glow** | Soft glow emanating outward |
+| **Inner Glow** | Glow on the inside edges |
+| **See-Through** | X-ray silhouette behind occluders |
+| **Target FX** | Animated sprite on the ground |
+| **Icon FX** | 3D mesh icon floating above |
+| **Hit FX** | Damage flash effect |
+
+**Key Properties (C# fields you can set):**
+
+```csharp
+// Turn highlight on/off
+highlightEffect.highlighted = true;  // or false
+
+// Outline
+highlightEffect.outline = 1f;              // 0 = off, 1 = full
+highlightEffect.outlineColor = Color.red;
+highlightEffect.outlineWidth = 0.45f;
+highlightEffect.outlineQuality = QualityLevel.High;
+
+// Outer Glow
+highlightEffect.glow = 1.5f;              // 0 = off
+highlightEffect.glowWidth = 0.4f;
+highlightEffect.glowHQColor = Color.cyan;
+
+// Overlay (color wash)
+highlightEffect.overlay = 0.5f;           // 0 = off
+highlightEffect.overlayColor = Color.yellow;
+highlightEffect.overlayAnimationSpeed = 1f;
+
+// See-Through
+highlightEffect.seeThrough = SeeThroughMode.WhenHighlighted;
+highlightEffect.seeThroughIntensity = 0.5f;
+highlightEffect.seeThroughTintColor = Color.blue;
+
+// Fade
+highlightEffect.fadeInDuration = 0.3f;
+highlightEffect.fadeOutDuration = 0.3f;
+```
+
+---
+
+### 5.2 `HighlightTrigger` (Auto-Highlight on Hover)
+
+**What:** Automatically turns highlight on/off when the mouse hovers over the object.  
+**Requires:** `HighlightEffect` on the same GameObject (auto-added via `[RequireComponent]`).
+
+**How to add:**
+1. Ensure your object has a **Collider** (BoxCollider, MeshCollider, etc.)
+2. Add Component → "Highlight Trigger"
+
+**Key Properties:**
+
+| Property | Type | Purpose |
+|---|---|---|
+| `highlightOnHover` | bool | Enable/disable hover highlighting |
+| `triggerMode` | enum | `ColliderEventsOnlyOnThisObject` or `RaycastOnThisObjectAndChildren` |
+| `raycastCamera` | Camera | Which camera to raycast from (auto-detected if null) |
+| `raycastSource` | enum | `MousePosition` or `CameraDirection` (for FPS games) |
+| `selectOnClick` | bool | Click to select (persistent highlight) |
+| `toggle` | bool | Click toggles selection on/off |
+| `singleSelection` | bool | Deselect others when selecting this |
+| `respectUI` | bool | Don't highlight when mouse is over UI |
+| `minDistance` / `maxDistance` | float | Distance limits for interaction |
+
+**Events you can subscribe to:**
+
+```csharp
+trigger.OnObjectHighlightStart += (GameObject obj) => { /* hover entered */ return true; };
+trigger.OnObjectHighlightEnd += (GameObject obj) => { /* hover exited */ return true; };
+trigger.OnObjectSelected += (GameObject obj) => { /* clicked/selected */ return true; };
+trigger.OnObjectUnSelected += (GameObject obj) => { /* deselected */ return true; };
+```
+
+> Return `false` from the event to **cancel** the action.
+
+---
+
+### 5.3 `HighlightManager` (Global Scene Highlight)
+
+**What:** A single manager that highlights ANY object the mouse hovers over — no need to add `HighlightTrigger` to every object.
+
+**How to add:**
+- Menu: `GameObject → Effects → Highlight Plus → Create Manager`
+- Or manually: Create empty GameObject → Add `HighlightManager` component
+
+**How it works:**
+1. Manager raycasts from the camera every frame
+2. When it hits an object with a collider, it clones its own `HighlightEffect` settings onto that object
+3. If the object already has its own `HighlightEffect`, the manager uses those settings instead
+
+**Key Properties:**
+
+| Property | Type | Purpose |
+|---|---|---|
+| `highlightOnHover` | bool | Master on/off |
+| `layerMask` | LayerMask | Which layers can be highlighted |
+| `raycastCamera` | Camera | Camera for raycasting |
+| `selectOnClick` | bool | Enable click-to-select |
+| `selectedProfile` | HighlightProfile | Different look when selected |
+| `singleSelection` | bool | Only one selection at a time |
+| `keepSelection` | bool | Keep selection when clicking empty space |
+
+**Static API:**
+
+```csharp
+// Access all currently selected objects
+List<HighlightEffect> selected = HighlightManager.selectedObjects;
+
+// Programmatic selection
+HighlightManager.instance.SelectObject(transform);
+HighlightManager.instance.UnselectObject(transform);
+HighlightManager.instance.ToggleObject(transform);
+```
+
+---
+
+### 5.4 `HighlightProfile` (ScriptableObject)
+
+**What:** A reusable preset that stores all highlight settings. Share one profile across many objects.
+
+**How to create:**
+- Right-click in Project → `Create → Highlight Plus Profile`
+
+**How to use:**
+1. Create a profile asset
+2. Configure its settings in the Inspector
+3. Assign it to any `HighlightEffect.profile` field
+4. Enable `profileSync` if you want runtime profile changes to auto-apply
+
+**Runtime API:**
+
+```csharp
+// Load a profile at runtime
+highlightEffect.ProfileLoad(myProfile);
+
+// Save current settings to a profile
+highlightEffect.ProfileSave(myProfile);
+```
+
+---
+
+### 5.5 `HighlightSeeThroughOccluder`
+
+**What:** Marks an object as a "wall" that triggers the see-through effect on highlighted objects behind it.
+
+**How to add:**
+1. Add `HighlightSeeThroughOccluder` to any wall/obstacle
+2. The highlighted object behind it will show its see-through silhouette
+
+---
+
+### 5.6 `HighlightEffectBlocker`
+
+**What:** Cancels background outline/glow/overlay when a sprite or transparent object is highlighted. Useful for 2D or UI elements that shouldn't show background effects.
+
+---
+
+## 6. All Available Effects
+
+### 6.1 Outline
+
+Draws a colored edge around the object.
+
+| Property | Default | Description |
+|---|---|---|
+| `outline` | 1.0 | Intensity (0 = off) |
+| `outlineColor` | Black | Edge color (HDR supported) |
+| `outlineWidth` | 0.45 | Thickness of the outline |
+| `outlineQuality` | Medium | `Fastest`, `Medium`, `High`, `Highest` |
+| `outlineEdgeMode` | Exterior | `Exterior` (outer only) or `Any` (includes interior edges) |
+| `outlineContourStyle` | AroundVisibleParts | `AroundVisibleParts` or `AroundObjectShape` |
+| `outlineColorStyle` | SingleColor | `SingleColor` or `Gradient` |
+| `outlineIndependent` | false | Don't merge with other objects' outlines |
+| `constantWidth` | true | Size stays same regardless of distance |
+
+### 6.2 Outer Glow
+
+Soft luminous halo outside the object.
+
+| Property | Default | Description |
+|---|---|---|
+| `glow` | 0 | Intensity (0 = off) |
+| `glowWidth` | 0.4 | Size of the glow |
+| `glowQuality` | Medium | Quality level |
+| `glowHQColor` | Yellow-Green | Color in HQ mode |
+| `glowDithering` | 1.0 | Dithering amount (0 = solid) |
+| `glowAnimationSpeed` | 1.0 | Pulsing speed |
+| `glowBlendPasses` | true | Overlap glow passes |
+| `glowPasses` | GlowPassData[] | Array of offset/alpha/color per pass |
+
+### 6.3 Overlay
+
+Color wash that pulses over the mesh surface.
+
+| Property | Default | Description |
+|---|---|---|
+| `overlay` | 0 | Intensity (0 = off) |
+| `overlayColor` | Yellow | Overlay color (HDR) |
+| `overlayAnimationSpeed` | 1.0 | Pulse speed |
+| `overlayMinIntensity` | 0.5 | Minimum pulse brightness |
+| `overlayBlending` | 1.0 | Mix with object's natural color |
+| `overlayTexture` | null | Optional texture |
+| `overlayMode` | WhenHighlighted | `WhenHighlighted` or `Always` |
+
+### 6.4 Inner Glow
+
+Glow on the inside edges of the mesh.
+
+| Property | Default | Description |
+|---|---|---|
+| `innerGlow` | 0 | Intensity (0 = off) |
+| `innerGlowWidth` | 1.0 | Width of inner glow |
+| `innerGlowColor` | White | Color (HDR) |
+| `innerGlowBlendMode` | Additive | `Additive` or `AlphaBlending` |
+
+### 6.5 See-Through
+
+X-ray silhouette visible when object is behind occluders.
+
+| Property | Description |
+|---|---|
+| `seeThrough` | `WhenHighlighted`, `AlwaysWhenOccluded`, or `Never` |
+| `seeThroughIntensity` | Silhouette brightness |
+| `seeThroughTintColor` | Silhouette color |
+| `seeThroughBorderWidth` | Border around silhouette |
+| `seeThroughBorderColor` | Border color |
+| `seeThroughMaxDepth` | Max visibility depth |
+
+### 6.6 Target FX
+
+Animated sprite on the ground beneath the highlighted object (like an RTS selection circle).
+
+| Property | Description |
+|---|---|
+| `targetFX` | Enable/disable |
+| `targetFXTexture` | The sprite to display |
+| `targetFXColor` | Tint color |
+| `targetFXRotationSpeed` | Spin speed |
+| `targetFXInitialScale` | Start size |
+| `targetFXEndScale` | End size |
+| `targetFXAlignToGround` | Snap to terrain |
+| `targetFXTransitionDuration` | Animation time |
+
+### 6.7 Icon FX
+
+3D mesh icon floating above the object.
+
+| Property | Description |
+|---|---|
+| `iconFX` | Enable/disable |
+| `iconFXMesh` | The 3D mesh to show |
+| `iconFXLightColor` | Lit side color |
+| `iconFXDarkColor` | Shadow side color |
+| `iconFXRotationSpeed` | Spin speed |
+
+### 6.8 Hit FX
+
+Instant flash feedback for damage.
+
+| Property | Description |
+|---|---|
+| `hitFxInitialIntensity` | Starting flash brightness |
+| `hitFxMode` | `Overlay`, `InnerGlow`, or `LocalHit` |
+| `hitFxFadeOutDuration` | How fast the flash fades |
+| `hitFxColor` | Flash color |
+| `hitFxRadius` | Radius for `LocalHit` mode |
+
+---
+
+## 7. Scene Setup — Step by Step
+
+### 7.1 Minimal Setup: Highlight a Single Object
+
+1. **Setup URP Renderer Feature** (see Section 3)
+2. Select your 3D object (must have `MeshRenderer`)
+3. Add Component → `HighlightEffect`
+4. In Inspector, set `highlighted = true` (checkbox)
+5. Adjust `outline`, `glow`, etc. to taste
+6. Press Play — you should see the effect
+
+### 7.2 Hover Highlight on Specific Objects
+
+1. Ensure objects have **Colliders**
+2. Add `HighlightEffect` + `HighlightTrigger` to each object
+3. On the Trigger, ensure `highlightOnHover = true`
+4. Press Play → hover mouse over objects
+
+### 7.3 Global Hover Highlight (Everything)
+
+1. Create empty GameObject → name it "HighlightManager"
+2. Add `HighlightManager` component (auto-adds `HighlightEffect`)
+3. Configure the `HighlightEffect` on the Manager — these become **default settings**
+4. Set `layerMask` to include your interactable layers
+5. Press Play → hover over any object in that layer
+
+### 7.4 Click-to-Select
+
+1. On `HighlightManager` (or `HighlightTrigger`), enable `selectOnClick`
+2. Optionally assign a `selectedProfile` for a different look when selected
+3. Enable `singleSelection` for one-at-a-time selection
+
+### 7.5 See-Through Setup
+
+1. Add `HighlightEffect` to the object you want to see through walls
+2. Set `seeThrough = WhenHighlighted`
+3. Add `HighlightSeeThroughOccluder` to any wall objects
+4. Walls must have Colliders
+
+### 7.6 Static Objects
+
+Objects marked as **Static** in Unity need a **MeshCollider** (can be disabled) to be highlighted, because Unity batches their meshes.
+
+---
+
+## 8. Profiles (Reusable Presets)
+
+### Creating a Profile
+
+1. Right-click in Project window → `Create → Highlight Plus Profile`
+2. Name it (e.g., `Profile_InteractableGlow`)
+3. Configure all settings on the profile asset
+4. Drag it into any `HighlightEffect.profile` slot
+
+### Sharing Profiles
+
+- Multiple objects can reference the same profile
+- Enable `profileSync` to auto-update all objects when profile changes
+- Use `ProfileLoad()` / `ProfileSave()` at runtime
+
+---
+
+## 9. C# API Reference
+
+### 9.1 Controlling Highlight
+
+```csharp
+HighlightEffect effect = GetComponent<HighlightEffect>();
+
+// Turn on/off
+effect.highlighted = true;
+effect.highlighted = false;
+
+// With fade
+effect.fadeInDuration = 0.3f;
+effect.fadeOutDuration = 0.3f;
+effect.highlighted = true;
+
+// Force refresh (after changing mesh, etc.)
+effect.Refresh();
+
+// Update material properties after changing settings via code
+effect.UpdateMaterialProperties();
+```
+
+### 9.2 Hit FX
+
+```csharp
+HighlightEffect effect = GetComponent<HighlightEffect>();
+
+// Simple hit flash
+effect.HitFX();
+
+// Custom hit flash
+effect.HitFX(Color.red, fadeOutDuration: 0.5f, initialIntensity: 1f);
+
+// Localized hit (at world position with radius)
+effect.HitFX(Color.red, 0.5f, 1f, hitPoint, 0.5f);
+```
+
+### 9.3 Target FX
+
+```csharp
+// Trigger target effect programmatically
+effect.TargetFX();
+```
+
+### 9.4 Icon FX
+
+```csharp
+// Trigger icon effect programmatically
+effect.IconFX();
+```
+
+### 9.5 Profile Management
+
+```csharp
+// Load profile at runtime
+effect.ProfileLoad(myProfile);
+
+// Save current settings to profile
+effect.ProfileSave(myProfile);
+```
+
+### 9.6 Events
+
+```csharp
+// On HighlightEffect:
+effect.OnObjectHighlightStart += (GameObject obj) => { return true; };
+effect.OnObjectHighlightEnd += (GameObject obj) => { return true; };
+
+// On HighlightManager:
+manager.OnObjectSelected += (GameObject obj) => { return true; };
+manager.OnObjectUnSelected += (GameObject obj) => { return true; };
+manager.OnObjectHighlightStart += (GameObject obj) => { return true; };
+manager.OnObjectHighlightEnd += (GameObject obj) => { return true; };
+manager.OnObjectHighlightStay += (GameObject obj) => { return true; }; // cancel current
+```
+
+### 9.7 Static Fields
+
+```csharp
+// Last highlighted / selected objects
+HighlightEffect lastHighlighted = HighlightEffect.lastHighlighted;
+HighlightEffect lastSelected = HighlightEffect.lastSelected;
+
+// Use unscaled time (for paused games)
+HighlightEffect.useUnscaledTime = true;
+```
+
+### 9.8 Selection Management (HighlightManager)
+
+```csharp
+HighlightManager mgr = HighlightManager.instance;
+
+mgr.SelectObject(targetTransform);
+mgr.UnselectObject(targetTransform);
+mgr.ToggleObject(targetTransform);
+
+// Read all selected
+foreach (var he in HighlightManager.selectedObjects) { ... }
+```
+
+---
+
+## 10. Common Recipes
+
+### Recipe: Outline Only (No Glow)
+
+```csharp
+effect.outline = 1f;
+effect.outlineColor = Color.white;
+effect.outlineWidth = 0.5f;
+effect.glow = 0;
+effect.overlay = 0;
+effect.innerGlow = 0;
+```
+
+### Recipe: Damage Flash
+
+```csharp
+void OnTakeDamage(Vector3 hitPoint)
+{
+    var effect = GetComponent<HighlightEffect>();
+    effect.HitFX(Color.red, 0.3f, 1f, hitPoint, 0.5f);
+}
+```
+
+### Recipe: Interactable Glow (Hover)
+
+1. Add `HighlightEffect` + `HighlightTrigger` to object
+2. Set: `outline=0`, `glow=1.5`, `glowHQColor=Color.cyan`
+3. The glow auto-activates on hover
+
+### Recipe: X-Ray Through Walls
+
+```csharp
+effect.seeThrough = SeeThroughMode.AlwaysWhenOccluded;
+effect.seeThroughIntensity = 0.8f;
+effect.seeThroughTintColor = new Color(0, 0.5f, 1f, 1f);
+```
+
+---
+
+## 11. Performance Tips
+
+1. **Use `Fastest` or `Medium` quality** unless you need pixel-perfect outlines
+2. **Increase `outlineDownsampling` / `glowDownsampling`** for cheaper effects
+3. **Enable `optimizeSkinnedMesh`** for characters (reduces draw calls)
+4. **Enable `GPUInstancing`** (on by default)
+5. **Use `combineMeshes`** when highlighting parent+children to reduce draw calls
+6. **Use profiles** — avoid per-frame property changes
+7. **Set `PerformanceMode = true`** on the Highlight Manager in production
+8. **Disable effects you don't use** (set intensity to 0)
+9. **Use LOD-friendly approach**: disable highlight on distant objects
+
+---
+
+## 12. Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| Nothing renders | Add Highlight Plus Renderer Feature to URP Forward Renderer |
+| Effect only in Game view, not Scene view | Enable "Show In Preview Camera" on the Renderer Feature |
+| Static objects not highlighting | Add MeshCollider (can be disabled) |
+| See-through not working | Add `HighlightSeeThroughOccluder` to walls; walls need Colliders |
+| Outline looks jagged | Increase `outlineQuality` to `High` or `Highest` |
+| Effects conflict with other assets | Enable "Clear Stencil" on the Renderer Feature |
+| Transparent objects don't trigger see-through | Use `Add Depth To Transparent Object` (menu: GameObject → Effects → Highlight Plus) |
+| VR single-pass issues | Use v7.0+ which supports Single Pass Instanced |
+| Flicker on overlapping geometry | Enable `outlineIndependent` or check normals option |
+
+---
+
+## 13. Folder Structure
+
+```
+HighlightPlus(URP unpacked)/
+├── Demo/              → Example scenes showing all effects
+├── Documentation/     → PDF documentation
+├── Editor/            → Custom inspectors
+│   ├── HighlightEffectEditor.cs
+│   ├── HighlightManagerEditor.cs
+│   ├── HighlightProfileEditor.cs
+│   ├── HighlightTriggerEditor.cs
+│   └── HighlightSeeThroughOccluderEditor.cs
+└── Runtime/
+    ├── Resources/     → Shader files (.shader)
+    └── Scripts/
+        ├── HighlightEffect.cs              → Main component (all effects)
+        ├── HighlightEffectActions.cs       → HitFX, TargetFX, IconFX methods
+        ├── HighlightEffectBlocker.cs       → Cancel effects on transparent objects
+        ├── HighlightEffectOccluderManager.cs → See-through occluder management
+        ├── HighlightManager.cs             → Global scene highlighting
+        ├── HighlightPlusRenderPassFeature.cs → URP Renderer Feature
+        ├── HighlightProfile.cs             → ScriptableObject preset
+        ├── HighlightSeeThroughOccluder.cs  → Mark walls for see-through
+        ├── HighlightTrigger.cs             → Auto hover/click trigger
+        ├── InputProxy.cs                   → Input system abstraction
+        └── Misc.cs, RenderingUtils.cs, ShaderParams.cs, VRCheck.cs
+```
+
+---
+
+## Enums Reference
+
+```csharp
+// Quality levels for outline/glow
+enum QualityLevel { Fastest, Medium, High, Highest }
+
+// Who to highlight
+enum TargetOptions { Children, OnlyThisObject, RootToChildren, LayerInScene, LayerInChildren, Scripting }
+
+// When effect is visible
+enum Visibility { Normal, AlwaysOnTop, OnlyWhenOccluded }
+
+// See-through behavior
+enum SeeThroughMode { WhenHighlighted, AlwaysWhenOccluded, Never }
+
+// Outline edge rendering
+enum OutlineEdgeMode { Exterior, Any }
+enum ContourStyle { AroundVisibleParts, AroundObjectShape }
+
+// Color options
+enum ColorStyle { SingleColor, Gradient }
+
+// Blend modes
+enum GlowBlendMode { Additive, AlphaBlending }
+enum InnerGlowBlendMode { Additive, AlphaBlending }
+
+// Hit effect style
+enum HitFxMode { Overlay, InnerGlow, LocalHit }
+
+// Trigger mode
+enum TriggerMode { ColliderEventsOnlyOnThisObject, RaycastOnThisObjectAndChildren, Volume }
+
+// Raycast source
+enum RayCastSource { MousePosition, CameraDirection }
+```
+
+---
+
+## 14. Real-World Example: Replacing a Custom Fresnel Highlighter
+
+> This section shows how to migrate from a **custom URP Renderer Feature + Shader Graph fresnel approach** (as used in Phase B/D of this project) to Highlight Plus. This is the exact use case in our codebase.
+
+### 14.1 The Problem (What Phase B Does Without Highlight Plus)
+
+Phase B implements `FresnelHighlighter.cs` — a temporary highlighting system that:
+
+1. **Every frame** raycasts from the camera forward
+2. If the ray hits a tool → swaps the object's **layer** to a special "Highlighted" layer (31)
+3. If the ray hits a grabbable → same layer swap, different color
+4. A **URP Renderer Feature** (Render Objects) is configured to render layer 31 with an additive fresnel shader graph material
+5. Next frame, `ClearAll()` restores original layers
+
+**This requires:**
+- A custom "Highlighted" layer in Project Settings
+- A custom Shader Graph (`Highlight_Fresnel_Additive`)
+- A custom material (`M_Highlight_Fresnel`)
+- A URP Render Objects renderer feature configured for that layer
+- Layer swapping every frame (fragile, interferes with physics layers)
+- `MaterialPropertyBlock` for per-object color overrides
+
+**Phase D extends** the same system with building/wrench highlight colors.
+
+### 14.2 The Migration (Replace With Highlight Plus)
+
+Highlight Plus eliminates **all** of the above complexity. No custom layers, no shader graph, no renderer feature configuration (beyond adding the Highlight Plus feature itself).
+
+### 14.3 The Replacement Script
+
+```csharp
+using UnityEngine;
+using HighlightPlus;
+
+/// <summary>
+/// I outline whatever the player looks at using Highlight Plus.
+/// Every Update I raycast from the camera. If I hit a tool/grabbable/building,
+/// I enable HighlightEffect on it with the appropriate color.
+/// ClearAll disables the previous highlight each frame.
+///
+/// SETUP REQUIRED:
+///   1. URP Renderer Data → Add Renderer Feature → Highlight Plus
+///   2. Create HighlightProfile assets for each color preset (optional but recommended)
+///   3. Assign profiles or colors in inspector
+///
+/// Replaces: FresnelHighlighter.cs (Phase B) + all custom layer/shader/material setup
+/// </summary>
+public class HighlightPlusHighlighter : MonoBehaviour
+{
+    [Header("Raycast")]
+    [SerializeField] Camera _cam;
+    [SerializeField] float _interactRange = 2f;
+    [SerializeField] LayerMask _interactLayerMask;
+
+    [Header("Highlight Colors")]
+    [SerializeField] Color _toolColor = new Color(0.25f, 0.85f, 1f, 1f);
+    [SerializeField] Color _grabbableColor = new Color(0.25f, 0.85f, 1f, 1f);
+    // Phase D:
+    // [SerializeField] Color _buildingColor = new Color(0.25f, 0.85f, 1f, 1f);
+    // [SerializeField] Color _wrenchEnableColor = new Color(0.3f, 1f, 0.3f, 1f);
+    // [SerializeField] Color _wrenchDisableColor = new Color(1f, 0.3f, 0.3f, 1f);
+
+    [Header("Highlight Settings")]
+    [SerializeField] float _outlineWidth = 0.5f;
+    [SerializeField] float _glowIntensity = 1.5f;
+
+    HighlightEffect currentHighlight;
+    GameObject currentTarget;
+
+    void Update()
+    {
+        ClearCurrent();
+        OutlineLookedAtThing();
+    }
+
+    void ClearCurrent()
+    {
+        if (currentHighlight != null)
+        {
+            currentHighlight.highlighted = false;
+            currentHighlight = null;
+            currentTarget = null;
+        }
+    }
+
+    void OutlineLookedAtThing()
+    {
+        if (!Physics.Raycast(_cam.transform.position, _cam.transform.forward,
+            out RaycastHit hit, _interactRange, _interactLayerMask))
+            return;
+
+        // → Check for tool
+        if (hit.collider.GetComponentInParent<BaseHeldTool>() != null)
+        {
+            ApplyHighlight(hit.collider.gameObject, _toolColor);
+            return;
+        }
+
+        // → Check for grabbable
+        if (hit.collider.HasTag(TagType.Grabbable))
+        {
+            ApplyHighlight(hit.collider.gameObject, _grabbableColor);
+            return;
+        }
+
+        // Phase D: Check for building
+        // var building = hit.collider.GetComponentInParent<BuildingObject>();
+        // if (building != null && !building.IsGhost)
+        // {
+        //     ApplyHighlight(hit.collider.gameObject, _buildingColor);
+        //     return;
+        // }
+    }
+
+    void ApplyHighlight(GameObject target, Color color)
+    {
+        // → Get or add HighlightEffect
+        HighlightEffect effect = target.GetComponent<HighlightEffect>();
+        if (effect == null)
+            effect = target.AddComponent<HighlightEffect>();
+
+        // → Configure effect
+        effect.effectGroup = TargetOptions.Children;
+        effect.outline = 1f;
+        effect.outlineColor = color;
+        effect.outlineWidth = _outlineWidth;
+        effect.outlineQuality = QualityLevel.High;
+        effect.glow = _glowIntensity;
+        effect.glowHQColor = color;
+        effect.glowWidth = 0.4f;
+        effect.constantWidth = true;
+
+        // → Turn on
+        effect.highlighted = true;
+
+        currentHighlight = effect;
+        currentTarget = target;
+    }
+}
+```
+
+### 14.4 What Was Removed vs What Highlight Plus Handles
+
+| Old System (FresnelHighlighter) | Highlight Plus Replacement |
+|---|---|
+| Custom "Highlighted" layer (slot 31) | **Not needed** — no layer swapping at all |
+| Shader Graph `Highlight_Fresnel_Additive` | **Not needed** — Highlight Plus has its own shaders |
+| Material `M_Highlight_Fresnel` | **Not needed** — effect generates materials internally |
+| URP Render Objects renderer feature | **Replaced** by Highlight Plus renderer feature (one-time setup) |
+| `UtilsPhaseB.SetLayerRecursively()` per frame | **Not needed** — `effect.highlighted = true/false` |
+| `MaterialPropertyBlock` for per-object color | **Not needed** — `effect.outlineColor = color` |
+| 97 lines of layer-swap code | ~30 lines of Highlight Plus API calls |
+
+### 14.5 Color Mapping (Phase B → D)
+
+| Game Context | Old Color | Highlight Plus Setting |
+|---|---|---|
+| Tools, terminals | Cyan `(0.25, 0.85, 1)` | `outlineColor = cyan`, `glowHQColor = cyan` |
+| Grabbable objects | Cyan `(0.25, 0.85, 1)` | Same — or use a different shade |
+| Buildings (Phase D, hammer) | Cyan `(0.25, 0.85, 1)` | Same |
+| Wrench enable (Phase D) | Green `(0.3, 1, 0.3)` | `outlineColor = green` |
+| Wrench disable (Phase D) | Red `(1, 0.3, 0.3)` | `outlineColor = red` |
+
+### 14.6 Profile-Based Approach (Cleaner)
+
+Instead of setting colors in code, create **HighlightProfile** assets:
+
+1. Create `Profile_Tool.asset` → outline=1, glow=1.5, color=cyan
+2. Create `Profile_WrenchEnable.asset` → outline=1, glow=1.5, color=green
+3. Create `Profile_WrenchDisable.asset` → outline=1, glow=1.5, color=red
+4. In the highlighter, swap profiles:
+
+```csharp
+[SerializeField] HighlightProfile _toolProfile;
+[SerializeField] HighlightProfile _wrenchEnableProfile;
+[SerializeField] HighlightProfile _wrenchDisableProfile;
+
+void ApplyHighlight(GameObject target, HighlightProfile profile)
+{
+    HighlightEffect effect = target.GetComponent<HighlightEffect>();
+    if (effect == null)
+        effect = target.AddComponent<HighlightEffect>();
+
+    effect.ProfileLoad(profile);
+    effect.highlighted = true;
+    currentHighlight = effect;
+}
+```
+
+### 14.7 Bonus: See-Through for Occluded Objects
+
+Something the old fresnel system **couldn't do at all** — Highlight Plus can show objects behind walls:
+
+```csharp
+effect.seeThrough = SeeThroughMode.WhenHighlighted;
+effect.seeThroughIntensity = 0.5f;
+effect.seeThroughTintColor = new Color(0, 0.5f, 1f, 0.5f);
+```
+
+Add `HighlightSeeThroughOccluder` to wall objects, and highlighted objects become visible through them — useful for tools behind crates, ores behind rocks, etc.
+
+<!-- ==== FILE: Documentation/INDEX.md ==== -->
+# Imported Assets Analysis — Documentation Index
+
+> **Location:** `importedAssetsAnalysis/Documentation/`  
+> **Source data:** `importedAssetsAnalysis/assetsAnalysis-main/Classify/` and `GUI/`
+
+---
+
+## Package Documentation
+
+| # | Document | Package | Lines | Covers |
+|---|---|---|---|---|
+| 1 | [HighlightPlus.md](HighlightPlus.md) | **Highlight Plus** (URP) | ~925 | Outline/glow/overlay/see-through effects, HighlightEffect, HighlightManager, HighlightTrigger, Profiles, Hit FX, Target FX, Icon FX, full C# API, **real-world Phase B/D migration from FresnelHighlighter** |
+| 2 | [Feel-MMFeedbacks.md](Feel-MMFeedbacks.md) | **Feel** (MMFeedbacks + MMTools + Nice Vibrations) | ~1660 | MMF_Player, 80+ feedback types, Shakers, Springs (31 components), Floating Text, Object Pooling, Singletons, Event System, Save/Load, Sound Manager, Scene Loading, Time Manager, State Machine, Tweens, Extensions, Math helpers, MMVFX, Health Bars, Post-Processing integration, Cinemachine integration, TMP integration, Nice Vibrations haptics, Custom Feedbacks, full architecture workflow |
+| 3 | [MeshAnimator.md](MeshAnimator.md) | **Mesh Animator** (Massive Crowd) | ~550 | Snapshot vs Shader mode, Baking pipeline, MeshAnimatorBase API, LOD system, Exposed Transforms, Root Motion, Animation Events, Crossfading, MeshAnimatorManager, crowd spawning |
+| 4 | [TextAnimator.md](TextAnimator.md) | **Text Animator** by Febucci | ~500 | TMP per-character animation, 12 behavior effects, 8 appearance effects, Typewriter system, Action tags, rich-text tag syntax, custom effects via ScriptableObjects, dialogue system integration |
+| 5 | [GUI-Assets.md](GUI-Assets.md) | **GUI Art Packs** (5 packs) | ~200 | UI Bundle Free (7 themes), Animated Tree, Free Environment, Web Button, Retro Windows GUI, sprite import workflow, 9-slice setup |
+
+---
+
+## Quick Navigation by Use Case
+
+### "I want to highlight objects when the player looks at them"
+→ **[HighlightPlus.md](HighlightPlus.md)** — Section 7 (Scene Setup), Section 14 (Phase B/D migration)
+
+### "I want camera shake, screen flash, hit stop effects"
+→ **[Feel-MMFeedbacks.md](Feel-MMFeedbacks.md)** — Section 7 (Scene Setup), Section 14 (Common Recipes)
+
+### "I want bouncy spring animations on UI elements"
+→ **[Feel-MMFeedbacks.md](Feel-MMFeedbacks.md)** — Section 20 (Springs Deep Dive)
+
+### "I want floating damage numbers"
+→ **[Feel-MMFeedbacks.md](Feel-MMFeedbacks.md)** — Section 19 (Floating Text System)
+
+### "I want to render 1000+ animated characters"
+→ **[MeshAnimator.md](MeshAnimator.md)** — Full guide
+
+### "I want typewriter dialogue text with effects"
+→ **[TextAnimator.md](TextAnimator.md)** — Section 6-7 (Setup + Typewriter)
+
+### "I want object pooling, singletons, save/load"
+→ **[Feel-MMFeedbacks.md](Feel-MMFeedbacks.md)** — Section 18 (MMTools Core Utilities)
+
+### "I want sound management with playlists"
+→ **[Feel-MMFeedbacks.md](Feel-MMFeedbacks.md)** — Section 18.5 (Sound Manager)
+
+### "I want haptic feedback on mobile"
+→ **[Feel-MMFeedbacks.md](Feel-MMFeedbacks.md)** — Section 11 (Nice Vibrations)
+
+### "I need UI sprites for my game"
+→ **[GUI-Assets.md](GUI-Assets.md)** — Section 2-6 (Asset descriptions)
+
+---
+
+## Package Relationship Map
+
+```
+YOUR GAME CODE
+    │
+    ├── HighlightPlus ──────── Object highlighting (outline, glow, see-through)
+    │   └── URP Renderer Feature (required)
+    │
+    ├── Feel ───────────────── Game juice orchestration
+    │   ├── MMFeedbacks ────── Feedback player + 80+ effects + shakers + springs
+    │   ├── MMTools ────────── Utilities (pooling, singletons, save/load, audio, events)
+    │   └── Nice Vibrations ── Mobile haptic feedback
+    │
+    ├── Text Animator ──────── Animated text effects + typewriter
+    │   └── TextMeshPro (required)
+    │
+    ├── Mesh Animator ──────── Massive crowd rendering
+    │   └── Custom shaders (Shader mode only)
+    │
+    └── GUI Assets ─────────── Art sprites (no code)
+```
+
+<!-- ==== FILE: Documentation/MeshAnimator.md ==== -->
+# Mesh Animator (Massive Crowd) — Complete Beginner Guide
+
+> **Package:** Mesh Animator by Flick Shot Games  
+> **Purpose:** High-performance mesh-based animation for massive crowds  
+> **Namespace:** `FSG.MeshAnimator`  
+> **Pipeline:** Works with any (Built-in, URP, HDRP)
+
+---
+
+## Table of Contents
+
+1. [What Is Mesh Animator?](#1-what-is-mesh-animator)
+2. [Why Not Use Unity's Animator?](#2-why-not-use-unitys-animator)
+3. [How It Works (The Big Idea)](#3-how-it-works-the-big-idea)
+4. [Two Modes: Snapshot vs Shader](#4-two-modes-snapshot-vs-shader)
+5. [Installation & Setup](#5-installation--setup)
+6. [Baking Animations](#6-baking-animations)
+7. [Scene Setup — Step by Step](#7-scene-setup--step-by-step)
+8. [Core Components](#8-core-components)
+9. [C# API Reference](#9-c-api-reference)
+10. [LOD System](#10-lod-system)
+11. [Exposed Transforms](#11-exposed-transforms)
+12. [Root Motion](#12-root-motion)
+13. [Animation Events](#13-animation-events)
+14. [Crossfading](#14-crossfading)
+15. [MeshAnimatorManager](#15-meshanimatormanager)
+16. [Performance Tips](#16-performance-tips)
+17. [Common Recipes](#17-common-recipes)
+18. [Troubleshooting](#18-troubleshooting)
+19. [Folder Structure](#19-folder-structure)
+
+---
+
+## 1. What Is Mesh Animator?
+
+Mesh Animator is a **mesh-swapping animation system** designed for rendering **hundreds or thousands** of animated characters with minimal CPU and GPU cost. Instead of using Unity's skinned mesh rendering (SkinnedMeshRenderer + Animator), it **pre-bakes** all animation frames into mesh snapshots or shader textures, then swaps between them at runtime.
+
+Think of it like a **sprite sheet, but for 3D meshes** — each "frame" is a complete mesh with vertices already in their final positions.
+
+---
+
+## 2. Why Not Use Unity's Animator?
+
+| Feature | Unity Animator | Mesh Animator |
+|---|---|---|
+| **CPU cost per character** | High (skeletal calculations) | Very low (just swap mesh) |
+| **GPU instancing** | Not possible with SkinnedMesh | Fully supported |
+| **1000+ characters** | Unplayable (<5 FPS) | Smooth (60+ FPS) |
+| **Animation blending** | Full blend trees | Simple crossfade only |
+| **IK / Ragdoll** | Supported | Not supported |
+| **Memory usage** | Low (one mesh + bones) | Higher (mesh per frame) |
+
+**Use Mesh Animator when:**
+- You need massive crowds (NPCs, zombies, soldiers, animals)
+- Characters don't need complex blend trees or IK
+- Performance is critical (mobile, VR, large battles)
+
+**Don't use it when:**
+- You need smooth animation blending
+- Characters need IK (foot placement, hand reaching)
+- You need ragdoll physics
+- Only a few characters on screen
+
+---
+
+## 3. How It Works (The Big Idea)
+
+```
+BAKE TIME (Editor):
+  Animator + SkinnedMeshRenderer
+      ↓
+  For each animation clip, sample every frame
+      ↓
+  Save each frame as a mesh snapshot (vertices, normals, tangents)
+      ↓
+  Store as MeshAnimation asset (ScriptableObject)
+
+RUNTIME (Game):
+  MeshAnimator component
+      ↓
+  Each frame: swap MeshFilter.mesh to the pre-baked frame
+      ↓
+  GPU draws a regular MeshRenderer (not Skinned!)
+      ↓
+  GPU instancing works → massive batching → amazing performance
+```
+
+Key insight: **MeshRenderer is way cheaper than SkinnedMeshRenderer** because there's no bone deformation on the GPU. And since all instances share the same mesh data, GPU instancing kicks in.
+
+---
+
+## 4. Two Modes: Snapshot vs Shader
+
+### 4.1 Snapshot Mode
+
+- **How:** Pre-bakes mesh data (vertices/normals) into memory. At runtime, swaps the mesh each frame.
+- **Pro:** Simple, works everywhere, supports all shaders
+- **Con:** Uses more memory (one mesh per frame per animation)
+- **Best for:** Small to medium crowds, mobile
+
+### 4.2 Shader Mode
+
+- **How:** Bakes animation data into textures. A custom shader reads the texture to deform vertices on the GPU.
+- **Pro:** Extremely fast, very low memory, perfect GPU instancing
+- **Con:** Requires special shaders (provided), can't use custom material shaders without modification
+- **Best for:** Massive crowds (1000+), when you control the shader
+
+### Key Classes
+
+| Mode | Animation Asset | Animator Component |
+|---|---|---|
+| Snapshot | `SnapshotMeshAnimation` | `SnapshotMeshAnimator` |
+| Shader | `ShaderMeshAnimation` | `ShaderMeshAnimator` |
+
+Both inherit from `MeshAnimationBase` / `MeshAnimatorBase`.
+
+---
+
+## 5. Installation & Setup
+
+### 5.1 Import
+
+1. Import the Mesh Animator package into your project
+2. Folders: `Scripts/`, `Editor/`, `Shaders/`, `ShaderGraph/`, `Examples/`
+
+### 5.2 Prerequisites
+
+Your character model needs:
+- An **Animator** component with animation clips
+- A **SkinnedMeshRenderer** component
+- Animation clips (can be from Mixamo, custom, etc.)
+
+---
+
+## 6. Baking Animations
+
+This is the most important step — converting skeletal animations into mesh data.
+
+### 6.1 Opening the Baker
+
+1. Menu: `Window → Mesh Animator → Mesh Animator Baker`
+2. The baker window opens
+
+### 6.2 Baker Settings
+
+| Setting | Purpose |
+|---|---|
+| **Prefab** | Drag your character prefab here (must have Animator + SkinnedMeshRenderer) |
+| **Animation Clips** | Add all animation clips to bake |
+| **FPS** | Frames per second to bake (lower = less memory, less smooth) |
+| **Frame Skip** | Skip every N frames (1 = no skip, 2 = half the frames) |
+| **Output Path** | Where to save baked assets |
+| **Mode** | Snapshot or Shader |
+
+### 6.3 Recommended FPS
+
+| Crowd Size | Recommended FPS | Reason |
+|---|---|---|
+| < 100 | 30 | Smooth enough, manageable memory |
+| 100–500 | 15–20 | Good balance |
+| 500–2000 | 10–15 | Memory is priority |
+| 2000+ | 8–12 | Minimal memory, use LOD FPS too |
+
+### 6.4 Baking Process
+
+1. Set prefab, clips, FPS
+2. Click **"Bake"**
+3. Baker creates:
+   - **MeshAnimation assets** (one per clip) — ScriptableObject files
+   - **Base mesh** — the T-pose or first-frame mesh
+4. These assets are what you assign to the runtime MeshAnimator
+
+---
+
+## 7. Scene Setup — Step by Step
+
+### 7.1 Basic: One Animated Character
+
+1. **Create empty GameObject** in scene → name it "Crowd_Unit"
+2. Add components:
+   - `MeshFilter` (auto-added by MeshAnimator)
+   - `MeshRenderer` → assign your character material
+   - `SnapshotMeshAnimator` (or `ShaderMeshAnimator`)
+3. On the MeshAnimator:
+   - `baseMesh` → drag the baked base mesh
+   - `defaultAnimation` → drag the idle MeshAnimation asset
+   - `animations` → add all baked MeshAnimation assets
+4. Press Play → character animates!
+
+### 7.2 Spawning a Crowd
+
+```csharp
+using FSG.MeshAnimator;
+
+public class CrowdSpawner : MonoBehaviour
+{
+    [SerializeField] GameObject crowdUnitPrefab;
+    [SerializeField] int count = 500;
+    [SerializeField] float spawnRadius = 50f;
+    
+    void Start()
+    {
+        for (int i = 0; i < count; i++)
+        {
+            Vector3 pos = Random.insideUnitSphere * spawnRadius;
+            pos.y = 0;
+            GameObject unit = Instantiate(crowdUnitPrefab, pos, Quaternion.identity);
+            
+            var animator = unit.GetComponent<MeshAnimatorBase>();
+            animator.Play("Walk");
+            animator.speed = Random.Range(0.8f, 1.2f);
+        }
+    }
+}
+```
+
+### 7.3 Shader Mode Setup
+
+1. Bake with **Shader** mode selected
+2. On the character material, use one of the provided shaders:
+   - `MeshAnimator/Standard` (Built-in)
+   - `MeshAnimator/URP/Lit` (URP)
+   - Use ShaderGraph variants from `ShaderGraph/` folder
+3. The shader reads a **texture** containing vertex positions
+4. Assign the baked texture to the material
+
+---
+
+## 8. Core Components
+
+### 8.1 MeshAnimatorBase (Abstract Base)
+
+Both `SnapshotMeshAnimator` and `ShaderMeshAnimator` inherit from this.
+
+**Inspector Properties:**
+
+| Property | Type | Purpose |
+|---|---|---|
+| `baseMesh` | Mesh | The base mesh (T-pose or first frame) |
+| `defaultAnimation` | IMeshAnimation | Animation to play by default |
+| `animations` | IMeshAnimation[] | All available animations |
+| `speed` | float | Playback speed multiplier (1 = normal) |
+| `FPS` | int | Frames per second (default: 30) |
+| `playAutomatically` | bool | Auto-play default animation on Start |
+| `resetOnEnable` | bool | Reset animation when GameObject re-enables |
+| `updateWhenOffscreen` | bool | Keep animating even when not visible |
+| `eventReciever` | GameObject | Object that receives animation events |
+| `skipLastLoopFrame` | bool | Skip duplicate frame on loop seam |
+| `LODCamera` | Transform | Camera for LOD distance calculation |
+| `LODLevels` | LODLevel[] | LOD settings (FPS reduction by distance) |
+
+**Read-Only State:**
+
+| Property | Type | Purpose |
+|---|---|---|
+| `currentFrame` | int | Current frame index |
+| `currentAnimation` | MeshAnimationBase | Currently playing animation |
+| `meshFilter` | MeshFilter | The MeshFilter component |
+| `meshRenderer` | MeshRenderer | The MeshRenderer component |
+
+### 8.2 SnapshotMeshAnimator
+
+Concrete implementation for Snapshot mode. Swaps mesh data every frame.
+
+### 8.3 ShaderMeshAnimator
+
+Concrete implementation for Shader mode. Updates shader texture indices.
+
+### 8.4 MeshAnimationBase
+
+ScriptableObject that holds baked animation data.
+
+| Property | Type | Purpose |
+|---|---|---|
+| `AnimationName` | string | Name of the animation |
+| `Length` | float | Duration in seconds |
+| `TotalFrames` | int | Total number of baked frames |
+| `wrapMode` | WrapMode | `Loop`, `Once`, `PingPong`, `ClampForever` |
+| `playbackSpeed` | float | Per-animation speed multiplier |
+| `FrameSkip` | int | Frames to skip (for LOD) |
+| `ExposedTransforms` | string[] | Named transforms to track |
+| `RootMotionMode` | RootMotionMode | Root motion behavior |
+| `events` | MeshAnimationEvent[] | Events at specific frames |
+
+### 8.5 MeshAnimatorManager
+
+Singleton that **manages all MeshAnimator update ticks** centrally.
+
+- All MeshAnimators register with this manager
+- Manager calls `UpdateTick()` on each active animator
+- This avoids per-object `Update()` overhead (huge for 1000+ objects)
+- **You don't need to add this manually** — it creates itself automatically
+
+---
+
+## 9. C# API Reference
+
+### 9.1 Playing Animations
+
+```csharp
+MeshAnimatorBase animator = GetComponent<SnapshotMeshAnimator>();
+// or GetComponent<ShaderMeshAnimator>();
+
+// Play by name
+animator.Play("Walk");
+
+// Play by name at specific normalized time (0-1)
+animator.Play("Walk", 0.5f); // start at halfway
+
+// Play by index
+animator.Play(0);
+
+// Play a random animation from a list
+animator.PlayRandom("Idle", "IdleVariant1", "IdleVariant2");
+
+// Queue an animation (plays after current one finishes)
+animator.PlayQueued("Death");
+
+// Resume paused animation
+animator.Play();
+```
+
+### 9.2 Pausing & Restarting
+
+```csharp
+// Pause
+animator.Pause();
+
+// Restart current animation from beginning
+animator.RestartAnim();
+```
+
+### 9.3 Crossfading
+
+```csharp
+// Crossfade by name (0.1s default blend time)
+animator.Crossfade("Run");
+
+// Crossfade with custom blend duration
+animator.Crossfade("Run", 0.3f);
+
+// Crossfade by index
+animator.Crossfade(2, 0.2f);
+```
+
+### 9.4 Time Control
+
+```csharp
+// Set playback time (in seconds)
+animator.SetTime(1.5f);
+
+// Set playback time, normalized (0-1)
+animator.SetTimeNormalized(0.5f); // halfway
+
+// Set with instant visual update
+animator.SetTime(1.5f, instantUpdate: true);
+
+// Change speed
+animator.speed = 2f;  // double speed
+animator.speed = -1f; // play backwards
+```
+
+### 9.5 Getting Animation Info
+
+```csharp
+// Get animation clip by name
+IMeshAnimation clip = animator.GetClip("Walk");
+float length = clip.Length;
+int frames = clip.TotalFrames;
+string name = clip.AnimationName;
+
+// Current state
+int frame = animator.currentFrame;
+MeshAnimationBase currentAnim = animator.currentAnimation;
+```
+
+### 9.6 Callbacks
+
+```csharp
+// Animation finished
+animator.OnAnimationFinished = (string animName) =>
+{
+    Debug.Log($"Animation '{animName}' finished!");
+};
+
+// Frame updated
+animator.OnFrameUpdated = () =>
+{
+    // Called every frame the animation advances
+};
+
+// Visibility changed
+animator.OnVisibilityChanged = (bool visible) =>
+{
+    Debug.Log($"Now {(visible ? "visible" : "hidden")}");
+};
+```
+
+### 9.7 Prepopulating Crossfade Pool
+
+```csharp
+// Pre-allocate meshes for crossfading (reduces GC during gameplay)
+animator.PrepopulateCrossfadePool(5);
+```
+
+---
+
+## 10. LOD System
+
+Mesh Animator has a built-in LOD system that **reduces animation FPS based on distance** from the camera.
+
+### 10.1 Setting Up LOD
+
+On the MeshAnimator Inspector, expand `LOD Levels` and add entries:
+
+| LOD Level | FPS | Distance |
+|---|---|---|
+| Level 0 | 15 | 20 |
+| Level 1 | 8 | 50 |
+| Level 2 | 4 | 100 |
+
+**Meaning:**
+- Objects closer than 20 units → full FPS (30 from the `FPS` property)
+- Objects 20–50 units away → 15 FPS
+- Objects 50–100 units away → 8 FPS
+- Objects 100+ units away → 4 FPS
+
+### 10.2 LOD Camera
+
+- `LODCamera` field specifies which camera to measure distance from
+- If null, automatically uses the first camera found
+- For VR, set this to the HMD camera
+
+### 10.3 Why LOD Matters
+
+At distance, the player can't tell if a character updates at 30fps or 8fps. This **massively** reduces CPU work for distant crowds.
+
+---
+
+## 11. Exposed Transforms
+
+Exposed Transforms let you **track the position of specific bones** even though there's no skeleton at runtime.
+
+### 11.1 Use Cases
+
+- Attach a weapon to a hand bone
+- Place a health bar above the head bone
+- Emit particles from a foot bone
+
+### 11.2 How To Set Up
+
+1. In the Baker, specify **Exposed Transforms** (bone names to track)
+2. Bake as normal — the baker records transform matrices per frame
+3. At runtime, create **child GameObjects** with matching names
+4. The MeshAnimator automatically moves these child transforms to match the baked bone position
+
+### 11.3 Example
+
+```
+BakedCharacter (MeshAnimator)
+├── RightHand       ← child named same as exposed bone
+│   └── Sword       ← your weapon model
+├── Head            ← another exposed bone
+│   └── HealthBar
+```
+
+The `RightHand` child will automatically move to where the right hand bone was during baking.
+
+---
+
+## 12. Root Motion
+
+### 12.1 Root Motion Modes
+
+| Mode | Behavior |
+|---|---|
+| `None` | No root motion applied |
+| `AppliedToTransform` | Root motion from animation moves the transform |
+
+### 12.2 Setup
+
+1. In Baker, enable root motion recording for clips that need it
+2. On the MeshAnimation asset, set `rootMotionMode = AppliedToTransform`
+3. The character's transform moves based on baked root motion data
+
+---
+
+## 13. Animation Events
+
+You can fire events at specific frames of the animation.
+
+### 13.1 Setup
+
+1. On the `MeshAnimation` asset, add events in `events` array
+2. Each event has:
+   - `frame` — frame number to fire at
+   - `functionName` — method name to call
+   - `stringParameter`, `floatParameter`, `intParameter` — optional parameters
+
+### 13.2 Receiving Events
+
+Set `eventReciever` on the MeshAnimator to the GameObject that has the script with the matching method:
+
+```csharp
+public class CharacterEvents : MonoBehaviour
+{
+    public void OnFootstep()
+    {
+        // Play footstep sound
+    }
+    
+    public void OnAttackHit(string hitType)
+    {
+        // Deal damage
+    }
+}
+```
+
+---
+
+## 14. Crossfading
+
+Crossfading smoothly blends between two animations over a short duration.
+
+### 14.1 How It Works
+
+1. When crossfade starts, it creates an intermediate mesh that interpolates between the ending pose of animation A and the starting pose of animation B
+2. Over `speed` seconds, the blend factor goes from 0→1
+3. Uses exposed transform interpolation if available
+
+### 14.2 Pool Preallocation
+
+Crossfading allocates temporary meshes. To avoid GC spikes:
+
+```csharp
+animator.PrepopulateCrossfadePool(3); // pre-allocate 3 crossfade meshes
+```
+
+---
+
+## 15. MeshAnimatorManager
+
+The `MeshAnimatorManager` is a **centralized update loop** for all MeshAnimators in the scene.
+
+### 15.1 How It Works
+
+- Auto-creates as a singleton
+- All MeshAnimators call `MeshAnimatorManager.AddAnimator(this)` on enable
+- All MeshAnimators call `MeshAnimatorManager.RemoveAnimator(this)` on disable
+- Manager calls `UpdateTick(Time.time)` on each registered animator
+
+### 15.2 Why Centralized?
+
+Having 1000 individual `Update()` calls is expensive. A single manager iterating an array is much faster.
+
+### 15.3 You Don't Need To Do Anything
+
+This is automatic. The manager creates itself, and animators register/unregister themselves.
+
+---
+
+## 16. Performance Tips
+
+### 16.1 General Tips
+
+1. **Use Shader mode** for maximum performance (1000+ characters)
+2. **Enable GPU instancing** on materials
+3. **Use LOD levels** — 4 FPS at distance is indistinguishable from 30 FPS
+4. **Lower baked FPS** for non-hero characters (15 FPS is usually fine)
+5. **Use `Frame Skip`** in the baker to reduce memory
+6. **Disable `updateWhenOffscreen`** (default) — offscreen characters don't animate
+7. **Pre-populate crossfade pool** if crossfading frequently
+8. **Share materials** — all instances using the same material = one draw call (with instancing)
+
+### 16.2 Memory Guidelines
+
+| Characters | Animations | Baked FPS | Approx Memory |
+|---|---|---|---|
+| 100 | 5 clips | 30 | ~50–100 MB |
+| 500 | 5 clips | 15 | ~100–200 MB |
+| 2000 | 3 clips | 10 | ~200–400 MB |
+
+Memory depends heavily on mesh vertex count. Reduce vertex count for crowd models.
+
+### 16.3 Comparison
+
+| Scenario | Animator (CPU) | MeshAnimator Snapshot (CPU) | MeshAnimator Shader (CPU) |
+|---|---|---|---|
+| 100 units | ~5ms | ~0.5ms | ~0.1ms |
+| 500 units | ~25ms | ~2ms | ~0.3ms |
+| 2000 units | Unplayable | ~8ms | ~1ms |
+
+---
+
+## 17. Common Recipes
+
+### Recipe: Basic Crowd
+
+```csharp
+public class CrowdUnit : MonoBehaviour
+{
+    SnapshotMeshAnimator animator;
+    
+    void Start()
+    {
+        animator = GetComponent<SnapshotMeshAnimator>();
+        animator.speed = Random.Range(0.8f, 1.2f);
+        animator.PlayRandom("Walk", "Run", "Idle");
+    }
+}
+```
+
+### Recipe: Attack Animation with Callback
+
+```csharp
+public class CrowdCombat : MonoBehaviour
+{
+    MeshAnimatorBase animator;
+    
+    void Start()
+    {
+        animator = GetComponent<MeshAnimatorBase>();
+        animator.OnAnimationFinished = OnAnimFinished;
+    }
+    
+    public void Attack()
+    {
+        animator.Play("Attack");
+    }
+    
+    void OnAnimFinished(string animName)
+    {
+        if (animName == "Attack")
+            animator.Play("Idle");
+    }
+}
+```
+
+### Recipe: Smooth Transition
+
+```csharp
+void ChangeToRun()
+{
+    animator.Crossfade("Run", 0.2f);
+}
+```
+
+### Recipe: Weapon Attachment (Exposed Transform)
+
+```
+// In Baker: expose "RightHand" bone
+// In Scene:
+CrowdUnit
+├── RightHand          ← empty child, name MUST match
+│   └── Sword_Model    ← weapon parented here
+```
+
+---
+
+## 18. Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| Character doesn't animate | Check `playAutomatically` is true, `defaultAnimation` is assigned |
+| T-pose / frozen | Animation assets not assigned in `animations` array |
+| Mesh flickering | Check `skipLastLoopFrame` for looping anims |
+| Memory too high | Lower baked FPS, use Frame Skip, reduce vertex count |
+| No GPU instancing | Ensure material has GPU instancing enabled, use same material for all |
+| Exposed transforms wrong position | Child names must exactly match baked bone names |
+| Animation events not firing | Set `eventReciever` to the correct GameObject |
+| Crossfade stutters | Pre-populate crossfade pool |
+| LOD not working | Set `LODCamera` or ensure at least one Camera exists |
+| Shader mode artifacts | Use provided MeshAnimator shaders, not custom ones |
+
+---
+
+## 19. Folder Structure
+
+```
+MeshAnimator massiveCrowd --unpacked/
+├── Editor/                          → Baker window, custom inspectors
+├── Examples/                        → Demo scenes and prefabs
+├── Scripts/
+│   ├── Common/
+│   │   ├── Abstraction/             → IMeshAnimator, IMeshAnimation interfaces
+│   │   ├── Compatibility/           → Version compatibility helpers
+│   │   ├── Core/
+│   │   │   ├── MeshAnimatorBase.cs  → Abstract base animator (all public API)
+│   │   │   ├── MeshAnimationBase.cs → Abstract base animation asset
+│   │   │   ├── MeshAnimatorManager.cs → Centralized update manager
+│   │   │   ├── MeshAnimationEvent.cs  → Animation event data
+│   │   │   ├── MeshFrameDataBase.cs   → Per-frame data (transforms, root motion)
+│   │   │   ├── ExposedTransformCrossfade.cs → Crossfade bone interpolation
+│   │   │   ├── MeshNormalMode.cs      → Normal baking options
+│   │   │   └── RootMotionMode.cs      → Root motion options
+│   │   └── Utilities/               → AllocatedArray, MatrixUtils, etc.
+│   ├── ShaderAnimated/
+│   │   ├── ShaderMeshAnimator.cs    → Shader mode animator
+│   │   └── ShaderMeshAnimation.cs   → Shader mode animation asset
+│   └── Snapshot/
+│       ├── SnapshotMeshAnimator.cs  → Snapshot mode animator
+│       ├── SnapshotMeshAnimation.cs → Snapshot mode animation asset
+│       └── SnapshotMeshFrameData.cs → Snapshot frame data
+├── Shaders/                         → MeshAnimator custom shaders
+│   ├── MeshAnimator-Standard.shader
+│   ├── MeshAnimator-URP-Lit.shader
+│   └── [more variants]
+└── ShaderGraph/                     → Shader Graph versions
+```
+
+---
+
+## API Quick Reference
+
+```csharp
+// --- Play ---
+animator.Play();                           // Resume / play default
+animator.Play("Walk");                     // Play by name
+animator.Play("Walk", 0.5f);             // Play at normalized time
+animator.Play(0);                          // Play by index
+animator.PlayRandom("A", "B", "C");       // Random from list
+animator.PlayQueued("Death");              // Queue after current
+
+// --- Control ---
+animator.Pause();
+animator.RestartAnim();
+animator.speed = 1.5f;
+
+// --- Crossfade ---
+animator.Crossfade("Run");                // 0.1s default
+animator.Crossfade("Run", 0.3f);         // custom duration
+animator.Crossfade(2, 0.2f);             // by index
+
+// --- Time ---
+animator.SetTime(1.5f);                   // seconds
+animator.SetTimeNormalized(0.5f);         // 0-1
+animator.SetTime(1.5f, true);            // instant update
+
+// --- Query ---
+IMeshAnimation clip = animator.GetClip("Walk");
+int frame = animator.currentFrame;
+
+// --- Callbacks ---
+animator.OnAnimationFinished = (name) => { };
+animator.OnFrameUpdated = () => { };
+animator.OnVisibilityChanged = (visible) => { };
+
+// --- Memory ---
+animator.PrepopulateCrossfadePool(3);
+```
+
+<!-- ==== FILE: Documentation/TextAnimator.md ==== -->
+# Text Animator — Complete Beginner Guide
+
+> **Package:** Text Animator by Febucci  
+> **Purpose:** Rich text animation effects + typewriter for TextMeshPro  
+> **Namespace:** `Febucci.UI`, `Febucci.UI.Core`  
+> **Pipeline:** Any (text is UI/world-space TMP)
+
+---
+
+## Table of Contents
+
+1. [What Is Text Animator?](#1-what-is-text-animator)
+2. [When Would You Use It?](#2-when-would-you-use-it)
+3. [Installation & Setup](#3-installation--setup)
+4. [Core Concepts](#4-core-concepts)
+5. [Built-in Effects (Rich Text Tags)](#5-built-in-effects-rich-text-tags)
+6. [Scene Setup — Step by Step](#6-scene-setup--step-by-step)
+7. [The Typewriter (TextAnimatorPlayer)](#7-the-typewriter-textanimatorplayer)
+8. [C# API Reference](#8-c-api-reference)
+9. [Custom Effects (ScriptableObjects)](#9-custom-effects-scriptableobjects)
+10. [Action Tags (Special Commands)](#10-action-tags-special-commands)
+11. [Integration with Other Systems](#11-integration-with-other-systems)
+12. [Common Recipes](#12-common-recipes)
+13. [Performance Tips](#13-performance-tips)
+14. [Troubleshooting](#14-troubleshooting)
+15. [Folder Structure](#15-folder-structure)
+
+---
+
+## 1. What Is Text Animator?
+
+Text Animator adds **per-character animation effects** to TextMeshPro text. Characters can shake, wave, bounce, rotate, fade, change color — all controlled through **rich text-style tags** directly in your text string.
+
+It also includes a **typewriter system** (characters appear one at a time, like in RPG dialogue boxes).
+
+```
+"<shake>DANGER!</shake> The <wave>ocean</wave> is <bounce>rising</bounce>!"
+```
+
+Each word animates independently with its tagged effect.
+
+---
+
+## 2. When Would You Use It?
+
+| Use Case | Example |
+|---|---|
+| **Dialogue system** | Typewriter text with character-by-character reveal |
+| **UI emphasis** | Shaking "WARNING" text, waving quest titles |
+| **Damage numbers** | Bouncing, scaling numbers that appear and fade |
+| **Tutorial text** | Important words highlighted with effects |
+| **Narrative games** | Emotional text with wobble, color shifts |
+| **Mobile UI** | Attention-grabbing animated labels |
+
+---
+
+## 3. Installation & Setup
+
+### 3.1 Prerequisites
+
+- **TextMeshPro** must be installed (it's included in Unity by default since 2018.3)
+- Import TMP Essentials if prompted
+
+### 3.2 Import
+
+1. Import the Text Animator package
+2. Folder appears: `Febucci/Text Animator/`
+
+### 3.3 Global Data Setup (Optional)
+
+Text Animator can use a **global settings ScriptableObject** for default values:
+
+1. Right-click in Project → `Create → Febucci → TextAnimator → Global Data`
+2. Configure default effect speeds, intensities
+3. This is optional — effects work with defaults out of the box
+
+---
+
+## 4. Core Concepts
+
+### 4.1 The Architecture
+
+```
+TextMeshPro (or TextMeshProUGUI)
+    ↓ reads text, generates mesh
+TextAnimator component
+    ↓ intercepts mesh data
+    ↓ applies per-character vertex modifications (position, color, rotation)
+    ↓ writes modified mesh back
+TextAnimatorPlayer (optional)
+    ↓ controls typewriter reveal (one character at a time)
+```
+
+### 4.2 Two Types of Effects
+
+| Type | Tag Format | When It Applies | Example |
+|---|---|---|---|
+| **Behavior** | `<tag>text</tag>` | Continuously animates (loops forever) | `<shake>`, `<wave>`, `<wiggle>` |
+| **Appearance** | `<tag>text</tag>` | Plays once when character appears (typewriter) | `<size>`, `<fade>`, `<offset>` |
+
+- **Behavior effects** are visible all the time — characters keep moving
+- **Appearance effects** only play during the typewriter reveal, then stop
+
+### 4.3 How Tags Work
+
+Tags are embedded directly in your TMP text string:
+
+```
+"Normal text <shake>shaking text</shake> normal again"
+```
+
+- Tags are **not** rendered — they're parsed and removed
+- Tags can be **nested**: `<shake><wave>both effects</wave></shake>`
+- Tags can have **modifiers**: `<shake a=5 f=2>` (amplitude=5, frequency=2)
+
+---
+
+## 5. Built-in Effects (Rich Text Tags)
+
+### 5.1 Behavior Effects (Continuous Animation)
+
+These effects loop forever once the text is visible:
+
+| Tag | Effect | Description |
+|---|---|---|
+| `<shake>` | Shake | Characters jitter randomly in position |
+| `<rot>` | Rotate | Characters continuously rotate |
+| `<wiggle>` | Wiggle | Characters wiggle side to side |
+| `<wave>` | Wave | Characters move in a sine wave pattern |
+| `<swing>` | Swing | Characters swing like a pendulum |
+| `<incr>` | Increase | Characters scale up and down rhythmically |
+| `<slide>` | Slide | Characters slide horizontally |
+| `<bounce>` | Bounce | Characters bounce up and down |
+| `<fade>` | Fade | Characters fade in and out |
+| `<rainb>` | Rainbow | Characters cycle through rainbow colors |
+| `<dangle>` | Dangle | Characters dangle as if hanging |
+| `<pend>` | Pendulum | Characters swing in pendulum motion |
+
+### 5.2 Appearance Effects (One-Time on Reveal)
+
+These play **once** when the typewriter reveals each character:
+
+| Tag | Effect | Description |
+|---|---|---|
+| `<size>` | Size | Characters scale from 0 to full size |
+| `<fade>` | Fade | Characters fade from transparent to opaque |
+| `<offset>` | Offset | Characters slide in from an offset position |
+| `<rdir>` | Random Direction | Characters fly in from random directions |
+| `<vertexp>` | Vertical Expand | Characters expand vertically from a line |
+| `<horiexp>` | Horizontal Expand | Characters expand horizontally from center |
+| `<diagexp>` | Diagonal Expand | Characters expand diagonally |
+| `<rot>` | Rotate | Characters rotate in as they appear |
+
+### 5.3 Tag Modifiers
+
+Most tags accept parameter modifiers:
+
+```
+<shake a=5 f=2>Intense shake</shake>
+```
+
+Common modifiers:
+- `a` = amplitude (how much the effect moves)
+- `f` = frequency (how fast the effect cycles)
+- `d` = delay between characters
+
+Example usage:
+
+```
+"<wave a=10 f=0.5>Gentle wave</wave>"
+"<shake a=20>AGGRESSIVE SHAKE</shake>"
+"<bounce f=3>Fast bounce</bounce>"
+```
+
+---
+
+## 6. Scene Setup — Step by Step
+
+### 6.1 Basic: Animated Text (No Typewriter)
+
+1. Create a **TextMeshPro** text object:
+   - UI: `GameObject → UI → Text - TextMeshPro`
+   - World: `GameObject → 3D Object → Text - TextMeshPro`
+2. Add Component → `TextAnimator` (from `Febucci/TextAnimator`)
+3. In the TMP text field, type:
+   ```
+   <shake>Hello</shake> <wave>World</wave>!
+   ```
+4. Press Play → "Hello" shakes, "World" waves
+
+### 6.2 With Typewriter
+
+1. Do steps 1–3 from above
+2. Add Component → `TextAnimatorPlayer`
+3. Configure typewriter speed:
+   - `waitForNormalChars = 0.03` (30ms per character)
+   - `waitLong = 0.6` (pause for `.`, `!`, `?`)
+   - `waitMiddle = 0.2` (pause for `,`, `;`, `:`)
+4. Press Play → text types out one character at a time with effects
+
+### 6.3 Setting Text from Script
+
+```csharp
+using Febucci.UI;
+using TMPro;
+
+public class DialogueBox : MonoBehaviour
+{
+    [SerializeField] TextAnimator textAnimator;
+    [SerializeField] TextAnimatorPlayer player;
+    
+    public void ShowDialogue(string text)
+    {
+        // Set text (this triggers the typewriter)
+        textAnimator.SetText(text);
+        player.ShowText(text);
+    }
+}
+```
+
+### 6.4 World Space Text
+
+1. Create `TextMeshPro - Text` (not UI version)
+2. Add `TextAnimator` + `TextAnimatorPlayer`
+3. Works the same way — great for floating damage numbers, NPC names
+
+---
+
+## 7. The Typewriter (TextAnimatorPlayer)
+
+### 7.1 What It Does
+
+The typewriter reveals characters one at a time, with configurable timing. It interacts with TextAnimator to play **appearance effects** as each character appears.
+
+### 7.2 Key Properties
+
+| Property | Type | Default | Purpose |
+|---|---|---|---|
+| `useTypeWriter` | bool | true | Enable/disable typewriter |
+| `waitForNormalChars` | float | 0.03 | Wait time per normal character (seconds) |
+| `waitLong` | float | 0.6 | Wait time for `.`, `!`, `?` |
+| `waitMiddle` | float | 0.2 | Wait time for `,`, `;`, `:`, `)`, `-` |
+| `avoidMultiplePunctuactionWait` | bool | false | Only last punctuation in a sequence waits |
+| `waitForNewLines` | bool | true | Pause at newlines |
+| `waitForLastCharacter` | bool | true | Wait for the final character |
+| `canSkipTypewriter` | bool | true | Allow skipping |
+| `hideAppearancesOnSkip` | bool | false | Skip appearance animations on skip |
+| `triggerEventsOnSkip` | bool | false | Fire all remaining events on skip |
+| `disappearanceOrientation` | enum | SameAsTypewriter | Direction text disappears |
+
+### 7.3 Start Modes
+
+The typewriter can auto-start from:
+
+| Mode | When It Starts |
+|---|---|
+| `FromScriptOnly` | Only when you call `StartShowingText()` |
+| `OnEnable` | Every time the GameObject enables |
+| `OnShowText` | When `ShowText()` is called |
+| `AutomaticallyFromAllEvents` | Both OnEnable and OnShowText |
+
+### 7.4 Events
+
+| Event | When |
+|---|---|
+| `onTextShowed` | All text finished showing |
+| `onTypewriterStart` | Typewriter begins |
+| `onCharacterVisible` | Each character becomes visible (CharacterEvent with char) |
+
+### 7.5 Custom Player (Subclassing)
+
+You can create custom typewriters by inheriting `TAnimPlayerBase`:
+
+```csharp
+using Febucci.UI.Core;
+
+public class MyCustomPlayer : TAnimPlayerBase
+{
+    protected override float GetWaitAppearanceTimeOf(char character)
+    {
+        // Return custom wait time per character
+        return 0.05f;
+    }
+    
+    protected override float GetWaitDisappearanceTimeOf(char character)
+    {
+        return 0.02f;
+    }
+    
+    protected override IEnumerator WaitInput()
+    {
+        // Custom input waiting (for dialogue systems)
+        while (!Input.GetKeyDown(KeyCode.Space))
+            yield return null;
+    }
+}
+```
+
+---
+
+## 8. C# API Reference
+
+### 8.1 TextAnimator
+
+```csharp
+using Febucci.UI;
+
+TextAnimator textAnimator = GetComponent<TextAnimator>();
+
+// Set text (triggers appearance effects and typewriter)
+textAnimator.SetText("<shake>Hello!</shake>");
+
+// Check if all letters are shown
+bool allShown = textAnimator.allLettersShown;
+
+// Get info about the latest shown character
+var latest = textAnimator.latestCharacterShown;
+bool isVisible = latest.isVisible;
+
+// Try to get the next character info
+if (textAnimator.TryGetNextCharacter(out var nextChar))
+{
+    char c = nextChar.character;
+}
+```
+
+### 8.2 TextAnimatorPlayer (Typewriter)
+
+```csharp
+using Febucci.UI;
+
+TextAnimatorPlayer player = GetComponent<TextAnimatorPlayer>();
+
+// Show text with typewriter
+player.ShowText("<wave>Loading...</wave>");
+
+// Start showing (if startMode is FromScriptOnly)
+player.StartShowingText();
+
+// Skip typewriter (instant show)
+player.SkipTypewriter();
+
+// Set typewriter speed
+player.SetTypewriterSpeed(2f); // 2x speed
+
+// Check state
+bool isTyping = player.isBaseInsideRoutine;
+bool waitingInput = player.isWaitingForPlayerInput;
+
+// Events (assign in Inspector or code)
+player.onTextShowed.AddListener(() => Debug.Log("Text complete!"));
+player.onCharacterVisible.AddListener((char c) => Debug.Log($"Showed: {c}"));
+```
+
+### 8.3 Disappearance
+
+Text can also disappear (reverse of appearance):
+
+```csharp
+// Trigger disappearance
+player.StartDisappearingText();
+```
+
+The `disappearanceOrientation` controls direction:
+- `SameAsTypewriter` — disappears in same order as appeared
+- `Inverted` — disappears in reverse order
+
+---
+
+## 9. Custom Effects (ScriptableObjects)
+
+You can create custom behavior and appearance effects as **ScriptableObject presets**.
+
+### 9.1 Behavior Effect Preset
+
+1. Right-click → `Create → Febucci → TextAnimator → Behavior Preset`
+2. Configure amplitude, frequency, curves
+3. Assign a **tag name** (e.g., "mybounce")
+4. Register it in the TextAnimator's global data or component
+5. Use: `<mybounce>custom effect</mybounce>`
+
+### 9.2 Appearance Effect Preset
+
+1. Right-click → `Create → Febucci → TextAnimator → Appearance Preset`
+2. Configure entry animation
+3. Assign a tag name
+4. Use same as behavior
+
+### 9.3 Custom Effect via Code
+
+Create a class inheriting from the base effect classes:
+
+```csharp
+// Behavior effect (continuous)
+public class MyCustomShake : BehaviorBase
+{
+    public override void SetDefaultValues(TAnimGlobalDataScriptable data)
+    {
+        // Set defaults
+    }
+    
+    public override void ApplyEffect(ref CharacterData data, int charIndex)
+    {
+        // Modify data.vertices, data.colors per character
+    }
+}
+```
+
+---
+
+## 10. Action Tags (Special Commands)
+
+Action tags are **inline commands** that execute during the typewriter reveal:
+
+### 10.1 Built-in Action Tags
+
+| Tag | Purpose | Example |
+|---|---|---|
+| `{waitinput}` | Pause typewriter until player presses input | `"Press any key{waitinput} to continue"` |
+| `{speed=X}` | Change typewriter speed | `"Normal speed {speed=0.5}now slower"` |
+| `{pause=X}` | Pause for X seconds | `"Wait for it...{pause=2}BOOM!"` |
+
+### 10.2 Custom Action Tags
+
+You can create custom TypewriterActions:
+
+```csharp
+public class PlaySoundAction : TypewriterAction
+{
+    public override void OnAction(string parameter)
+    {
+        // parameter is the text after "=" in the tag
+        AudioManager.PlaySound(parameter);
+    }
+}
+```
+
+Usage: `"The door {sfx=door_creak}creaks open"`
+
+---
+
+## 11. Integration with Other Systems
+
+### 11.1 Dialogue Systems
+
+Text Animator works great with dialogue systems. Common pattern:
+
+```csharp
+public class DialogueManager : MonoBehaviour
+{
+    [SerializeField] TextAnimatorPlayer player;
+    [SerializeField] TextAnimator textAnimator;
+    
+    string[] dialogueLines;
+    int currentLine = 0;
+    
+    public void StartDialogue(string[] lines)
+    {
+        dialogueLines = lines;
+        currentLine = 0;
+        ShowCurrentLine();
+    }
+    
+    void ShowCurrentLine()
+    {
+        string line = dialogueLines[currentLine];
+        textAnimator.SetText(line);
+        player.ShowText(line);
+        player.onTextShowed.AddListener(OnLineComplete);
+    }
+    
+    void OnLineComplete()
+    {
+        player.onTextShowed.RemoveListener(OnLineComplete);
+        // Wait for input, then advance
+    }
+    
+    public void AdvanceDialogue()
+    {
+        if (!textAnimator.allLettersShown)
+        {
+            player.SkipTypewriter(); // Skip if still typing
+        }
+        else
+        {
+            currentLine++;
+            if (currentLine < dialogueLines.Length)
+                ShowCurrentLine();
+        }
+    }
+}
+```
+
+### 11.2 Available Integrations
+
+The package includes integration packages for:
+- **PlayMaker** — Visual scripting actions
+- **Visual Scripting** — Unity Visual Scripting nodes
+
+Found in `Integrations/` folder as `.unitypackage` files.
+
+---
+
+## 12. Common Recipes
+
+### Recipe: RPG Dialogue Box
+
+```csharp
+textAnimator.SetText(
+    "<fade>You have entered the <shake>Forbidden Forest</shake>.</fade> " +
+    "{pause=1}" +
+    "<wave>Be careful...</wave>"
+);
+player.ShowText(textAnimator.text);
+```
+
+### Recipe: Damage Numbers
+
+```csharp
+// On a world-space TMP
+textAnimator.SetText($"<bounce><size>-{damage}</size></bounce>");
+// Destroy after animation
+Destroy(gameObject, 1.5f);
+```
+
+### Recipe: Warning Text
+
+```
+<shake a=15 f=5>WARNING!</shake>
+<rainb>Critical system failure</rainb>
+```
+
+### Recipe: Gentle Ambient Text
+
+```
+<wave a=3 f=0.5>The forest whispers softly...</wave>
+```
+
+### Recipe: Skip Typewriter on Click
+
+```csharp
+void Update()
+{
+    if (Input.GetMouseButtonDown(0))
+    {
+        if (!textAnimator.allLettersShown)
+            player.SkipTypewriter();
+        else
+            AdvanceToNextLine();
+    }
+}
+```
+
+### Recipe: Speed Up Typewriter While Holding
+
+```csharp
+void Update()
+{
+    if (Input.GetKey(KeyCode.Space))
+        player.SetTypewriterSpeed(5f);
+    else
+        player.SetTypewriterSpeed(1f);
+}
+```
+
+---
+
+## 13. Performance Tips
+
+1. **Disable effects on hidden text** — TextAnimator still processes invisible text
+2. **Use simpler effects** for large amounts of text (shake, fade are cheapest)
+3. **Limit simultaneous animated characters** — 500+ animated characters can impact mobile
+4. **Reuse TextAnimator objects** — don't create/destroy for each dialogue line
+5. **Pool damage number objects** instead of instantiating
+6. **Behavior effects are continuous** — they run every frame; use sparingly in large quantities
+
+---
+
+## 14. Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| Tags show as raw text | Ensure `TextAnimator` component is on the same GameObject as TMP |
+| No typewriter effect | Add `TextAnimatorPlayer` component |
+| Characters don't animate | Check that TMP text contains valid tags (e.g., `<shake>text</shake>`) |
+| Typewriter too fast/slow | Adjust `waitForNormalChars` on TextAnimatorPlayer |
+| Text doesn't appear | Check `startTypewriterMode` — may need to call `ShowText()` manually |
+| Missing effects | Check tag spelling: `<shake>` not `<Shake>` (case sensitive) |
+| Custom effects not working | Register custom effect tag in global data or component |
+| "TMP not found" errors | Import TextMeshPro via Package Manager |
+| Text layout breaks | TextAnimator modifies vertices — complex layouts may need adjustment |
+| Disappearance not working | Set `useTypeWriter = true` and call `StartDisappearingText()` |
+
+---
+
+## 15. Folder Structure
+
+```
+Febucci/Text Animator/
+├── Documentation & Quick Start.pdf    → Official PDF guide
+├── Example/                           → Demo scenes and prefabs
+├── Extra/                             → Additional utilities
+├── Integrations/
+│   ├── PlayMaker - Integration.unitypackage
+│   └── Visual Scripting - Integration.unitypackage
+└── Scripts/
+    ├── Editor/                        → Custom inspectors (11 files)
+    └── Runtime/
+        ├── Core/
+        │   ├── Base/                  → Base classes for effects
+        │   ├── Special Tags/          → Action tag system
+        │   ├── TAnimBuilder.cs        → Tag parser and effect builder
+        │   ├── TAnimPlayerBase.cs     → Base typewriter class (717 lines)
+        │   ├── TAnimGlobalDataScriptable.cs → Global settings SO
+        │   ├── TAnimTags.cs           → All built-in tag string constants
+        │   ├── TypewriterAction.cs    → Base for custom action tags
+        │   └── EffectsDefaultValues.cs → Default effect parameters
+        ├── Effects/
+        │   ├── Behavior Effects/
+        │   │   ├── Base/              → BehaviorBase class
+        │   │   ├── Defaults/          → All 12 built-in behaviors
+        │   │   └── Presets/           → ScriptableObject preset system
+        │   ├── Appearance Effects/
+        │   │   ├── Base/              → AppearanceBase class
+        │   │   ├── Defaults/          → All 8 built-in appearances
+        │   │   └── Presets/           → ScriptableObject preset system
+        │   ├── Presets Base/          → Shared preset infrastructure
+        │   └── Scriptables/           → Effect ScriptableObject types
+        ├── TextAnimator.cs            → Main component (78KB, 2000+ lines)
+        ├── TextAnimatorPlayer.cs      → Default typewriter (95 lines)
+        └── Utilities/                 → Helper classes
+```
+
+---
+
+## Tags Quick Reference Card
+
+### Behavior Tags (Continuous)
+
+```
+<shake>shaking text</shake>           → Random jitter
+<rot>rotating text</rot>              → Continuous rotation
+<wiggle>wiggling text</wiggle>        → Side-to-side wiggle
+<wave>waving text</wave>              → Sine wave motion
+<swing>swinging text</swing>          → Pendulum swing
+<incr>pulsing text</incr>             → Scale pulse
+<slide>sliding text</slide>           → Horizontal slide
+<bounce>bouncing text</bounce>        → Vertical bounce
+<fade>fading text</fade>              → Opacity pulse
+<rainb>rainbow text</rainb>           → Color cycling
+<dangle>dangling text</dangle>        → Hanging motion
+<pend>pendulum text</pend>            → Pendulum motion
+```
+
+### Appearance Tags (One-Time on Typewriter Reveal)
+
+```
+<size>scaling in</size>               → Scale from 0 to 1
+<fade>fading in</fade>                → Fade from 0 to 1
+<offset>sliding in</offset>           → Slide from offset
+<rdir>random direction</rdir>         → Fly in from random angle
+<vertexp>vertical expand</vertexp>    → Expand vertically
+<horiexp>horizontal expand</horiexp>  → Expand horizontally
+<diagexp>diagonal expand</diagexp>    → Expand diagonally
+<rot>rotate in</rot>                  → Rotate in
+```
+
+### Action Tags (Typewriter Commands)
+
+```
+{waitinput}                            → Pause for player input
+{speed=0.5}                           → Change typewriter speed
+{pause=2}                             → Pause for 2 seconds
+```
+
+### Modifier Examples
+
+```
+<shake a=10 f=3>                       → amplitude=10, frequency=3
+<wave a=5 f=1 d=0.1>                 → amplitude=5, frequency=1, delay=0.1
+<bounce a=8>                           → amplitude=8
+```
+
