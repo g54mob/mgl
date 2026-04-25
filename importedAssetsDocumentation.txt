@@ -5777,4 +5777,3 @@ _moneyText.text = "<bounce>$400.00</bounce>";
 | Unity 2019.4+ | Minimum version |
 
 TMP is already in the project (used by all UI text), so no new dependencies.
-
