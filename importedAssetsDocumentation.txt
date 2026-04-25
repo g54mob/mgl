@@ -5,6 +5,14 @@
 > **Sub-packages:** MMFeedbacks, MMTools, Nice Vibrations v4.1.2  
 > **Pipeline:** Works with URP, HDRP, Built-in  
 > **Namespace:** `MoreMountains.Feedbacks`, `MoreMountains.Tools`, `Lofelt.NiceVibrations`
+>
+> **Package Variant in This Repo:** `Feel--unpackedURP` — the **URP edition**. Includes:
+> - Core MMFeedbacks (80+ feedbacks, shakers, springs, floating text)
+> - MMTools (singletons, pooling, events, save/load, audio, scene loading, etc.)
+> - Nice Vibrations v4.1.2 (mobile haptics + gamepad rumble)
+> - **Third-party integrations:** URP post-processing (13 effects), Cinemachine (4 feedbacks), TMP, HDRP (unused but present), Visual Effect Graph, UI Toolkit
+>
+> **This is a complete Feel package.** Nothing is missing.
 
 ---
 
@@ -37,7 +45,7 @@
 25. [MMF_Player Inspector Deep Dive](#25-mmf_player-inspector-deep-dive) — Every setting explained
 26. [Creating Custom Feedbacks](#26-advanced-creating-custom-feedbacks) — Extend the system
 27. [Quick Reference Card](#27-quick-reference-card) — Copy-paste API cheatsheet
-28. [Real-World Use Cases From the Main Source](#28-real-world-use-cases-from-the-main-source) — TNT explosion, pickaxe hit, ore break, item pickup, camera shaker replacement, particle pooling, quest completion
+**APPENDIX** (MineMGL-specific, at bottom): [Scene Prerequisites](#a-scene-prerequisites-for-minemgl) | [TNT Explosion](#b-tnt-explosion) | [Pickaxe Hit](#c-pickaxe-mining-hit) | [Ore Break](#d-ore-node-break) | [Item Pickup](#e-item-pickup) | [Camera Shaker Replace](#f-mainmenucamerashaker) | [Particle Pooling](#h-particlemanager) | [Quest Complete](#i-quest-completion)
 
 ---
 
@@ -192,8 +200,8 @@ Every feedback has a Timing section:
 
 | Feedback Class | What It Does |
 |---|---|
-| `MMF_CameraShake` | Shake the camera |
-| `MMF_CameraZoom` | Zoom in/out |
+| `MMF_CameraShake` | Shake the camera (**Regular Camera** — needs `MMCameraShaker` on camera) |
+| `MMF_CameraZoom` | Zoom in/out (**Regular Camera** — needs `MMCameraZoom` on camera) |
 | `MMF_CameraFieldOfView` | Animate FOV |
 | `MMF_CameraOrthographicSize` | Animate ortho size |
 | `MMF_CameraClippingPlanes` | Animate near/far clip |
@@ -392,8 +400,8 @@ Camera shakes!
 
 | Shaker Component | Paired With Feedback | What It Shakes |
 |---|---|---|
-| `MMCameraShaker` | `MMF_CameraShake` | Camera position/rotation |
-| `MMCameraZoom` | `MMF_CameraZoom` | Camera FOV |
+| `MMCameraShaker` | `MMF_CameraShake` | Camera position/rotation (**Regular Camera only**) |
+| `MMCameraZoom` | `MMF_CameraZoom` | Camera FOV (**Regular Camera only**) |
 | `MMFlash` | `MMF_Flash` | Full-screen flash Image |
 | `MMPositionShaker` | `MMF_PositionShake` | Transform position |
 | `MMRotationShaker` | `MMF_RotationShake` | Transform rotation |
@@ -411,6 +419,68 @@ Shakers only respond to feedbacks on the **same channel**:
 - Feedback `Channel = 0` → Shaker `Channel = 1` ❌
 
 Use `MMChannel` ScriptableObjects for cleaner channel management.
+
+### Camera Shake: Regular Camera vs Cinemachine
+
+This is a common confusion point. Feel supports **both** camera types with different feedback classes:
+
+| Camera Type | Shake Feedback | Shaker Component | Setup |
+|---|---|---|---|
+| **Regular Camera** | `MMF_CameraShake` | `MMCameraShaker` on the Camera | Just add the shaker, done |
+| **Cinemachine** | `MMF_CinemachineImpulse` | `CinemachineImpulseListener` on the Virtual Camera | Need Cinemachine package + impulse source |
+| **Either** | `MMF_PositionShake` | `MMPositionShaker` on any transform | Works on anything, not camera-specific |
+
+**When to use which:**
+
+- **Regular Camera** (`MMF_CameraShake`): Simplest. If your game uses `Camera` directly (no Cinemachine), use this. Add `MMCameraShaker` to the Camera GameObject and you're done.
+- **Cinemachine** (`MMF_CinemachineImpulse`): If you use Cinemachine Virtual Cameras. The impulse system is Cinemachine-native and integrates with its noise profiles.
+- **Position Shake** (`MMF_PositionShake`): Most flexible. Works on any transform — camera, UI element, weapon model, anything. Doesn't care about camera type.
+
+**Quick setup for Regular Camera shake:**
+
+```
+1. Select your Main Camera in Hierarchy
+2. Add Component → MMCameraShaker
+3. That's it. MMF_CameraShake feedbacks will now shake this camera.
+```
+
+**URP Post-Processing feedbacks (Vignette, ChromaticAberration, Bloom, etc.) don't care about camera type.** They target the URP Volume, not the camera. Add the matching shaker (e.g., `MMVignetteShaker_URP`) to the Volume GameObject.
+
+### Available URP Post-Processing Feedbacks (from this package)
+
+| Feedback | Shaker | What It Does |
+|---|---|---|
+| `MMF_Bloom_URP` | `MMBloomShaker_URP` | Pulse bloom intensity |
+| `MMF_ChromaticAberration_URP` | `MMChromaticAberrationShaker_URP` | Glitch/aberration pulse |
+| `MMF_Vignette_URP` | `MMVignetteShaker_URP` | Dark edge vignette |
+| `MMF_LensDistortion_URP` | `MMLensDistortionShaker_URP` | Warp/distort screen |
+| `MMF_MotionBlur_URP` | `MMMotionBlurShaker_URP` | Motion blur intensity |
+| `MMF_DepthOfField_URP` | `MMDepthOfFieldShaker_URP` | Focus/blur |
+| `MMF_ColorAdjustments_URP` | `MMColorAdjustmentsShaker_URP` | Saturation, contrast |
+| `MMF_FilmGrain_URP` | `MMFilmGrainShaker_URP` | Film grain overlay |
+| `MMF_WhiteBalance_URP` | `MMWhiteBalanceShaker_URP` | Temperature shift |
+| `MMF_ChannelMixer_URP` | `MMChannelMixerShaker_URP` | RGB channel mixing |
+| `MMF_PaniniProjection_URP` | `MMPaniniProjectionShaker_URP` | Panini distortion |
+| `MMF_GlobalPPVolumeAutoBlend_URP` | — | Auto-blend between PP volumes |
+| `MMF_Light2D_URP` | `MMLight2DShaker_URP` | 2D light properties |
+
+**Setup for URP post-processing shakers:**
+
+```
+1. Create or select your URP Volume (Global Volume with Volume component)
+2. Add the override you want (e.g., Vignette, Chromatic Aberration)
+3. Add the matching shaker to the SAME GameObject (e.g., MMVignetteShaker_URP)
+4. Your MMF_Vignette_URP feedback will now target this shaker
+```
+
+### Available Cinemachine Feedbacks (from this package)
+
+| Feedback | What It Does |
+|---|---|
+| `MMF_CinemachineImpulse` | Fire a Cinemachine Impulse (shake via impulse system) |
+| `MMF_CinemachineImpulseClear` | Clear all active impulses |
+| `MMF_CinemachineImpulseSource` | Trigger a specific impulse source |
+| `MMF_CinemachineTransition` | Transition between virtual cameras |
 
 ---
 
@@ -1669,25 +1739,59 @@ bool exists = MyManager.HasInstance;
 ```
 
 ---
+---
 
-## 28. Real-World Use Cases From the Main Source
+# APPENDIX: MineMGL-Specific Use Cases
 
-> This section maps actual systems in `Scripts/Assembly-CSharp/` to Feel features that could replace or enhance them.
+> **Everything below this line is specific to the MineMGL project** (`Scripts/Assembly-CSharp/`).
+> It maps actual source systems to Feel features that could replace or enhance them.
+> The game uses a **Regular Camera** (not Cinemachine) — `PlayerController.PlayerCamera` is a direct `Camera` reference.
 
-### 28.1 TNT Explosion → MMF_Player "OnExplosion"
+---
+
+## A. Scene Prerequisites for MineMGL
+
+Before any feedback works, set up these scene objects **once**:
+
+```
+Scene Setup (one-time):
+━━━━━━━━━━━━━━━━━━━━━━
+1. PlayerCamera (the existing Camera)
+   └── Add: MMCameraShaker          ← receives MMF_CameraShake events
+
+2. URP Global Volume (Post-Processing)
+   ├── Add override: Vignette
+   ├── Add override: Chromatic Aberration
+   ├── Add override: Bloom
+   ├── Add: MMVignetteShaker_URP    ← receives MMF_Vignette_URP events
+   ├── Add: MMChromaticAberrationShaker_URP
+   └── Add: MMBloomShaker_URP
+
+3. Canvas → ScreenFlashImage (full-screen Image, alpha=0)
+   └── Add: MMFlash                 ← receives MMF_Flash events
+
+All shakers default to Channel 0. All feedbacks default to Channel 0. They match automatically.
+```
+
+---
+
+## B. TNT Explosion → MMF_Player "OnExplosion"
 
 **Current source** (`DetonatorExplosion.cs` line 123–168):
-The `Explode()` method plays a sound, enables particles, spawns ore pieces, and calls `PhysicsUtils.SimpleExplosion()`. There is **no camera shake, no screen flash, no freeze frame** — just sound + particles + physics.
+`Explode()` plays sound, enables particles, spawns ore, calls `SimpleExplosion()`. **No camera shake, no screen flash, no freeze frame.**
 
 **With Feel:**
 
 ```
 MMF_Player "OnTNTExplosion" (assign to DetonatorExplosion):
-  1. MMF_FreezeFrame         → 0.06s hit-stop (sells the impact)
-  2. MMF_CameraShake         → Amplitude 5, Duration 0.6s, Frequency 25
-  3. MMF_Flash               → White, Duration 0.15s, Alpha 0.8
-  4. MMF_ParticlesInstantiation → Spawn dust cloud VFX at explosion point
-  5. MMF_Vignette (URP)      → Dark edges for 0.3s (post-processing)
+  1. MMF_FreezeFrame              → 0.06s hit-stop
+  2. MMF_CameraShake              → Amplitude 5, Duration 0.6s, Frequency 25
+     ↳ requires: MMCameraShaker on PlayerCamera (Regular Camera)
+  3. MMF_Flash                    → White, Duration 0.15s, Alpha 0.8
+     ↳ requires: MMFlash on a full-screen UI Image
+  4. MMF_ParticlesInstantiation   → Dust cloud VFX
+  5. MMF_Vignette_URP             → Dark edges for 0.3s
+     ↳ requires: MMVignetteShaker_URP on URP Volume
 ```
 
 ```csharp
@@ -1698,88 +1802,99 @@ MMF_Player "OnTNTExplosion" (assign to DetonatorExplosion):
 _explosionFeedback?.PlayFeedbacks(ParticleObject.transform.position);
 ```
 
-### 28.2 Pickaxe Mining Hit → MMF_Player "OnMineHit"
+---
+
+## C. Pickaxe Mining Hit → MMF_Player "OnMineHit"
 
 **Current source** (`ToolPickaxe.cs` line 49–94):
-`PerformAttack()` raycasts, calls `TakeDamage()`, spawns hit particles, plays sound, applies force. **No camera punch, no screen feedback.**
+`PerformAttack()` raycasts, calls `TakeDamage()`, spawns particles, plays sound. **No camera punch.**
 
 **With Feel:**
 
 ```
 MMF_Player "OnPickaxeHit" (assign to ToolPickaxe):
-  1. MMF_CameraShake         → Amplitude 0.5, Duration 0.15s (subtle)
-  2. MMF_ScaleSpring          → Punch the pickaxe model scale (0.85→1.0)
-  3. MMF_ChromaticAberration  → Brief 0.05s pulse (URP post-process)
+  1. MMF_CameraShake              → Amplitude 0.5, Duration 0.15s (subtle)
+     ↳ requires: MMCameraShaker on PlayerCamera (Regular Camera)
+  2. MMF_ScaleSpring              → Punch pickaxe viewmodel scale (0.85→1.0)
+     ↳ target: the pickaxe model transform (no camera/shaker needed)
+  3. MMF_ChromaticAberration_URP  → Brief 0.05s pulse
+     ↳ requires: MMChromaticAberrationShaker_URP on URP Volume
 ```
 
 ```csharp
-// In ToolPickaxe.PerformAttack(), after TakeDamage:
 [SerializeField] MMF_Player _hitFeedback;
+// In PerformAttack(), after TakeDamage:
 _hitFeedback?.PlayFeedbacks(hit.point);
 ```
 
-### 28.3 Ore Node Break → MMF_Player "OnOreBreak"
+---
+
+## D. Ore Node Break → MMF_Player "OnOreBreak"
 
 **Current source** (`DamageableOrePiece.cs` line 20–31):
-When `Health <= 0`, plays break sound, spawns break particles, calls `CompleteClusterBreaking()` and `SimpleExplosion()`.
-
-**With Feel:**
+On `Health <= 0`: break sound, break particles, cluster break, SimpleExplosion.
 
 ```
 MMF_Player "OnOreBreak":
-  1. MMF_FreezeFrame         → 0.04s (micro hit-stop)
-  2. MMF_CameraShake         → Amplitude 2, Duration 0.3s
-  3. MMF_ParticlesInstantiation → Extra debris VFX
-  4. MMF_ScaleSpring          → Punch nearby UI ore counter
+  1. MMF_FreezeFrame              → 0.04s micro hit-stop
+  2. MMF_CameraShake              → Amplitude 2, Duration 0.3s
+     ↳ requires: MMCameraShaker on PlayerCamera
+  3. MMF_ParticlesInstantiation   → Extra debris VFX
+  4. MMF_ScaleSpring              → Punch nearby UI ore counter
+     ↳ target: ore count UI element (no camera needed)
 ```
 
-### 28.4 Item Pickup → MMF_Player "OnPickup"
+---
+
+## E. Item Pickup → MMF_Player "OnPickup"
 
 **Current source** (`PlayerInventory.cs` line 307–363):
-`TryAddToInventory()` sets tool inactive, plays `PickupItemSound`, calls `UpdateUI()`. **No visual juice.**
-
-**With Feel:**
+Sets tool inactive, plays PickupItemSound, UpdateUI(). **No visual juice.**
 
 ```
 MMF_Player "OnItemPickup":
-  1. MMF_Scale               → UI slot icon scale punch (1.0→1.3→1.0)
-  2. MMF_Flash               → Subtle green flash, Duration 0.1s, Alpha 0.3
-  3. MMF_AudioSource          → Replace manual PlayUISound
+  1. MMF_Scale                    → UI slot icon scale punch (1.0→1.3→1.0)
+     ↳ target: inventory slot UI element
+  2. MMF_Flash                    → Subtle green flash, Duration 0.1s, Alpha 0.3
+     ↳ requires: MMFlash on screen flash Image
+  3. MMF_AudioSource              → Replace manual PlayUISound
 ```
 
-### 28.5 MainMenuCameraShaker → Replace with MMCameraShaker
+---
+
+## F. MainMenuCameraShaker → Replace Entirely
 
 **Current source** (`MainMenuCameraShaker.cs`, 52 lines):
-Custom Perlin noise-based camera shake + `ApplyViewPunch()`. This is exactly what `MMCameraShaker` + `MMPositionShaker` does out of the box.
+Custom Perlin noise + `ApplyViewPunch()`. This is what `MMCameraShaker` + `MMPositionShaker` does out of the box.
 
-**With Feel (replace entirely):**
-
-```csharp
-// Delete MainMenuCameraShaker.cs
-// On MainMenu Camera: add MMCameraShaker + MMPositionShaker
-// In MainMenu.PlayElevatorLowerAnimation():
-//   OLD: FindObjectOfType<MainMenuCameraShaker>()?.ApplyViewPunch(...)
-//   NEW: elevatorFeedback.PlayFeedbacks();
+```
+Replace:
+  1. Delete MainMenuCameraShaker.cs
+  2. On MainMenu Camera: add MMCameraShaker + MMPositionShaker
+  3. In MainMenu.PlayElevatorLowerAnimation():
+     OLD: FindObjectOfType<MainMenuCameraShaker>()?.ApplyViewPunch(...)
+     NEW: elevatorFeedback.PlayFeedbacks();
 
 MMF_Player "OnElevatorDrop":
-  1. MMF_CameraShake     → Amplitude 3, Duration 1s
-  2. MMF_PositionShake   → Low-freq rumble
+  1. MMF_CameraShake              → Amplitude 3, Duration 1s
+     ↳ requires: MMCameraShaker on MainMenu Camera (Regular Camera)
+  2. MMF_PositionShake            → Low-freq rumble
+     ↳ requires: MMPositionShaker on the Camera transform
 ```
 
-### 28.6 TMPBounceEffect → Replace with MMSpringTMP or Keep
+---
+
+## G. TMPBounceEffect → Replace with MMSpringTMP or Keep
 
 **Current source** (`TMPBounceEffect.cs`, 92 lines):
-Uses DOTweenTMPAnimator to bounce+color-cycle each character. This is a DOTween dependency that could be replaced by:
-- **MMSpringTMPFontSize** + **MMSpringTMPTextColor** for spring-based approach
-- Or keep DOTween version — it works fine and is more specialized
+DOTween per-char bounce + color cycle. Could use **MMSpringTMPFontSize** + **MMSpringTMPTextColor** for spring-based approach. Or keep DOTween — it works and is more specialized for per-character animation.
 
-### 28.7 ParticleManager → Enhance with MMSimpleObjectPooler
+---
+
+## H. ParticleManager → Enhance with MMSimpleObjectPooler
 
 **Current source** (`ParticleManager.cs`, 25 lines):
-`CreateParticle()` calls `Object.Instantiate()` every time. **No pooling** — GC pressure on frequent hits.
-
-**With Feel:**
-Replace with `MMF_ParticlesInstantiation` feedback (has built-in pooling) or use `MMSimpleObjectPooler` directly:
+`CreateParticle()` calls `Object.Instantiate()` every time. **No pooling** — GC pressure.
 
 ```csharp
 // Replace:
@@ -1790,20 +1905,23 @@ particle.transform.SetPositionAndRotation(pos, rot);
 particle.SetActive(true);
 ```
 
-### 28.8 Quest Completion → MMF_Player "OnQuestComplete"
+---
+
+## I. Quest Completion → MMF_Player "OnQuestComplete"
 
 **Current source** (`QuestManager.cs` line 38–59):
-When quest completes: adds money, adds research tickets, removes from active list, fires `QuestCompleted` event. **No celebration feedback.**
-
-**With Feel:**
+Adds money, adds research tickets, fires `QuestCompleted` event. **No celebration.**
 
 ```
 MMF_Player "OnQuestComplete":
-  1. MMF_Scale               → HUD quest panel punch
-  2. MMF_Flash               → Gold flash, 0.2s
-  3. MMF_TMPColor            → "Quest Complete!" text gold→white
-  4. MMF_ParticlesInstantiation → Confetti burst on screen edges
-  5. MMF_AudioSource          → Victory jingle
+  1. MMF_Scale                    → HUD quest panel punch
+     ↳ target: quest HUD panel
+  2. MMF_Flash                    → Gold flash, 0.2s
+     ↳ requires: MMFlash on screen flash Image
+  3. MMF_TMPColor                 → "Quest Complete!" text gold→white
+     ↳ target: TMP text component
+  4. MMF_ParticlesInstantiation   → Confetti burst
+  5. MMF_AudioSource              → Victory jingle
 ```
 
 <!-- ==== FILE: Documentation/GUI-Assets.md ==== -->
@@ -2091,7 +2209,7 @@ For UI frames/panels that need to scale without stretching corners:
 11. [Performance Tips](#11-performance-tips)
 12. [Troubleshooting](#12-troubleshooting)
 13. [Folder Structure](#13-folder-structure)
-14. [Real-World Example: Replacing FresnelHighlighter (Phase B/D)](#14-real-world-example-replacing-a-custom-fresnel-highlighter) — Full migration from custom shader to Highlight Plus, complete PlayerController.OutlineLookedAtThing() mapping
+**APPENDIX** (MineMGL-specific, at bottom): [Replacing FresnelHighlighter](#a-the-problem-what-the-source-does-without-highlight-plus) | [Replacement Script](#c-the-replacement-script) | [Source Mapping](#h-full-source-mapping) | [Profile Approach](#f-profile-based-approach) | [See-Through Bonus](#g-bonus-see-through-for-occluded-objects)
 
 ---
 
@@ -2791,12 +2909,17 @@ enum RayCastSource { MousePosition, CameraDirection }
 ```
 
 ---
+---
 
-## 14. Real-World Example: Replacing a Custom Fresnel Highlighter
+# APPENDIX: MineMGL-Specific Use Cases
 
-> This section shows how to migrate from a **custom URP Renderer Feature + Shader Graph fresnel approach** (as used in Phase B/D of this project) to Highlight Plus. This is the exact use case in our codebase.
+> **Everything below this line is specific to the MineMGL project** (`Scripts/Assembly-CSharp/`).
+> It shows how to migrate from the custom `FresnelHighlighter.cs` + `HighlightStyle` + `CommandBuffer` system to Highlight Plus.
+> The source uses `PlayerController.OutlineLookedAtThing()` (line 655–739) to raycast-highlight interactables.
 
-### 14.1 The Problem (What Phase B Does Without Highlight Plus)
+---
+
+## A. The Problem (What the Source Does Without Highlight Plus)
 
 Phase B implements `FresnelHighlighter.cs` — a temporary highlighting system that:
 
@@ -2816,11 +2939,11 @@ Phase B implements `FresnelHighlighter.cs` — a temporary highlighting system t
 
 **Phase D extends** the same system with building/wrench highlight colors.
 
-### 14.2 The Migration (Replace With Highlight Plus)
+## B. The Migration (Replace With Highlight Plus)
 
 Highlight Plus eliminates **all** of the above complexity. No custom layers, no shader graph, no renderer feature configuration (beyond adding the Highlight Plus feature itself).
 
-### 14.3 The Replacement Script
+## C. The Replacement Script
 
 ```csharp
 using UnityEngine;
@@ -2933,7 +3056,7 @@ public class HighlightPlusHighlighter : MonoBehaviour
 }
 ```
 
-### 14.4 What Was Removed vs What Highlight Plus Handles
+## D. What Was Removed vs What Highlight Plus Handles
 
 | Old System (FresnelHighlighter) | Highlight Plus Replacement |
 |---|---|
@@ -2945,7 +3068,7 @@ public class HighlightPlusHighlighter : MonoBehaviour
 | `MaterialPropertyBlock` for per-object color | **Not needed** — `effect.outlineColor = color` |
 | 97 lines of layer-swap code | ~30 lines of Highlight Plus API calls |
 
-### 14.5 Color Mapping (Phase B → D)
+## E. Color Mapping (Phase B → D)
 
 | Game Context | Old Color | Highlight Plus Setting |
 |---|---|---|
@@ -2955,7 +3078,7 @@ public class HighlightPlusHighlighter : MonoBehaviour
 | Wrench enable (Phase D) | Green `(0.3, 1, 0.3)` | `outlineColor = green` |
 | Wrench disable (Phase D) | Red `(1, 0.3, 0.3)` | `outlineColor = red` |
 
-### 14.6 Profile-Based Approach (Cleaner)
+## F. Profile-Based Approach (Cleaner)
 
 Instead of setting colors in code, create **HighlightProfile** assets:
 
@@ -2981,7 +3104,7 @@ void ApplyHighlight(GameObject target, HighlightProfile profile)
 }
 ```
 
-### 14.7 Bonus: See-Through for Occluded Objects
+## G. Bonus: See-Through for Occluded Objects
 
 Something the old fresnel system **couldn't do at all** — Highlight Plus can show objects behind walls:
 
@@ -2993,7 +3116,7 @@ effect.seeThroughTintColor = new Color(0, 0.5f, 1f, 0.5f);
 
 Add `HighlightSeeThroughOccluder` to wall objects, and highlighted objects become visible through them — useful for tools behind crates, ores behind rocks, etc.
 
-### 14.8 Full Source Mapping: Every Highlight Call in PlayerController.OutlineLookedAtThing()
+## H. Full Source Mapping: Every Highlight Call in PlayerController.OutlineLookedAtThing()
 
 The original `PlayerController.cs` (line 655–739) raycasts and highlights 7 different object types. Here's the **exact 1:1 Highlight Plus replacement** for each:
 
@@ -3877,7 +4000,7 @@ animator.PrepopulateCrossfadePool(3);
 13. [Performance Tips](#13-performance-tips)
 14. [Troubleshooting](#14-troubleshooting)
 15. [Folder Structure](#15-folder-structure)
-16. [Real-World Use Cases From the Main Source](#16-real-world-use-cases-from-the-main-source) — TMPBounceEffect replacement, Quest HUD, Popups, Controls, Building Info
+**APPENDIX** (MineMGL-specific, at bottom): [TMPBounceEffect Replace](#a-tmpbounceeffectcs--replace-with-text-animator-tags) | [Quest HUD](#b-questhud--questinfoui) | [Info Popup](#c-infomessagepopup) | [Controls](#d-uimanagerupdateonscreencontrols) | [Quest Complete](#e-questtreeitembutton) | [Building Info](#f-building-info-description)
 
 ---
 
@@ -4536,12 +4659,16 @@ Febucci/Text Animator/
 ```
 
 ---
+---
 
-## 16. Real-World Use Cases From the Main Source
+# APPENDIX: MineMGL-Specific Use Cases
 
-> This section maps actual systems in `Scripts/Assembly-CSharp/` to Text Animator features.
+> **Everything below this line is specific to the MineMGL project** (`Scripts/Assembly-CSharp/`).
+> It maps actual source text display systems to Text Animator features.
 
-### 16.1 TMPBounceEffect.cs → Replace with Text Animator Tags
+---
+
+## A. TMPBounceEffect.cs → Replace with Text Animator Tags
 
 **Current source** (`TMPBounceEffect.cs`, 92 lines):
 A custom DOTween-based per-character bounce + color cycling effect. Requires DOTween dependency, 92 lines of code, manual `DOTweenTMPAnimator` setup.
@@ -4568,7 +4695,7 @@ The `<bounce>` tag replicates the vertical offset animation. The `<rainb>` tag r
 // "New Item:" bounces, "Diamond Pickaxe" waves — different effects per word
 ```
 
-### 16.2 QuestHud / QuestInfoUI → Typewriter for Quest Text
+## B. QuestHud / QuestInfoUI → Typewriter for Quest Text
 
 **Current source** (`QuestHud.cs` + `QuestInfoUI.cs`):
 Quest names and reward text are set instantly via `NameText.text = _quest.Name`. No animation.
@@ -4585,7 +4712,7 @@ NameText.text = "<size>" + _quest.Name + "</size>";
 // Characters scale in one by one as the quest appears in the HUD
 ```
 
-### 16.3 InfoMessagePopup → Typewriter for Important Messages
+## C. InfoMessagePopup → Typewriter for Important Messages
 
 **Current source** (`InfoMessagePopup.cs`, 23 lines):
 `ShowInfoPopup(header, message)` sets text instantly. These are important game messages that could benefit from typewriter reveal.
@@ -4601,7 +4728,7 @@ string animatedMessage = "<shake>WARNING:</shake> Your mine is running out of " 
 popup.ShowInfoPopup("Alert", animatedMessage);
 ```
 
-### 16.4 UIManager.UpdateOnScreenControls → Animated Keybind Display
+## D. UIManager.UpdateOnScreenControls → Animated Keybind Display
 
 **Current source** (`UIManager.cs` line 254–268):
 Builds a controls text string with keybind names. Static text, no emphasis.
@@ -4618,7 +4745,7 @@ text = "Grab Physics - <bounce>" + grabKey + "</bounce>\n" +
 // Keybind names bounce to draw attention
 ```
 
-### 16.5 QuestTreeItemButton → "Completed!" with Effects
+## E. QuestTreeItemButton → "Completed!" with Effects
 
 **Current source** (`QuestTreeItemButton.cs` line 109–112):
 When quest is completed, text is set to `"Completed!"` — static, no fanfare.
@@ -4634,7 +4761,7 @@ _questProgressText.text = "<bounce><rainb>Completed!</rainb></bounce>";
 // "Completed!" bounces with rainbow colors — visible celebration
 ```
 
-### 16.6 Building Info Description → Animated Tooltip
+## F. Building Info Description → Animated Tooltip
 
 **Current source** (`UIManager.ShowBuildingInfo(string description)`, line 247–252):
 Shows building info text instantly.
