@@ -4773,4 +4773,3 @@ Shows building info text instantly.
 // Text types out when you look at a building
 // Auto-starts via OnShowText mode — no extra code needed
 ```
-
