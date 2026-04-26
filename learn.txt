@@ -2124,6 +2124,67 @@ These are purely hand-tested — no script automates them. The `.md` is the test
 
 **When building any phase, always ask:** "Are there any systems in this phase that need visual/hands-on verification?" If yes, create a `Manual/*.md` for each. Analyse the main source for UI panels, animations, physics visuals, and any complex inspector setup that a `.cs` test can't verify. See PhaseMap.md + StructureMap.md for the full list of required manual tests per phase.
 
+### Common Pitfalls — Things Manual Tests MUST Warn About
+
+> These are real bugs that occurred because the guides didn't warn about them. Every Manual/*.md
+> must check for these and add explicit warnings where applicable.
+
+**1. SetActive Cascading — Parent disables ALL children**
+- If a SubManager calls `SetActive(false)` on itself, every child GO becomes invisible and non-interactive
+- **Rule:** Any GO that must stay visible (HotBar, money display) must be a **sibling** of the SubManager, not a child
+- **Manual test must show:** the exact parent-child hierarchy with bold warning: *"HotBar must NOT be a child of InventoryUI — it will be disabled when InventoryUI self-disables"*
+
+**2. Scene Instance vs Project Prefab**
+- Inspector `[SerializeField]` fields that reference GOs must point to **scene instances** (drag from Hierarchy), not prefab assets (drag from Project)
+- A prefab reference won't exist as a live GO in the scene — events fire but nothing happens
+- **Manual test must say:** *"Drag from Hierarchy panel, NOT Project panel"* with bold warning
+
+**3. raycastTarget on UI Elements**
+- Ghost/overlay images MUST have `raycastTarget = false` — otherwise they steal pointer/drop events from the real targets underneath
+- Slot background images MUST have `raycastTarget = true` — they need to receive drops
+- Icon/label child images should have `raycastTarget = false` — they shouldn't intercept parent slot events
+- **Manual test must list:** exact `raycastTarget` value for every Image component in the prefab hierarchy
+
+**4. Swap Entire Object vs Swap Contents**
+- When swapping inventory slots, swap the **tool field only**, not the entire slot object — otherwise index-based properties (like `isHotBar`) break
+- **DataService tests must verify:** after swap, both slots retain their original index/isHotBar identity
+
+**5. Missing Layers — Silent Failure**
+- `LayerMask.NameToLayer("SomeName")` returns `-1` if the layer doesn't exist — Unity sets GO to layer 0 (Default) with NO error
+- Physics checks (OverlapBox, Raycast with LayerMask) then include/exclude the wrong objects → placement always rejected, scaffolding never spawns, etc.
+- **Manual test must:** list every custom layer needed + a "What Happens If Missing" column + "Verify: open LayerMask field in inspector, both layers appear in dropdown"
+
+**6. LayerMask Fields Left at "Nothing"**
+- `[SerializeField] LayerMask _someLayer` defaults to "Nothing" (0) — all raycasts/overlaps against it return empty → logic silently skips
+- **Manual test must:** list every LayerMask field on every manager + exactly which layers to check in each
+
+**7. Cross-Phase Modifications Not Applied**
+- Later phases add methods/fields to earlier phase scripts (e.g. Phase D adds `AddConveyorVelocity()` to Phase B's `BasePhysicsObject`)
+- If these are skipped: compile error (`MissingMethodException`) or silent runtime failure (method exists but is empty stub)
+- **Manual test must:** have a "Cross-Phase Modifications" prerequisites table: file, what to add, what fails if missing
+- **GUIDE.md must:** have a prominent ⚠️ warning box at the very top
+
+**8. Dual Collider Setup (Trigger + Physical)**
+- ConveyorBelt, SellerMachine, and similar objects need TWO colliders on separate child GOs: one `IsTrigger=true` (detects entry/exit), one `IsTrigger=false` (physical surface)
+- If the trigger collider is missing or not flagged: `OnTriggerEnter` never fires → ore sits on belt but doesn't move, no error
+- **Manual test must:** explicitly state which child has which collider type + IsTrigger value
+
+**9. Static Lists Surviving Domain Reload**
+- `static List<T>` fields (e.g. `AllConveyorBelts`, `AllOrePieces`) survive between Play sessions in the editor — second Play press has stale null refs
+- **Manual test must:** mention this as expected behavior with optional fix (`[RuntimeInitializeOnLoadMethod]` to clear)
+
+**10. Execution Order Attributes**
+- `[DefaultExecutionOrder(-10)]` on managers ensures they run before the systems they coordinate (e.g. ConveyorBeltManager before ConveyorBelt)
+- Removing or forgetting this attribute → velocity accumulation applied in wrong frame → physics stutters
+- **Manual test must:** note which scripts have execution order attributes and warn not to remove them
+
+### Prototypes (`learn/prototype/`)
+
+> Optional standalone scripts that test ONE mechanic in total isolation. One `.cs` file = one prototype.
+> Zero external dependencies. Drop on empty scene + Canvas → Press Play.
+> If the prototype works but the real system doesn't, the bug is in wiring — not concept.
+> User decides which prototypes are needed — create on request.
+
 ---
 
 ## 7-3D — Models, Animations, World Layout (centralized in phase-All)
@@ -2634,6 +2695,17 @@ For each phase, the agent must produce:
    - **Must be comprehensive enough for a beginner AND teach the architecture** — the reader should understand the full data path by reading the manual test. Not just "click → see result" but "click → this script → this event → this subscriber → this GO activates → you see this."
    - One `.md` per system. Self-contained — no "see GUIDE.md" shortcuts. The `.md` IS the test.
    - **Always analyse main source** for each phase: "Does this system have UI, animations, physics visuals, or dense inspector setup?" If yes → `Manual/*.md`.
+   - **MANDATORY pitfall checks (10 rules)** — every Manual/*.md must warn about applicable ones. See GOAL.md "Common Pitfalls" for full details. Quick reference:
+     1. **SetActive cascading:** SubManager disables itself → ALL children die. Visible GOs (HotBar) = SIBLING not child.
+     2. **Scene instance vs prefab:** inspector refs → drag from Hierarchy, NOT Project.
+     3. **raycastTarget:** list exact value for every Image. Ghost = false, slot bg = true, icon = false.
+     4. **Swap contents not objects:** swap tool field only, not entire slot objects.
+     5. **Missing layers:** `LayerMask.NameToLayer` returns -1 silently → list every layer + "What Fails If Missing" column.
+     6. **LayerMask fields at Nothing:** defaults to 0 → raycasts return empty → list every LayerMask field + which layers to check.
+     7. **Cross-phase mods not applied:** later phases add to earlier scripts → prerequisites table with "What Fails If Missing".
+     8. **Dual collider setup:** trigger + physical on separate child GOs → state which child has IsTrigger.
+     9. **Static lists surviving reload:** `static List<T>` has stale nulls on 2nd Play → mention as expected.
+     10. **Execution order attributes:** `[DefaultExecutionOrder]` must not be removed → note which scripts have it.
    - Gold standard: `phase-b(New)/Scripts/5-Tests/Manual/InventoryUITest.md`
    - Full list: PhaseMap.md + StructureMap.md `All Manual Tests` table.
 
@@ -5720,6 +5792,620 @@ public class DEBUG_Check : MonoBehaviour
 
 }
 
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/TODO.md ==== -->
+```
+- doesnt specify that Tool.... components, should be added to the worldGameObjects in the Scene
+- that inventoryTest require the Tool.... components to be connected to scene gameObjects and exist in scene prior.
+```
+
+```sceneHeirarchy
+=== Component Abbreviations ===
+dmc = MeshFilter | MeshRenderer
+rb = Rigidbody
+bc = BoxCollider
+sc = SphereCollider
+mc = MeshCollider
+alstn = AudioListener
+cam = Camera
+lgt = Light
+canvas = Canvas
+cr = CanvasRenderer
+btn = Button | Image
+img = Image
+autoFitH = HorizontalLayoutGroup | ContentSizeFitter
+ps = ParticleSystem
+psr = ParticleSystemRenderer
+lr = LineRenderer
+================================
+
+./InventoryTest/(scale:1.0 | no components)
+├ Directional Light (scale:1.0 | lgt, UniversalAdditionalLightData)
+├ Global Volume (scale:1.0 | Volume)
+├ GameObject (scale:1.0 | no components)
+├ Canvas (scale:1.5 | canvas, CanvasScaler, GraphicRaycaster, CanvasGroup)
+│ ├ center Image (scale:1.0 | cr, img)
+│ ├ fps Text (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │ └ build phase (TMP)  (scale:1.0 | cr, TextMeshProUGUI)
+│ ├ BgUI (Panel) (scale:1.0 | cr, img, bgUI)
+│ ├ InventoryUI (Panel) (scale:1.0 | cr, img, InventoryUI, InventoryOrchestrator)
+│ │ ├ HotBar (Panel) (scale:1.0 | cr, img, autoFitH, Outline)
+│ │ │ ├ pfInventorySlot (Image) (scale:1.0 | cr, img, Field_InventorySlot)
+│ │ │ │ ├ hideWhenDragged (scale:1.0 | no components)
+│ │ │ │ │ ├ icon (image) (scale:1.0 | cr, img)
+│ │ │ │ │ ├ nameText (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │ │ │ │ └ countTxtBg (Panel) (scale:1.0 | cr, img, autoFitH)
+│ │ │ │ │   └ countText (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │ │ │ └ organeBar (image) (scale:1.0 | cr, img)
+│ │ │ └ pfInventorySlot (Image) (6) (scale:1.0 | cr, img, Field_InventorySlot)
+│ │ │   ├ hideWhenDragged (scale:1.0 | no components)
+│ │ │   │ ├ icon (image) (scale:1.0 | cr, img)
+│ │ │   │ ├ nameText (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │ │   │ └ countTxtBg (Panel) (scale:1.0 | cr, img, autoFitH)
+│ │ │   │   └ countText (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │ │   └ organeBar (image) (scale:1.0 | cr, img)
+│ │ └ ExtendedBar (Panel) (scale:1.0 | cr, img, Outline, GridLayoutGroup)
+│ │   ├ pfInventorySlot (Image) (scale:1.0 | cr, img, Field_InventorySlot)
+│ │   │ ├ hideWhenDragged (scale:1.0 | no components)
+│ │   │ │ ├ icon (image) (scale:1.0 | cr, img)
+│ │   │ │ ├ nameText (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │   │ │ └ countTxtBg (Panel) (scale:1.0 | cr, img, autoFitH)
+│ │   │ │   └ countText (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │   │ └ organeBar (image) (scale:1.0 | cr, img)
+│ │   ├ pfInventorySlot (Image) (6) (scale:1.0 | cr, img, Field_InventorySlot)
+│ │   │ ├ hideWhenDragged (scale:1.0 | no components)
+│ │   │ │ ├ icon (image) (scale:1.0 | cr, img)
+│ │   │ │ ├ nameText (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │   │ │ └ countTxtBg (Panel) (scale:1.0 | cr, img, autoFitH)
+│ │   │ │   └ countText (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │   │ └ organeBar (image) (scale:1.0 | cr, img)
+│ │   ├ pfInventorySlot (Image) (7) (scale:1.0 | cr, img, Field_InventorySlot)
+│ │   │ ├ hideWhenDragged (scale:1.0 | no components)
+│ │   │ │ ├ icon (image) (scale:1.0 | cr, img)
+│ │   │ │ ├ nameText (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │   │ │ └ countTxtBg (Panel) (scale:1.0 | cr, img, autoFitH)
+│ │   │ │   └ countText (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │   │ └ organeBar (image) (scale:1.0 | cr, img)
+│ │   ├ pfInventorySlot (Image) (8) (scale:1.0 | cr, img, Field_InventorySlot)
+│ │   │ ├ hideWhenDragged (scale:1.0 | no components)
+│ │   │ │ ├ icon (image) (scale:1.0 | cr, img)
+│ │   │ │ ├ nameText (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │   │ │ └ countTxtBg (Panel) (scale:1.0 | cr, img, autoFitH)
+│ │   │ │   └ countText (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │   │ └ organeBar (image) (scale:1.0 | cr, img)
+│ │   ├ pfInventorySlot (Image) (9) (scale:1.0 | cr, img, Field_InventorySlot)
+│ │   │ ├ hideWhenDragged (scale:1.0 | no components)
+│ │   │ │ ├ icon (image) (scale:1.0 | cr, img)
+│ │   │ │ ├ nameText (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │   │ │ └ countTxtBg (Panel) (scale:1.0 | cr, img, autoFitH)
+│ │   │ │   └ countText (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │   │ └ organeBar (image) (scale:1.0 | cr, img)
+│ │   ├ pfInventorySlot (Image) (10) (scale:1.0 | cr, img, Field_InventorySlot)
+│ │   │ ├ hideWhenDragged (scale:1.0 | no components)
+│ │   │ │ ├ icon (image) (scale:1.0 | cr, img)
+│ │   │ │ ├ nameText (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │   │ │ └ countTxtBg (Panel) (scale:1.0 | cr, img, autoFitH)
+│ │   │ │   └ countText (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │   │ └ organeBar (image) (scale:1.0 | cr, img)
+│ │   ├ pfInventorySlot (Image) (11) (scale:1.0 | cr, img, Field_InventorySlot)
+│ │   │ ├ hideWhenDragged (scale:1.0 | no components)
+│ │   │ │ ├ icon (image) (scale:1.0 | cr, img)
+│ │   │ │ ├ nameText (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │   │ │ └ countTxtBg (Panel) (scale:1.0 | cr, img, autoFitH)
+│ │   │ │   └ countText (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │   │ └ organeBar (image) (scale:1.0 | cr, img)
+│ │   ├ pfInventorySlot (Image) (12) (scale:1.0 | cr, img, Field_InventorySlot)
+│ │   │ ├ hideWhenDragged (scale:1.0 | no components)
+│ │   │ │ ├ icon (image) (scale:1.0 | cr, img)
+│ │   │ │ ├ nameText (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │   │ │ └ countTxtBg (Panel) (scale:1.0 | cr, img, autoFitH)
+│ │   │ │   └ countText (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │   │ └ organeBar (image) (scale:1.0 | cr, img)
+│ │   ├ pfInventorySlot (Image) (13) (scale:1.0 | cr, img, Field_InventorySlot)
+│ │   │ ├ hideWhenDragged (scale:1.0 | no components)
+│ │   │ │ ├ icon (image) (scale:1.0 | cr, img)
+│ │   │ │ ├ nameText (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │   │ │ └ countTxtBg (Panel) (scale:1.0 | cr, img, autoFitH)
+│ │   │ │   └ countText (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │   │ └ organeBar (image) (scale:1.0 | cr, img)
+│ │   ├ pfInventorySlot (Image) (14) (scale:1.0 | cr, img, Field_InventorySlot)
+│ │   │ ├ hideWhenDragged (scale:1.0 | no components)
+│ │   │ │ ├ icon (image) (scale:1.0 | cr, img)
+│ │   │ │ ├ nameText (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │   │ │ └ countTxtBg (Panel) (scale:1.0 | cr, img, autoFitH)
+│ │   │ │   └ countText (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │   │ └ organeBar (image) (scale:1.0 | cr, img)
+│ │   ├ pfInventorySlot (Image) (15) (scale:1.0 | cr, img, Field_InventorySlot)
+│ │   │ ├ hideWhenDragged (scale:1.0 | no components)
+│ │   │ │ ├ icon (image) (scale:1.0 | cr, img)
+│ │   │ │ ├ nameText (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │   │ │ └ countTxtBg (Panel) (scale:1.0 | cr, img, autoFitH)
+│ │   │ │   └ countText (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │   │ └ organeBar (image) (scale:1.0 | cr, img)
+│ │   ├ pfInventorySlot (Image) (16) (scale:1.0 | cr, img, Field_InventorySlot)
+│ │   │ ├ hideWhenDragged (scale:1.0 | no components)
+│ │   │ │ ├ icon (image) (scale:1.0 | cr, img)
+│ │   │ │ ├ nameText (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │   │ │ └ countTxtBg (Panel) (scale:1.0 | cr, img, autoFitH)
+│ │   │ │   └ countText (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │   │ └ organeBar (image) (scale:1.0 | cr, img)
+│ │   └ pfInventorySlot (Image) (17) (scale:1.0 | cr, img, Field_InventorySlot)
+│ │     ├ hideWhenDragged (scale:1.0 | no components)
+│ │     │ ├ icon (image) (scale:1.0 | cr, img)
+│ │     │ ├ nameText (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │     │ └ countTxtBg (Panel) (scale:1.0 | cr, img, autoFitH)
+│ │     │   └ countText (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │     └ organeBar (image) (scale:1.0 | cr, img)
+│ ├ SelectedItemInfo (Panel) (scale:1.0 | cr, img, Field_SelectedItemInfo)
+│ │ ├ Image (scale:1.0 | cr, img)
+│ │ ├ name (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │ ├ count (TMP) (1) (scale:1.0 | cr, TextMeshProUGUI)
+│ │ ├ decr (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │ ├ equipButton (Panel) (scale:1.0 | cr, img)
+│ │ │ └ equipClick (Button) (scale:1.0 | cr, btn, autoFitH)
+│ │ │   └ Text (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ │ └ dropButton (Panel) (scale:1.0 | cr, img)
+│ │   └ dropClick (Button) (scale:1.0 | cr, btn, autoFitH)
+│ │     └ Text (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│ └ dragGhost (Panel) (scale:1.0 | cr)
+│   ├ icon (image) (scale:1.0 | cr, img)
+│   ├ nameText (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+│   └ countTxtBg (Panel) (scale:1.0 | cr, img, autoFitH)
+│     └ countText (TMP) (scale:1.0 | cr, TextMeshProUGUI)
+├ EventSystem (scale:1.0 | EventSystem, InputSystemUIInputModule)
+├ Level (scale:1.0 | no components)
+│ ├ Plane (scale:1.0 | dmc, mc, ProBuilderMesh, ProBuilderShape)
+│ ├ Cube (scale:1.0 | dmc, mc, ProBuilderMesh, ProBuilderShape)
+│ ├ Cube (1) (scale:(1.0,2.4,1.0) | dmc, mc, ProBuilderMesh, ProBuilderShape)
+│ ├ computerScreen (scale:(0.8,1.0,0.1) | dmc, bc, ProBuilderMesh, ProBuilderShape)
+│ ├ elevator (scale:1.0 | StartingElevator)
+│ │ ├ elevatorPlatform (scale:1.0 | dmc, mc, ProBuilderMesh, ProBuilderShape)
+│ │ ├ playerTeleport (scale:1.0 | no components)
+│ │ ├ elevator land (Particle System) (scale:1.0 | ps, psr)
+│ │ └ walls (scale:1.0 | no components)
+│ │   ├ elevatorWalls inside (scale:(1.0,1.0,1.0) | dmc, mc, ProBuilderMesh, ProBuilderShape)
+│ │   └ elevatorWalls outside (scale:(1.0,1.0,1.0) | dmc, mc, ProBuilderMesh, ProBuilderShape)
+│ ├ Stairs (scale:1.0 | dmc, mc, ProBuilderMesh, ProBuilderShape)
+│ ├ Cube (scale:1.0 | dmc, mc, ProBuilderMesh, ProBuilderShape)
+│ └ SpawnPoints (scale:1.0 | no components)
+│   └ PlayerSpawnPoints (scale:1.0 | no components)
+│     └ point (0) (scale:1.0 | PlayerSpawnPoint)
+├ player (scale:1.0 | CharacterController, PlayerController, PlayerCamera, PlayerGrab)
+│ ├ Main Camera (scale:1.0 | alstn, cam, UniversalAdditionalCameraData)
+│ │ └ holdPos (scale:0.1 | dmc)
+│ ├ model (scale:(0.2,1.0,0.2) | dmc, bc)
+│ ├ viewModelContainer (scale:(0.2,1.0,0.2) | no components)
+│ ├ rigidBodyDragger (scale:0.1 | no components)
+│ ├ magnetToolPos (scale:0.1 | dmc, sc)
+│ ├ nightVisionLight (scale:1.0 | lgt, UniversalAdditionalLightData)
+│ ├ miningHatLight (scale:1.0 | lgt, UniversalAdditionalLightData)
+│ ├ lrRope (scale:1.0 | lr)
+│ └ groundCheck (scale:1.0 | no components)
+├ Managers (scale:1.0 | no components)
+│ ├ EconomyManager (scale:1.0 | EconomyManager)
+│ ├ UIManager (scale:1.0 | UIManager)
+│ ├ ShopSpawnPoints (scale:1.0 | no components)
+│ │ └ point (0) (scale:1.0 | ShopSpawnPoint)
+│ └ ObjectHighlighManager (scale:1.0 | ObjectHighlighterManager)
+├ GRAB (scale:1.0 | no components)
+│ ├ Sphere 0.5 (scale:0.5 | dmc, rb, sc, ProBuilderMesh, ProBuilderShape)
+│ ├ Cube  0.1x0.4 (scale:(0.1,0.4,0.1) | dmc, rb, bc, ProBuilderMesh, ProBuilderShape)
+│ ├ toolPickAxe (scale:(1.8,0.2,0.1) | ToolPickaxe)
+│ │ ├ worldModel (scale:1.0 | dmc, rb, bc, ProBuilderMesh, ProBuilderShape)
+│ │ └ viewModel (scale:1.0 | dmc, bc, ProBuilderMesh, ProBuilderShape)
+│ └ toolHammer (scale:(0.6,0.2,0.1) | ToolHammer)
+│   ├ worldModel (scale:1.0 | dmc, rb, bc, ProBuilderMesh, ProBuilderShape)
+│   └ viewModel (scale:1.0 | dmc, bc, ProBuilderMesh, ProBuilderShape)
+├ DEBUG_Check (scale:1.0 | InventoryTest)
+└ Cube (scale:(0.5,1.0,1.0) | dmc, mc, ProBuilderMesh, ProBuilderShape)
+
+```
+
+
+```projectHeirarchy
+=== Component Abbreviations ===
+dmc = MeshFilter | MeshRenderer
+smc = SkinnedMeshRenderer
+rb = Rigidbody
+bc = BoxCollider
+sc = SphereCollider
+anim = Animator
+asrc = AudioSource
+cr = CanvasRenderer
+sr = ScrollRect
+btnO = Button | Image | Outline
+img = Image
+autoFitH = HorizontalLayoutGroup | ContentSizeFitter
+================================
+
+=== Asset Type Abbreviations ===
+mesh = Mesh
+mat = Material
+pf = Prefab
+tex = Texture
+anim = AnimClip
+audio = Audio
+cs = Script
+scene = Scene
+txt = TextAsset
+================================
+
+./Assets/
+├ AD/
+│ └ Highlight Plus Profile - InteractableComputer.asset (HighlightProfile)
+├ Export/
+│ ├ phase-a complete (playerController, shopUI, interactionUI) Unity3D+6000.3.unitypackage (DefaultAsset)
+│ └ phase-a-1 complete (startingElevator, camShake) Unity3D+6000.3.unitypackage (DefaultAsset)
+├ HighlightPlus/
+│ ├ Demo/
+│ │ ├ Demo1_HighlightExample/
+│ │ │ ├ LightingData.asset (LightingDataAsset)
+│ │ │ ├ ReflectionProbe-0.exr (Cubemap)
+│ │ │ └ ReflectionProbe-1.exr (Cubemap)
+│ │ ├ Demo1_HighlightExample.unity (scene)
+│ │ ├ Demo2_SelectionExample/
+│ │ │ ├ LightingData.asset (LightingDataAsset)
+│ │ │ ├ ReflectionProbe-0.exr (Cubemap)
+│ │ │ └ ReflectionProbe-1.exr (Cubemap)
+│ │ ├ Demo2_SelectionExample.unity (scene)
+│ │ ├ Demo3_HitFXExample.unity (scene)
+│ │ ├ Materials/
+│ │ │ ├ Floor.mat (mat | URP/Lit)
+│ │ │ ├ Gold.mat (mat | URP/Lit)
+│ │ │ ├ PlasticGlossy.mat (mat | URP/Lit)
+│ │ │ ├ Silk.mat (mat | URP/Lit)
+│ │ │ └ Wall.mat (mat | URP/Lit)
+│ │ ├ Profiles/
+│ │ │ ├ Selected.asset (HighlightProfile)
+│ │ │ ├ SelectedAndHighlighted.asset (HighlightProfile)
+│ │ │ └ UniversalRenderPipelineGlobalSettings.asset (UniversalRenderPipelineGlobalSettings)
+│ │ ├ Scripts/
+│ │ │ ├ HitFxDemo.cs (cs | HitFxDemo)
+│ │ │ ├ ManualSelectionDemo.cs (cs | ManualSelectionDemo)
+│ │ │ ├ SphereHighlightEventExample.cs (cs | SphereHighlightEventExample)
+│ │ │ └ SphereSelectionEventsExample.cs (cs | SphereSelectionEventsExample)
+│ │ ├ Sounds/
+│ │ │ └ metalHit.wav (audio | 0.30s | 2ch)
+│ │ ├ Textures/
+│ │ │ ├ floor_tiles_06_diff_1k.png (tex | 1024×1024 | DXT5)
+│ │ │ ├ floor_tiles_06_nor_1k.png (tex | 1024×1024 | DXT5)
+│ │ │ ├ overlaySampleTex.png (tex | 256×256 | DXT1)
+│ │ │ ├ red_brick_plaster_patch_02_AO_1k.png (tex | 1024×1024 | DXT5)
+│ │ │ ├ red_brick_plaster_patch_02_bump_1k.png (tex | 1024×1024 | DXT5)
+│ │ │ ├ red_brick_plaster_patch_02_diff_1k.png (tex | 1024×1024 | DXT1)
+│ │ │ └ red_brick_plaster_patch_02_Nor_1k.png (tex | 1024×1024 | DXT5)
+│ │ └ URP settings/
+│ │   ├ HighlightPlusForwardRenderer.asset (UniversalRendererData)
+│ │   │ └ NewHighlightPlusRenderPassFeature (HighlightPlusRenderPassFeature)
+│ │   └ UniversalRenderPipelineAsset.asset (UniversalRenderPipelineAsset)
+│ ├ Documentation/
+│ │ ├ Documentation Online.url (DefaultAsset)
+│ │ ├ Documentation PDF.url (DefaultAsset)
+│ │ └ Kronnect Assets.pdf (DefaultAsset)
+│ ├ Editor/
+│ │ ├ HighlightEffectEditor.cs (cs | HighlightEffectEditor)
+│ │ ├ HighlightManagerEditor.cs (cs | HighlightManagerEditor)
+│ │ ├ HighlightProfileEditor.cs (cs | HighlightProfileEditor)
+│ │ ├ HighlightSeeThroughOccluderEditor.cs (cs | HighlightSeeThroughOccluderEditor)
+│ │ ├ HighlightTriggerEditor.cs (cs | HighlightTriggerEditor)
+│ │ └ TransparentWithDepth.cs (cs | TransparentWithDepth)
+│ ├ README.txt (txt)
+│ └ Runtime/
+│   ├ Resources/
+│   │ └ HighlightPlus/
+│   │   ├ blueNoiseVL.png (tex | 32×32 | RGB24)
+│   │   ├ CustomVertexTransform.cginc (txt)
+│   │   ├ HighlightAddDepth.shader (Shader)
+│   │   ├ HighlightBlockerOutlineAndGlow.mat (mat | HighlightPlus/UI/Mask)
+│   │   ├ HighlightBlockerOverlay.mat (mat | HighlightPlus/UI/Mask)
+│   │   ├ HighlightBlurGlow.shader (Shader)
+│   │   ├ HighlightBlurOutline.shader (Shader)
+│   │   ├ HighlightClearStencil.shader (Shader)
+│   │   ├ HighlightComposeGlow.shader (Shader)
+│   │   ├ HighlightComposeOutline.shader (Shader)
+│   │   ├ HighlightGlow.mat (mat | HighlightPlus/Geometry/Glow)
+│   │   ├ HighlightGlow.shader (Shader)
+│   │   ├ HighlightIconFX.shader (Shader)
+│   │   ├ HighlightInnerGlow.shader (Shader)
+│   │   ├ HighlightMask.shader (Shader)
+│   │   ├ HighlightOccluder.shader (Shader)
+│   │   ├ HighlightOutline.mat (mat | HighlightPlus/Geometry/Outline)
+│   │   ├ HighlightOutline.shader (Shader)
+│   │   ├ HighlightOverlay.shader (Shader)
+│   │   ├ HighlightPlusDepthWrite.mat (mat | HighlightPlus/Geometry/JustDepth)
+│   │   ├ HighlightSeeThrough.shader (Shader)
+│   │   ├ HighlightSeeThroughBorder.shader (Shader)
+│   │   ├ HighlightSeeThroughMask.shader (Shader)
+│   │   ├ HighlightSolidColor.shader (Shader)
+│   │   ├ HighlightTarget.shader (Shader)
+│   │   ├ HighlightUIMask.mat (mat | HighlightPlus/UI/Mask)
+│   │   ├ HighlightUIMask.shader (Shader)
+│   │   ├ IconMesh.fbx (pf | scale:1.0 | dmc)
+│   │   │ └ Cone (mesh | bounds:0.20×0.40×0.20 | v:32)
+│   │   └ target.png (tex | 256×256 | DXT5)
+│   └ Scripts/
+│     ├ HighlightEffect.cs (cs | HighlightEffect)
+│     ├ HighlightEffectActions.cs (cs | unknown)
+│     ├ HighlightEffectBlocker.cs (cs | HighlightEffectBlocker)
+│     ├ HighlightEffectOccluderManager.cs (cs | unknown)
+│     ├ HighlightManager.cs (cs | HighlightManager)
+│     ├ HighlightPlusRenderPassFeature.cs (cs | HighlightPlusRenderPassFeature)
+│     ├ HighlightProfile.cs (cs | HighlightProfile)
+│     ├ HighlightSeeThroughOccluder.cs (cs | HighlightSeeThroughOccluder)
+│     ├ HighlightTrigger.cs (cs | HighlightTrigger)
+│     ├ InputProxy.cs (cs | InputProxy)
+│     ├ Misc.cs (cs | Misc)
+│     ├ RenderingUtils.cs (cs | RenderingUtils)
+│     ├ ShaderParams.cs (cs | ShaderParams)
+│     └ VRCheck.cs (cs | VRCheck)
+├ Import/
+│ └ --pack/
+│   ├ learn.txt (txt)
+│   └ web-tools.txt (txt)
+├ LOG/
+│ ├ GameData/
+│ └ LOG.md (txt)
+├ Prefabs/
+│ ├ 3D/
+│ │ ├ Cube  0.1x0.4.prefab (pf | scale:(0.1,0.4,0.1) | dmc, rb, bc, ProBuilderMesh, ProBuilderShape)
+│ │ ├ Cube 1x1.prefab (pf | scale:1.0 | dmc, rb, bc, ProBuilderMesh, ProBuilderShape)
+│ │ └ Sphere 0.5.prefab (pf | scale:0.5 | dmc, rb, sc, ProBuilderMesh, ProBuilderShape)
+│ └ UI/
+│   ├ button (Panel).prefab (pf | scale:1.0 | cr, img)
+│   ├ pfCategory (Panel).prefab (pf | scale:1.0 | cr, img, Field_ShopCategory)
+│   ├ pfInteractionOption (Panel).prefab (pf | scale:1.0 | cr, img, Field_InteractionOption)
+│   ├ pfInventorySlot (Image).prefab (pf | scale:1.0 | cr, img, Field_InventorySlot)
+│   ├ pfShopCartItem(Panel) .prefab (pf | scale:1.0 | cr, img, Field_ShopCartItem)
+│   └ pfShopItem(Panel).prefab (pf | scale:1.0 | cr, img, Field_ShopItem)
+├ ProBuilder Data/
+│ ├ Default Color Palette.asset (ColorPalette)
+│ └ Default Material Palette.asset (MaterialPalette)
+├ Scenes/
+│ ├ phase-a complete.unity (scene)
+│ ├ phase-a-1 complete.unity (scene)
+│ ├ phase-b.unity (scene)
+│ ├ SampleScene.unity (scene)
+│ └ VerticalSliceTest/
+│   └ phase-b --inventory.unity (scene)
+├ Scripts/
+│ ├ DEBUG_Check.cs (cs | DEBUG_Check)
+│ ├ phase-@all/
+│ │ ├ 0-Core/
+│ │ │ ├ GameEvents.cs (cs | GameEvents)
+│ │ │ └ Singleton.cs (cs | unknown)
+│ │ ├ 1-Managers/
+│ │ │ ├ EconomyManager.cs (cs | EconomyManager)
+│ │ │ └ UIManager.cs (cs | UIManager)
+│ │ ├ 2-Data/
+│ │ │ └ Enums/
+│ │ │   └ GlobalEnums.cs (cs | unknown)
+│ │ └ 4-Utils/
+│ │   ├ IEnumerableUtilsPhaseAll.cs (cs | IEnumerableUtilsPhaseAll)
+│ │   └ UtilsPhaseAll.cs (cs | UtilsPhaseAll)
+│ ├ phase-a/
+│ │ ├ 0-Core/
+│ │ │ └ GameEvents.cs (cs | GameEvents)
+│ │ ├ 1-Managers/
+│ │ │ └ SubManager/
+│ │ │   ├ bgUI.cs (cs | bgUI)
+│ │ │   ├ InteractionWheelUI.cs (cs | InteractionWheelUI)
+│ │ │   ├ moneyUI.cs (cs | moneyUI)
+│ │ │   └ ShopUI.cs (cs | ShopUI)
+│ │ ├ 2-Data/
+│ │ │ ├ DataServices/
+│ │ │ │ └ ShopDataService.cs (cs | ShopDataService)
+│ │ │ ├ DataWrappers/
+│ │ │ │ └ ShopDataWrapper.cs (cs | WShopItem)
+│ │ │ ├ Enums/
+│ │ │ ├ Field_InteractionOption.cs (cs | Field_InteractionOption)
+│ │ │ ├ Field_ShopCartItem.cs (cs | Field_ShopCartItem)
+│ │ │ ├ Field_ShopCategory.cs (cs | Field_ShopCategory)
+│ │ │ ├ Field_ShopItem.cs (cs | Field_ShopItem)
+│ │ │ ├ Interfaces/
+│ │ │ │ └ IInteractable.cs (cs | IInteractable)
+│ │ │ ├ SO_InteractionOption.cs (cs | SO_InteractionOption)
+│ │ │ ├ SO_ShopCategory.cs (cs | SO_ShopCategory)
+│ │ │ └ SO_ShopItemDef.cs (cs | SO_ShopItemDef)
+│ │ ├ 3-MonoBehaviours/
+│ │ │ ├ InteractableComputer.cs (cs | InteractableComputer)
+│ │ │ ├ Orchestrator/
+│ │ │ │ └ ShopUIOrchestrator.cs (cs | ShopUIOrchestrator)
+│ │ │ ├ ShopSpawnPoint.cs (cs | ShopSpawnPoint)
+│ │ │ ├ SimplePlayerController.cs (cs | SimplePlayerController)
+│ │ │ └ SimplePlayerInteraction.cs (cs | SimplePlayerInteraction)
+│ │ ├ 4-Utils/
+│ │ │ ├ PhaseALOG.cs (cs | PhaseALOG)
+│ │ │ └ UtilsPhaseA.cs (cs | UtilsPhaseA)
+│ │ └ 5-Tests/
+│ │   └ ShopUITest.cs (cs | ShopUITest)
+│ ├ phase-a-1/
+│ │ ├ 0-Core/
+│ │ │ └ GameEvents.cs (cs | GameEvents)
+│ │ ├ 1-Managers/
+│ │ ├ 2-Data/
+│ │ ├ 3-Monobehaviours/
+│ │ │ ├ CameraShaker.cs (cs | CameraShaker)
+│ │ │ └ StartingElevator.cs (cs | StartingElevator)
+│ │ ├ 4-Utils/
+│ │ └ 5-Tests/
+│ │   └ ElevatorTest.cs (cs | ElevatorTest)
+│ ├ phase-b/
+│ │ ├ 0-Core/
+│ │ │ └ GameEvents.cs (cs | GameEvents)
+│ │ ├ 1-Managers/
+│ │ │ ├ ObjectHighlighterManager.cs (cs | ObjectHighlighterManager)
+│ │ │ └ SubManagers/
+│ │ │   └ InventoryUI.cs (cs | InventoryUI)
+│ │ ├ 2-Data/
+│ │ │ ├ 2-DataWrapper/
+│ │ │ ├ 3-Entities/
+│ │ │ ├ DataServices/
+│ │ │ │ └ InventoryDataService.cs (cs | InventoryDataService)
+│ │ │ ├ Entities/
+│ │ │ │ └ InventorySlot.cs (cs | InventorySlot)
+│ │ │ ├ Enums/
+│ │ │ │ └ GlobalEnums.cs (cs | unknown)
+│ │ │ ├ Field_InventorySlot.cs (cs | Field_InventorySlot)
+│ │ │ ├ Field_SelectedItemInfo.cs (cs | Field_SelectedItemInfo)
+│ │ │ ├ Interfaces/
+│ │ │ │ └ GlobalInterfaces.cs (cs | IHighlightable)
+│ │ │ └ SO_FootStepSoundDef.cs (cs | SO_FootStepSoundDef)
+│ │ ├ 3-Monobehaviours/
+│ │ │ ├ DomainSpecific/
+│ │ │ ├ Orchestrators/
+│ │ │ │ └ InventoryOrchestrator.cs (cs | InventoryOrchestrator)
+│ │ │ ├ Physics/
+│ │ │ │ ├ BasePhysicsObject.cs (cs | BasePhysicsObject)
+│ │ │ │ └ BaseSellableItem.cs (cs | BaseSellableItem)
+│ │ │ ├ Player/
+│ │ │ │ ├ PlayerCamera.cs (cs | PlayerCamera)
+│ │ │ │ ├ PlayerController.cs (cs | PlayerController)
+│ │ │ │ ├ PlayerGrab.cs (cs | PlayerGrab)
+│ │ │ │ ├ PlayerSpawnPoint.cs (cs | PlayerSpawnPoint)
+│ │ │ │ └ RbDraggerController.cs (cs | RbDraggerController)
+│ │ │ ├ Tool/
+│ │ │ │ ├ BaseHeldTool.cs (cs | BaseHeldTool)
+│ │ │ │ ├ ToolBuilder.cs (cs | ToolBuilder)
+│ │ │ │ ├ ToolHammer.cs (cs | ToolHammer)
+│ │ │ │ └ ToolPickAxe.cs (cs | ToolPickaxe)
+│ │ │ ├ UI/
+│ │ │ │ └ UIEventRelay.cs (cs | UIEventRelay)
+│ │ │ └ UIRelays/
+│ │ ├ 4-Utils/
+│ │ │ ├ PhaseBLOG.cs (cs | PhaseBLOG)
+│ │ │ └ UtilsPhaseB.cs (cs | UtilsPhaseB)
+│ │ ├ 5-Tests/
+│ │ │ ├ InventoryTest.cs (cs | InventoryTest)
+│ │ │ ├ Manual/
+│ │ │ ├ PlayerControllerTest.cs (cs | PlayerControllerTest)
+│ │ │ └ ToolActionTest.cs (cs | ToolActionTest)
+│ │ └ DEBUG_CheckB.cs (cs | DEBUG_CheckB)
+│ ├ phase-x/
+│ │ ├ 0-Core/
+│ │ │ └ GameEvents.cs (cs | GameEvents)
+│ │ ├ 1-Managers/
+│ │ │ └ SubManagers/
+│ │ ├ 2-Data/
+│ │ │ ├ DataServices/
+│ │ │ ├ DataWrappers/
+│ │ │ ├ Entities/
+│ │ │ ├ Enums/
+│ │ │ └ Interfaces/
+│ │ ├ 3-Monobehaviours/
+│ │ │ ├ DomainSpecific/
+│ │ │ ├ Orchestrators/
+│ │ │ └ UIRelays/
+│ │ ├ 4-Utils/
+│ │ └ 5-Tests/
+│ │   └ Manual/
+│ └ TODO.md (txt)
+├ SO/
+│ ├ SO_FootStepSoundDef player.asset (SO_FootStepSoundDef)
+│ ├ SO_InteractionOption grab.asset (SO_InteractionOption)
+│ ├ SO_InteractionOption openShopView.asset (SO_InteractionOption)
+│ ├ SO_ShopCategory explosives.asset (SO_ShopCategory)
+│ ├ SO_ShopCategory tools.asset (SO_ShopCategory)
+│ ├ SO_ShopItemDef dynamite.asset (SO_ShopItemDef)
+│ ├ SO_ShopItemDef lamp.asset (SO_ShopItemDef)
+│ └ SO_ShopItemDef pickAxe.asset (SO_ShopItemDef)
+├ TM/
+│ ├ FONTS 1/
+│ │ ├ CONSOLA SDF.asset (TMP_FontAsset)
+│ │ │ ├ CONSOLA SDF Material (mat | TextMeshPro/Distance Field)
+│ │ │ └ CONSOLA SDF Atlas (tex | 512×512 | Alpha8)
+│ │ ├ CONSOLA.TTF (Font)
+│ │ │ ├ Font Material (mat | GUI/Text Shader)
+│ │ │ └ Font Texture (tex | 256×256 | Alpha8)
+│ │ ├ CONSOLAI.TTF (Font)
+│ │ │ ├ Font Material (mat | GUI/Text Shader)
+│ │ │ └ Font Texture (tex | 256×256 | Alpha8)
+│ │ └ pixelplay.ttf (Font)
+│ │   ├ Font Material (mat | GUI/Text Shader)
+│ │   └ Font Texture (tex | 256×256 | Alpha8)
+│ └ TextMesh Pro/
+│   ├ Fonts/
+│   │ ├ LiberationSans - OFL.txt (txt)
+│   │ └ LiberationSans.ttf (Font)
+│   │   ├ Font Material (mat | GUI/Text Shader)
+│   │   └ Font Texture (tex | 256×256 | Alpha8)
+│   ├ Resources/
+│   │ ├ Fonts & Materials/
+│   │ │ ├ LiberationSans SDF - Drop Shadow.mat (mat | TextMeshPro/Mobile/Distance Field)
+│   │ │ ├ LiberationSans SDF - Fallback.asset (TMP_FontAsset)
+│   │ │ │ ├ LiberationSans SDF Material (mat | TextMeshPro/Mobile/Distance Field)
+│   │ │ │ └ LiberationSans SDF Atlas (tex | 0×0 | Alpha8)
+│   │ │ ├ LiberationSans SDF - Outline.mat (mat | TextMeshPro/Mobile/Distance Field)
+│   │ │ └ LiberationSans SDF.asset (TMP_FontAsset)
+│   │ │   ├ LiberationSans SDF Material (mat | TextMeshPro/Mobile/Distance Field)
+│   │ │   └ LiberationSans SDF Atlas (tex | 1024×1024 | Alpha8)
+│   │ ├ LineBreaking Following Characters.txt (txt)
+│   │ ├ LineBreaking Leading Characters.txt (txt)
+│   │ ├ Sprite Assets/
+│   │ │ └ EmojiOne.asset (TMP_SpriteAsset)
+│   │ ├ Style Sheets/
+│   │ │ └ Default Style Sheet.asset (TMP_StyleSheet)
+│   │ └ TMP Settings.asset (TMP_Settings)
+│   ├ Shaders/
+│   │ ├ SDFFunctions.hlsl (txt)
+│   │ ├ TMPro.cginc (txt)
+│   │ ├ TMPro_Mobile.cginc (txt)
+│   │ ├ TMPro_Properties.cginc (txt)
+│   │ ├ TMPro_Surface.cginc (txt)
+│   │ ├ TMP_Bitmap-Custom-Atlas.shader (Shader)
+│   │ ├ TMP_Bitmap-Mobile.shader (Shader)
+│   │ ├ TMP_Bitmap.shader (Shader)
+│   │ ├ TMP_SDF Overlay.shader (Shader)
+│   │ ├ TMP_SDF SSD.shader (Shader)
+│   │ ├ TMP_SDF-HDRP LIT.shadergraph (Shader)
+│   │ │ └ TMP_SDF-HDRP LIT (mat | TextMeshPro/SRP/TMP_SDF-HDRP LIT)
+│   │ ├ TMP_SDF-HDRP UNLIT.shadergraph (Shader)
+│   │ │ └ TMP_SDF-HDRP UNLIT (mat | TextMeshPro/SRP/TMP_SDF-HDRP UNLIT)
+│   │ ├ TMP_SDF-Mobile Masking.shader (Shader)
+│   │ ├ TMP_SDF-Mobile Overlay.shader (Shader)
+│   │ ├ TMP_SDF-Mobile SSD.shader (Shader)
+│   │ ├ TMP_SDF-Mobile-2-Pass.shader (Shader)
+│   │ ├ TMP_SDF-Mobile.shader (Shader)
+│   │ ├ TMP_SDF-Surface-Mobile.shader (Shader)
+│   │ ├ TMP_SDF-Surface.shader (Shader)
+│   │ ├ TMP_SDF-URP Lit.shadergraph (Shader)
+│   │ │ └ TMP_SDF-URP Lit (mat | TextMeshPro/SRP/TMP_SDF-URP Lit)
+│   │ ├ TMP_SDF-URP Unlit.shadergraph (Shader)
+│   │ │ └ TMP_SDF-URP Unlit (mat | TextMeshPro/SRP/TMP_SDF-URP Unlit)
+│   │ ├ TMP_SDF.shader (Shader)
+│   │ └ TMP_Sprite.shader (Shader)
+│   └ Sprites/
+│     ├ EmojiOne Attribution.txt (txt)
+│     ├ EmojiOne.json (txt)
+│     └ EmojiOne.png (tex | 512×512 | DXT5)
+├ URP/
+│ ├ Readme.asset (Readme)
+│ ├ Settings/
+│ │ ├ DefaultVolumeProfile.asset (VolumeProfile)
+│ │ ├ Mobile_Renderer.asset (UniversalRendererData)
+│ │ ├ Mobile_RPAsset.asset (UniversalRenderPipelineAsset)
+│ │ ├ PC_Renderer.asset (UniversalRendererData)
+│ │ │ └ ScreenSpaceAmbientOcclusion (ScreenSpaceAmbientOcclusion)
+│ │ ├ PC_RPAsset.asset (UniversalRenderPipelineAsset)
+│ │ ├ SampleSceneProfile.asset (VolumeProfile)
+│ │ └ UniversalRenderPipelineGlobalSettings.asset (UniversalRenderPipelineGlobalSettings)
+│ └ TutorialInfo/
+│   ├ Icons/
+│   │ └ URP.png (tex | 350×200 | RGB24)
+│   ├ Layout.wlt (DefaultAsset)
+│   └ Scripts/
+│     ├ Editor/
+│     │ └ ReadmeEditor.cs (cs | ReadmeEditor)
+│     └ Readme.cs (cs | Readme)
+
+```
+
+```
+also the phase-a-1 doesnt depend on phase-a (update the dependency graph-grid)
+```
+
+```
+why the guide/(Test/Manual/*.md) wasn't consise enough for the scene to work ?
+```
+
 <!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-@all/0-Core/GameEvents.cs ==== -->
 using System;
 using System.Linq;
@@ -5875,6 +6561,7 @@ public class UIManager : Singleton<UIManager>
 	{
 		GameEvents.RaiseCloseShopView();
 		GameEvents.RaiseCloseInteractionView();
+		GameEvents.RaiseCloseInventoryView();
 	}
 
 	#region public API
@@ -6835,6 +7522,7 @@ public class bgUI : MonoBehaviour
 		if(isFirstEnable)
 		{
 			GameEvents.OnMenuStateChanged += (isAnyMenuOpen) => this.gameObject.SetActive(isAnyMenuOpen);
+			this.gameObject.SetActive(false); // deactivate once setUp Complete
 			isFirstEnable = false;
 		}
 	}
@@ -7180,6 +7868,7 @@ using SPACE_UTIL;
 public class SO_InteractionOption : ScriptableObject
 {
 	public string interactionName;
+	public InteractionType interactionType;
 	[TextArea(2, 3)] public string descr;
 	public Sprite sprite;
 }
@@ -7231,44 +7920,34 @@ public class SO_ShopItemDef : ScriptableObject
 ﻿using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
-using HighlightPlus;
 
 using SPACE_UTIL;
+using HighlightPlus;
 
-/// <summary>
-/// I'm a static world object the player can interact with (shop terminal, contracts terminal).
-/// I implement IInteractable for E-key interaction and IHighlightable for Highlight Plus outline.
-/// When the player looks at me, ObjectHighlighterManager finds my IHighlightable and applies my cyan
-/// profile. When they press E, SimplePlayerInteraction finds my IInteractable and calls Interact.
-///
-/// Who uses me: ObjectHighlighterManager (IHighlightable), SimplePlayerInteraction (IInteractable).
-/// Events I fire: RaiseOpenShopView (on "openShopView" interaction).
-/// </summary>
 public class InteractableComputer : MonoBehaviour, IInteractable, IHighlightable
 {
-	#region Inspector Fields
 	[SerializeField] List<SO_InteractionOption> _OPTION;
 	[SerializeField] bool _selectFirstOptionDefault = true;
 	[Header("Highlight")]
 	[SerializeField] HighlightProfile _highlightProfile;
-	#endregion
 
-	#region public API — IInteractable
-	public string GetObjectName() => gameObject.name;
-	public bool ShouldUseInteractionWheel() => !_selectFirstOptionDefault;
-	public List<SO_InteractionOption> GetOptions() => _OPTION;
+	#region public API - IInteractable
+	public string GetObjectName() => this.gameObject.name;
+	public bool ShouldUseInteractionWheel() => this._selectFirstOptionDefault == false;
+	public List<SO_InteractionOption> GetOptions() => this._OPTION;
 	public void Interact(SO_InteractionOption selectedInteraction)
 	{
-		if(selectedInteraction.interactionName == "openShopView")
-		{
+		// Debug.Log($"should perform {selectedInteraction.interactionName}".colorTag("lime"));
+		if (selectedInteraction.interactionType == InteractionType.openShopView)
 			GameEvents.RaiseOpenShopView();
-		}
 	}
 	#endregion
 
-	#region public API — IHighlightable
-	/// <summary> Always returns cyan profile — computer is always highlightable regardless of active tool. </summary>
-	public HighlightProfile GetHighlightProfile(BaseHeldTool activeTool) => _highlightProfile;
+	#region public API - IIHighlight
+	public HighlightProfile GetHighlightProfile(BaseHeldTool activeTool)
+	{
+		return this._highlightProfile;
+	} 
 	#endregion
 }
 
@@ -7749,256 +8428,6 @@ public static class UtilsPhaseA
 	}
 }
 
-<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-a/5-Tests/Manual/HighlightComputerTest.md ==== -->
-# Highlight Computer Terminal — Manual Test Flow
-
-> Verifies that InteractableComputer gets a cyan Highlight Plus outline when the player
-> looks at it, and that pressing E opens the shop. Tests the ObjectHighlighterManager integration
-> with Phase A's InteractableComputer.
-
----
-
-## Prerequisites
-
-- **Phase A scripts** hand-typed (InteractableComputer with `IHighlightable`, ShopUI, ShopUIOrchestrator, etc.)
-- **Phase B scripts** hand-typed (ObjectHighlighterManager, IHighlightable, PlayerMovement, PlayerGrab)
-- **Highlight Plus** imported (URP version — Runtime/ + Editor/)
-- URP Renderer Data → **Highlight Plus Renderer Feature** added
-- `Profile_Tool` HighlightProfile asset created (cyan outline)
-- `InteractableComputer` has `IHighlightable` implemented + `_highlightProfile` assigned in inspector
-
----
-
-## Setup Guide
-
-### Step 1 — Scene Hierarchy
-
-> If you already have a Phase B test scene, add the computer to it. Otherwise create fresh:
-
-```
-Scene Root
-├── UIManager (singleton)
-├── EconomyManager (singleton, _defaultMoney = 400)
-├── Player
-│   ├── Camera
-│   │   └── ObjectHighlighterManager (component)
-│   ├── ViewModelContainer (empty)
-│   └── HoldPosition (empty)
-├── Floor (Plane, layer: Ground)
-├── ComputerTerminal (see Step 2)
-└── Canvas (for ShopUI — from Phase A setup)
-```
-
-### Step 2 — Create the Computer Terminal
-
-1. Create Empty GO → name `ComputerTerminal`
-2. Position at `(0, 0.5, 3)` — in front of player spawn, within 2m
-3. Add child: **Cube** (scale 0.5, 0.8, 0.3) → this is the "monitor" visual
-4. On the **root GO** (`ComputerTerminal`):
-   - Add `InteractableComputer` component
-   - Add `BoxCollider` (covers the cube child)
-   - Set **Layer** = `Interact`
-5. Wire `InteractableComputer`:
-
-| Field | Assign |
-|-------|--------|
-| `_OPTION` | Create SO_InteractionOption → name "OpenShop", interactionName = "openShopView" |
-| `_selectFirstOptionDefault` | ✅ true (auto-selects first option = no wheel) |
-| `_highlightProfile` | `Profile_Tool.asset` (cyan — from Highlight Plus profiles) |
-
-### Step 3 — Create `Profile_Tool` HighlightProfile Asset
-
-> A HighlightProfile is a ScriptableObject that stores outline/glow settings. Create ONE, reuse
-> on all objects that need the same look (tools, computers, crates all use the same cyan profile).
-
-1. In Project panel: right-click → **Create → Highlight Plus Profile**
-2. Name it `Profile_Tool`
-3. Select the asset → Inspector shows all highlight settings. Configure:
-
-**Outline section:**
-
-| Inspector Field | Set To | What It Does |
-|----------------|--------|-------------|
-| **Outline** | ✅ checked (1.0) | Enables the edge outline. 0 = off, 1 = full intensity |
-| **Color** | Cyan `(0.25, 0.85, 1)` | The outline edge color — click the color box, enter RGB |
-| **Width** | 0.5 | How thick the outline is in screen pixels. 0.2 = thin, 1.0 = thick |
-| **Quality** | High | `Fastest` = jagged, `Medium` = decent, `High` = smooth. Use High for tools. |
-| **Constant Width** | ✅ checked | Outline stays same screen size whether you're near or far. If unchecked, outline shrinks with distance. |
-
-**Outer Glow section:**
-
-| Inspector Field | Set To | What It Does |
-|----------------|--------|-------------|
-| **Glow** | 1.5 | Soft luminous halo intensity. 0 = no glow, 1.5 = visible glow |
-| **Width** | 0.4 | How far the glow extends from the object edge |
-| **Color** (HQ) | Cyan `(0.25, 0.85, 1)` | Glow color — match the outline color for cohesive look |
-| **Animation Speed** | 0 | Pulsing speed. 0 = no pulse (static glow), 1 = gentle pulse |
-
-**Leave everything else OFF** (Overlay, Inner Glow, See-Through, Target FX, Hit FX — not needed for basic hover highlight).
-
-### Step 4 — ObjectHighlighterManager Setup
-
-1. On Camera GO → Add Component → `ObjectHighlighterManager`
-2. Wire in Inspector:
-
-| Inspector Field | Set To | What It Does |
-|----------------|--------|-------------|
-| **Cam** | Drag the Camera component | Which camera to raycast from (player's eyes) |
-| **Interact Range** | 3 | Max distance in meters to detect highlightable objects |
-| **Interact Layer Mask** | Check only "Interact" | Which physics layers the raycast can hit. Only objects on this layer are candidates. |
-
-> ObjectHighlighterManager has NO profile fields — each object owns its own profile via IHighlightable.
-
-### Step 5 — Verify IHighlightable on InteractableComputer
-
-1. Select `ComputerTerminal` GO in Hierarchy
-2. Look at the `InteractableComputer` component in Inspector
-3. You should see a **"Highlight"** header with `_highlightProfile` field
-4. Drag `Profile_Tool.asset` into `_highlightProfile`
-
-**If the field is missing** → your `InteractableComputer.cs` doesn't have `IHighlightable`. Add it:
-
-```csharp
-using HighlightPlus;
-
-public class InteractableComputer : MonoBehaviour, IInteractable, IHighlightable
-{
-    [Header("Highlight")]
-    [SerializeField] HighlightProfile _highlightProfile;  // assign Profile_Tool in inspector
-
-    public HighlightProfile GetHighlightProfile(BaseHeldTool activeTool) => _highlightProfile;
-
-    // ... existing IInteractable methods unchanged ...
-}
-```
-
-### Step 6 — URP Renderer Feature (if not already done)
-
-1. Edit → Project Settings → Graphics → click your **URP Renderer Data** asset
-2. Scroll to bottom → check if **Highlight Plus** Renderer Feature exists
-3. If NOT: click **Add Renderer Feature** → select **Highlight Plus**
-4. No configuration needed — it auto-detects HighlightEffect components
-
-### Step 7 — Press Play
-
----
-
-## How It Works (System Flow)
-
-**Every frame:** `ObjectHighlighterManager.Update()` runs. `ClearCurrent()` disables the previous
-frame's highlight. If `isMenuOpen` → returns early. Then `OutlineLookedAtThing()` fires a single
-raycast from the camera forward, masked to the `Interact` layer.
-
-**Computer detected:** The raycast hits the ComputerTerminal's BoxCollider (on Interact layer).
-`GetComponentInParent<IHighlightable>()` finds `InteractableComputer` (which implements `IHighlightable`).
-Calls `highlightable.GetHighlightProfile(activeTool)` → InteractableComputer returns `_highlightProfile`
-(Profile_Tool, cyan). ObjectHighlighterManager calls `ApplyHighlight(go, profile)`.
-
-**Inside ApplyHighlight:** `target.GetComponent<HighlightEffect>()` — first time returns null, so
-`AddComponent<HighlightEffect>()` + `effectGroup = TargetOptions.Children`. Then `ProfileLoad(profile)`
-loads cyan settings. `highlighted = true` turns on the outline.
-
-**Look away:** Next frame, `ClearCurrent()` sets `highlighted = false` → outline disappears.
-
-**Press E to interact:** Handled by `SimplePlayerInteraction` (Phase A), NOT by ObjectHighlighterManager.
-The interaction system does its own raycast, finds `IInteractable`, calls `Interact(selectedOption)`
-→ `GameEvents.RaiseOpenShopView()` → ShopUI opens. Highlight and interaction are **fully independent
-systems** — they both find interfaces on the same object but don't communicate.
-
----
-
-## 1. Initial State
-
-**DO:** Press Play, look at empty floor
-**EXPECT:**
-- No outlines visible
-- No console errors
-
-**Behind the scenes:** ObjectHighlighterManager raycasts, hits floor (layer Ground, not in Interact mask) → `GetComponentInParent<IHighlightable>()` returns null → no highlight applied.
-
----
-
-## 2. Look At Computer
-
-**DO:** Walk toward ComputerTerminal, aim crosshair at the cube mesh (within 3m)
-**EXPECT:**
-- **Cyan outline appears** around the computer cube
-- Outline follows cube edges — visible border + subtle glow
-- Outline appears **instantly** (no fade-in)
-
-**Behind the scenes:** Raycast hits BoxCollider on Interact layer → `GetComponentInParent<IHighlightable>()` finds `InteractableComputer` → calls `GetHighlightProfile(activeTool)` → returns `_highlightProfile` (Profile_Tool, cyan) → `ApplyHighlight(go, profile)` → `HighlightEffect` added → `ProfileLoad` → cyan outline → `highlighted = true`.
-
----
-
-## 3. Look Away
-
-**DO:** Move crosshair away from computer (look at floor or sky)
-**EXPECT:**
-- Cyan outline **disappears instantly**
-- Computer returns to normal appearance
-
-**Behind the scenes:** `ClearCurrent()` → `currentHighlight.highlighted = false` → Highlight Plus removes the outline. The `HighlightEffect` component stays on the GO but is inactive.
-
----
-
-## 4. Look Back (Reuse)
-
-**DO:** Look at computer again
-**EXPECT:**
-- Cyan outline appears again — same as step 2
-- No "double outline" or visual glitch
-
-**Behind the scenes:** `GetComponent<HighlightEffect>()` finds the existing one (added in step 2) → `ProfileLoad` reloads settings → `highlighted = true`. No `AddComponent` this time — reuses existing.
-
----
-
-## 5. Interact (E key)
-
-**DO:** While looking at computer (outline visible), press E
-**EXPECT:**
-- Shop UI opens (Phase A ShopUI panel becomes active)
-- Outline may disappear (menu opens → `isMenuOpen = true` → Update skips raycasting)
-
-**Behind the scenes:** `SimplePlayerInteraction` raycasts independently, finds `IInteractable` on computer → calls `Interact(openShopView)` → `GameEvents.RaiseOpenShopView()` → ShopUI subscribes and opens. Meanwhile `GameEvents.RaiseMenuStateChanged(true)` fires → ObjectHighlighterManager sets `isMenuOpen = true` → next Update calls `ClearCurrent()` and returns early.
-
----
-
-## 6. Close Shop, Look Again
-
-**DO:** Close shop (ESC or Tab), look at computer
-**EXPECT:**
-- Outline appears again
-- Can interact again with E
-
-**Behind the scenes:** `GameEvents.RaiseMenuStateChanged(false)` → `isMenuOpen = false` → ObjectHighlighterManager resumes raycasting.
-
----
-
-## 7. Multiple Objects — Priority Check
-
-**DO:** Place a ToolPickaxe on the ground NEXT to the computer. Look at the pickaxe (both within 3m).
-**EXPECT:**
-- **Pickaxe gets outline** (not computer) — raycast hits pickaxe collider first
-
-**DO:** Move crosshair from pickaxe → computer
-**EXPECT:**
-- Pickaxe outline disappears, computer outline appears
-
-**Behind the scenes:** Both ToolPickaxe (`BaseHeldTool`) and `InteractableComputer` implement `IHighlightable`. The raycast hits whichever collider is closest to the camera. `GetComponentInParent<IHighlightable>()` returns the first one found on the hit object — so whichever object the crosshair is directly on gets outlined. Only ONE object at a time (ClearCurrent runs each frame).
-
----
-
-## Summary Checklist
-
-- [ ] Computer gets cyan outline when looked at within 3m
-- [ ] Outline disappears when looking away
-- [ ] Outline reappears without visual glitches
-- [ ] E key opens shop (interaction works independently of highlight)
-- [ ] Outline clears when menu opens
-- [ ] Outline resumes when menu closes
-- [ ] Tool takes priority over computer when both in view
-- [ ] Zero console errors throughout
-
 <!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-a/5-Tests/ShopUITest.cs ==== -->
 using System;
 using System.Linq;
@@ -8066,6 +8495,49 @@ public static partial class GameEvents
 	// << when Somthng occured
 	*/
 
+	#region Inventory
+	// when inventory view opened >>
+	public static event Action OnOpenInventoryView;
+	public static void RaiseOpenInventoryView()
+	{
+		LogSubscribersCount(nameof(OnOpenInventoryView), OnOpenInventoryView);
+		GameEvents.OnOpenInventoryView? // if there is any subscribers
+			.Invoke();
+	}
+	// << when inventory view opened
+
+	// when inventory view closed >>
+	public static event Action OnCloseInventoryView;
+	public static void RaiseCloseInventoryView()
+	{
+		LogSubscribersCount(nameof(OnCloseInventoryView), OnCloseInventoryView);
+		GameEvents.OnCloseInventoryView? // if there is any subscribers
+			.Invoke();
+	}
+	// << when inventory view closed
+	#endregion
+
+	#region Tool
+	// when tool pickup was requested from world >>
+	public static event Action<BaseHeldTool> OnToolPickupRequested;
+	public static void RaiseToolPickupRequested(BaseHeldTool tool)
+	{
+		LogSubscribersCount(nameof(OnToolPickupRequested), OnToolPickupRequested);
+		GameEvents.OnToolPickupRequested? // if there is any subscribers
+			.Invoke(tool);
+	}
+	// << when tool pickup was requested from world
+
+	// when active tool was switched >>
+	public static event Action<int> OnToolSwitched;
+	public static void RaiseToolSwitched(int slotIndex)
+	{
+		LogSubscribersCount(nameof(OnToolSwitched), OnToolSwitched);
+		GameEvents.OnToolSwitched? // if there is any subscribers
+			.Invoke(slotIndex);
+	}
+	// << when active tool was switched 
+
 	// when tool was equipped (activated in hotbar) >>
 	public static event Action<BaseHeldTool> OnToolEquipped;
 	public static void RaiseToolEquipped(BaseHeldTool tool)
@@ -8075,10 +8547,173 @@ public static partial class GameEvents
 			.Invoke(tool);
 	}
 	// << when tool was equipped
+	#endregion
+
+	#region Item
+	// when item was picked up into inventory >>
+	public static event Action<BaseHeldTool> OnItemPickedUp;
+	public static void RaiseItemPickedUp(BaseHeldTool tool)
+	{
+		LogSubscribersCount(nameof(OnItemPickedUp), OnItemPickedUp);
+		GameEvents.OnItemPickedUp? // if there is any subscribers
+			.Invoke(tool);
+	}
+	// << when item was picked up into inventory
+
+	// when item was dropped from inventory >>
+	public static event Action<BaseHeldTool> OnItemDropped;
+	public static void RaiseItemDropped(BaseHeldTool tool)
+	{
+		LogSubscribersCount(nameof(OnItemDropped), OnItemDropped);
+		GameEvents.OnItemDropped? // if there is any subscribers
+			.Invoke(tool);
+	}
+	// << when item was dropped from inventory 
+	#endregion
+}
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/1-Managers/ObjectHighlighterManager.cs ==== -->
+﻿using System;
+using System.Linq;
+using System.Collections;
+using System.Collections.Generic;
+
+using UnityEngine;
+using UnityEngine.InputSystem;
+using UnityEngine.UI;
+using TMPro;
+
+using HighlightPlus;
+
+using SPACE_UTIL;
+// required: URP Renderer Data → Add Renderer Feature → Highlight Plus
+
+
+/// <summary>
+/// I outline whatever the player looks at using Highlight Plus. Every Update I raycast from
+/// the camera. If I hit something with IHighlightable, I ask it for a HighlightProfile via
+/// GetHighlightProfile(activeTool). If it returns a profile, I apply it. If null, I skip.
+///
+/// This is fully decoupled — ObjectHighlighterManager doesn't know about specific types (tools,
+/// buildings, computers). Each object decides its OWN profile via IHighlightable. New phases
+/// just implement the interface on their new scripts — no changes to this file ever.
+///
+/// SETUP REQUIRED:
+///   1. Import Highlight Plus package (Runtime + Editor + Demo/Profiles)
+///   2. URP Renderer Data → Add Renderer Feature → Highlight Plus
+///   3. Create HighlightProfile assets (see ShaderGuide.md)
+///   4. Assign _cam + _interactLayerMask in inspector
+///   5. Implement IHighlightable on any object that should be outlineable
+///
+/// Who uses me: Self (Update raycasts). External: PauseMenu (ClearCurrent), tutorial (HighlightObject).
+/// Events I fire: none. Events I subscribe to: OnMenuStateChanged, OnToolEquipped, OnItemDropped.
+/// </summary>
+public class ObjectHighlighterManager : Singleton<ObjectHighlighterManager>
+{
+
+	#region Inspector Fields
+	[Header("Raycast")]
+	[SerializeField] Camera _cam;
+	[SerializeField] float _interactRange = 3f;
+	[SerializeField] LayerMask _highlightableLayerMask;
+	#endregion
+
+	#region private API
+	HighlightEffect currentHighlight;
+	GameObject currentTarget;
+	bool isAnyMenuOpen;
+	BaseHeldTool activeTool;
+	#endregion
+
+	#region public API
+	/// <summary> Disables the current highlight. External scripts (PauseMenu, tutorial) can call
+	/// this to force-clear when needed (e.g. menu opens, tutorial step changes). </summary>
+	public void ClearCurrent()
+	{
+		if (currentHighlight != null)
+		{
+			currentHighlight.highlighted = false;
+			currentHighlight = null;
+			currentTarget = null;
+		}
+	}
+	/// <summary> Highlights a specific object with the given profile. External scripts can call this
+	/// to programmatically highlight objects (e.g. tutorial highlighting a specific tool). The highlight
+	/// stays until ClearCurrent is called (which happens every frame in Update). </summary>
+	public void HighlightObject(GameObject target, HighlightProfile profile)
+	{
+		ApplyHighlight(target, profile);
+	}
+	#endregion
+
+	#region private API — raycast + apply
+	/// <summary> Single raycast from camera forward. Finds first IHighlightable on the hit object
+	/// (via GetComponentInParent). Asks it for a HighlightProfile (passing activeTool so objects like
+	/// BuildingObject can return different colors per tool). If profile is non-null, applies it.
+	/// Zero type checks — each object owns its highlight logic via IHighlightable. </summary>
+	void OutlineLookedAtThing()
+	{
+		if (!Physics.Raycast(_cam.transform.position, _cam.transform.forward,
+			out RaycastHit hit, _interactRange, _highlightableLayerMask))
+			return;
+		// → find IHighlightable on hit object or its parents
+		var highlightable = hit.collider.GetComponentInParent<IHighlightable>();
+		if (highlightable == null)
+			return;
+		// → ask the object what profile it wants (null = skip highlighting)
+		var profile = highlightable.GetHighlightProfile(activeTool);
+		if (profile == null) return;
+		// → apply highlight on the GameObject that has the IHighlightable
+		ApplyHighlight(((MonoBehaviour)highlightable).gameObject, profile);
+	}
+	/// <summary> Gets or adds a HighlightEffect on the target, loads the profile, and turns it on.
+	/// HighlightEffect is added at runtime (not pre-placed on prefabs) so any object can be highlighted.
+	/// effectGroup = Children ensures ALL child meshes get the outline (e.g. tool with multiple parts). </summary>
+	void ApplyHighlight(GameObject target, HighlightProfile profile)
+	{
+		// → get existing HighlightEffect or add one at runtime
+		HighlightEffect effect = target.GetComponent<HighlightEffect>();
+		if (effect == null)
+		{
+			effect = target.AddComponent<HighlightEffect>();
+			effect.effectGroup = TargetOptions.Children;
+		}
+		// → load profile settings (outline color, width, glow, etc.)
+		effect.ProfileLoad(profile);
+		// → turn on the highlight
+		effect.highlighted = true;
+		// → store reference for ClearCurrent next frame
+		currentHighlight = effect;
+		currentTarget = target;
+	}
+	#endregion
+
+	#region Unity Life Cycle
+	/// <summary> Subscribes to menu state (blocks highlight) and tool equip (tracks active tool
+	/// so IHighlightable implementors can decide profile based on what the player is holding). </summary>
+	private void Start()
+	{
+		// purpose: block highlight when menu is open
+		GameEvents.OnMenuStateChanged += (isAnyMenuOpen) => this.isAnyMenuOpen = isAnyMenuOpen;
+		// purpose: track active tool — IHighlightable.GetHighlightProfile receives this
+		GameEvents.OnToolEquipped += (tool) => activeTool = tool;
+		// purpose: clear active tool when item is dropped
+		GameEvents.OnItemDropped += (tool) => { if (activeTool == tool) activeTool = null; };
+	}
+	/// <summary> Every frame: clears previous highlight, then raycasts (unless menu is open).
+	/// Finds IHighlightable on hit → asks for profile → applies. Zero type checks in this script. </summary>
+	private void Update()
+	{
+		ClearCurrent();
+		if (isAnyMenuOpen)
+			return;
+		OutlineLookedAtThing();
+	}
+	#endregion
 }
 
 <!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/1-Managers/SubManagers/InventoryUI.cs ==== -->
-using System;
+﻿using System;
 using System.Linq;
 using System.Collections;
 using System.Collections.Generic;
@@ -8090,12 +8725,72 @@ using TMPro;
 
 using SPACE_UTIL;
 
+
 /// <summary>
-/// toggle inventoryUI
+/// I'm the SubManager for the inventory panel. I don't touch any data — I just open and close.
+/// On first enable, I create an InventoryDataService, hand it to my Orchestrator via Init(),
+/// subscribe to Open/Close events, then immediately disable myself (so the panel starts hidden).
+/// After that, whenever UIManager fires RaiseOpenInventoryView (Tab key), I activate — which
+/// triggers OnEnable → RaiseMenuStateChanged(true) → cursor unlocks, player input freezes.
+/// Tab or ESC in my Update fires RaiseCloseInventoryView → I deactivate → OnDisable → cursor locks.
+///
+/// Who uses me: UIManager (Tab → RaiseOpenInventoryView), self (ESC/Tab → close).
+/// Who I talk to: InventoryOrchestrator (Init), GameEvents (menu state).
 /// </summary>
 public class InventoryUI : MonoBehaviour
 {
-   
+	#region Inspector Fields
+	[SerializeField] InventoryOrchestrator _orchestrator;
+	#endregion
+
+	#region private API
+	InventoryDataService dataService = new InventoryDataService();
+	#endregion
+
+	#region Unity Life Cycle
+	/// <summary> First enable: creates DataService, inits Orchestrator, subscribes to Open/Close,
+	/// then self-disables (panel starts hidden). Subsequent enables: fires MenuStateChanged(true)
+	/// which unlocks cursor and freezes player input. </summary>
+	bool isFirstEnable = true;
+	private void OnEnable()
+	{
+		Debug.Log(C.method(this));
+		if (isFirstEnable)
+		{
+			Debug.Log("InventoryUI first time enabled".colorTag("lime"));
+			// → hand DataService to Orchestrator which builds 40 slot Field_ instances + wires drag-drop
+			_orchestrator.Init(dataService);
+			// purpose: InventoryUI self-activates when inventory view is opened
+			GameEvents.OnOpenInventoryView += () => this.gameObject.SetActive(true);
+			// purpose: InventoryUI self-deactivates when inventory view is closed
+			GameEvents.OnCloseInventoryView += () => this.gameObject.SetActive(false);
+			// → self-disable so panel starts hidden — no false menu pulse
+			this.gameObject.SetActive(false);
+			isFirstEnable = false;
+			return;
+		}
+		// purpose: cursor lock/unlock for player controller
+		// → tells PlayerMovement to unlock cursor + freeze WASD, tells UIManager isAnyMenuOpen = true
+		GameEvents.RaiseMenuStateChanged(isAnyMenuOpen: true);
+	}
+	/// <summary> ESC or Tab while open → fires close event which deactivates this panel. </summary>
+	private void Update()
+	{
+		if (INPUT.K.InstantDown(KeyCode.Escape) || INPUT.K.InstantDown(KeyCode.Tab))
+		{
+			// purpose: close inventory panel → triggers OnDisable → RaiseMenuStateChanged(false) → cursor locks
+			GameEvents.RaiseCloseInventoryView();
+		}
+	}
+	/// <summary> Fires MenuStateChanged(false) which re-locks cursor and re-enables player input. </summary>
+	private void OnDisable()
+	{
+		Debug.Log(C.method(this, "orange"));
+		// purpose: cursor lock/unlock for player controller
+		// → tells PlayerMovement to re-lock cursor + re-enable WASD, tells UIManager isAnyMenuOpen = false
+		GameEvents.RaiseMenuStateChanged(isAnyMenuOpen: false);
+	}
+	#endregion
 }
 
 <!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/2-Data/DataServices/InventoryDataService.cs ==== -->
@@ -8112,20 +8807,11 @@ using SPACE_UTIL;
 public class InventoryDataService
 {
 	#region private static API
-	static int hotBarSize = 10, totalBarSize = 40;
-	#endregion
-
-	#region Nested Entity
-	public class Slot
-	{
-		public BaseHeldTool tool;
-		public int index;
-		public bool isHotBar { get => index < InventoryDataService.hotBarSize; }
-	}
+	public static int hotBarSize = 5, totalBarSize = 12;
 	#endregion
 
 	#region private API
-	List<Slot> SLOT = new List<Slot>();
+	List<InventorySlot> SLOT = new List<InventorySlot>();
 	int selectedSlotIndex = 0;
 	#endregion
 
@@ -8140,33 +8826,38 @@ public class InventoryDataService
 	{
 		SLOT.Clear();
 		for (int i0 = 0; i0 < totalBarSize; i0 += 1)
-			SLOT.Add(new Slot { tool = null, index = i0 });
+			SLOT.Add(new InventorySlot { tool = null, index = i0 });
 		selectedSlotIndex = 0;
 	}
+
 	/// <summary>
 	/// get all slots
 	/// </summary>
 	/// <returns></returns>
-	public List<Slot> GetAllSlots()
+	public List<InventorySlot> GetAllSlots()
 	{
 		return SLOT;
 	}
-	public Slot GetActiveSlot()
+	public InventorySlot GetActiveSlot()
 	{
 		return SLOT.TryGetAt(selectedSlotIndex);
 	}
 	public BaseHeldTool GetActiveTool()
 	{
-		Slot slot = GetActiveSlot();
+		/*
+		InventorySlot slot = GetActiveSlot();
 		if (slot != null)
 			return slot.tool;
 		return null;
+		*/
+
+		return GetActiveSlot()?.tool;
 	}
 	public int GetActiveSlotIndex()
 	{
 		return selectedSlotIndex;
 	}
-	public int GetIndexFotTool(BaseHeldTool tool)
+	public int GetIndexForTool(BaseHeldTool tool)
 	{
 		return SLOT.findIndex(slot => slot.tool == tool);
 	}
@@ -8196,8 +8887,7 @@ public class InventoryDataService
 				targetIndex = preferredSlot;
 		if(targetIndex == -1)
 			for(int i0 = 0; i0 < SLOT.Count; i0 += 1)
-				if(SLOT[i0].tool 
-== null)
+				if(SLOT[i0].tool == null)
 				{
 					targetIndex = i0;
 					break;
@@ -8209,7 +8899,7 @@ public class InventoryDataService
 	}
 	public void RemoveTool(BaseHeldTool tool)
 	{
-		int index = GetIndexFotTool(tool);
+		int index = GetIndexForTool(tool);
 		if (index != -1)
 			SLOT[index].tool = null;
 		if (GetActiveTool() == tool)
@@ -8268,6 +8958,22 @@ selectedSlotIndex: {selectedSlotIndex}";
 	#endregion
 }
 
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/2-Data/Entities/InventorySlot.cs ==== -->
+﻿using UnityEngine;
+using System.Collections;
+
+
+// since its similar to pure data such as SO_, Field_ no need for Get...() methods
+public class InventorySlot
+{
+	public BaseHeldTool tool;
+	public int index;
+	public bool isHotBar
+	{
+		get => index < InventoryDataService.hotBarSize;
+	}
+}
+
 <!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/2-Data/Enums/GlobalEnums.cs ==== -->
 // GLOBAL ENUM (@PhaseB) >> //
 
@@ -8275,12 +8981,22 @@ selectedSlotIndex: {selectedSlotIndex}";
 /// all enums introduced in Phase B � one file, one place
 /// </summary>
 
+/// <summary> animator parameter names as enum � never use raw strings.
+/// usage: _animator.Play(AnimParamType.attack1.ToString(), -1, 0f) </summary>
+public enum AnimParamType
+{
+	attack1,
+	// Phase E: isRunning, isSmelting, speed, fillPercent
+}
+
 /// <summary> interaction option types � replaces magic strings </summary>
 public enum InteractionType
 {
-	Take,
-	Destroy,
-	Toggle,
+	openShopView,
+	grab,
+	take,
+	destroy,
+	toggle,
 	// Pack, // Phase D:
 	// TakeBuilding,
 	// SetMold, // Phase E:
@@ -8311,7 +9027,7 @@ public enum SavableObjectID
 
 // << GLOBAL ENUM (@PhaseB) //
 
-<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/2-Data/Field_Inventory.cs ==== -->
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/2-Data/Field_InventorySlot.cs ==== -->
 using System.Collections.Generic;
 
 using UnityEngine;
@@ -8321,12 +9037,12 @@ using TMPro;
 
 using SPACE_UTIL;
 
-public class Field_Inventory : MonoBehaviour
+public class Field_InventorySlot : MonoBehaviour
 {
 	#region inspector fields
-	[SerializeField] Image _icon, _bg;
-	[SerializeField] TMP_Text _nameText, _countText;
-	[SerializeField] GameObject _orangeBarThing, _hideWhenDragged;
+	public Image _icon, _bg;
+	public TMP_Text _nameText, _countText;
+	public GameObject _orangeBarThing, _hideWhenDragged;
 
 	[SerializeField]
 	Color _selectedColor = new Color(0.4f, 0.8f, 0.6f, 0.2f),
@@ -8341,7 +9057,7 @@ public class Field_Inventory : MonoBehaviour
 		this._nameText.text = $"";
 		this._countText.text = (count <= 1) ? $"" : count.ToString();
 	}
-	public void SetHighLighted(bool isSelected)
+	public void SetHighlighted(bool isSelected)
 	{
 		this._bg.color = (isSelected) ? this._selectedColor : this._notSelectedColor;
 	}
@@ -8350,7 +9066,7 @@ public class Field_Inventory : MonoBehaviour
 		this._icon.enabled = false;
 		this._nameText.text = $"";
 		this._countText.text = $"";
-		SetHighLighted(false);
+		SetHighlighted(false);
 	}
 	public void SetHovered(bool isHovered)
 	{
@@ -8368,13 +9084,68 @@ public class Field_Inventory : MonoBehaviour
 	#endregion
 }
 
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/2-Data/Field_SelectedItemInfo.cs ==== -->
+using System.Collections.Generic;
+
+using UnityEngine;
+using UnityEngine.InputSystem;
+using UnityEngine.UI;
+using TMPro;
+
+using SPACE_UTIL;
+
+public class Field_SelectedItemInfo : MonoBehaviour
+{
+	#region inspector fields
+	public Image _selectedItemIcon;
+	public TMP_Text _selectedItemNameText, selectedItemCountText, _selectedItemDescrText;
+	public TMP_Text _equipButtonText;
+	public Button _equipButton;
+	public Button _dropButton;
+	#endregion
+	#region public API
+	public void SetData(Sprite sprite, string name, string descr, string count, string equipText)
+	{
+		this._selectedItemIcon.enabled = true;
+		this._selectedItemIcon.sprite = sprite;
+		this._selectedItemNameText.text = $"{name}";
+		this._selectedItemDescrText.text = $"{descr}";
+		this.selectedItemCountText.text = $"{count}";
+		this._equipButtonText.text = $"{equipText}";
+		// this._countText.text = (count <= 1) ? $"" : count.ToString();
+	}
+	#endregion
+}
+
 <!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/2-Data/Interfaces/GlobalInterfaces.cs ==== -->
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 
 using UnityEngine;
+
+using HighlightPlus;
+
 using SPACE_UTIL;
+
+/// <summary>
+/// Any object that can be outlined when the player looks at it. ObjectHighlighterManager raycasts
+/// each frame and calls GetHighlightProfile on the first IHighlightable it hits. The object
+/// decides which profile to return (or null to skip highlighting).
+///
+/// Who implements me: BaseHeldTool (cyan), InteractableComputer (cyan), OrePiece (cyan, skip if magnet-held),
+///   BuildingCrate (cyan), BuildingObject (cyan/green/red depending on active tool).
+/// Who calls me: ObjectHighlighterManager.OutlineLookedAtThing().
+/// </summary>
+public interface IHighlightable
+{
+	/// <summary>
+	/// Returns the HighlightProfile to use when the player looks at this object.
+	/// Return null to skip highlighting (e.g. ore already held by magnet).
+	/// </summary>
+	/// <param name="activeTool">is the currently equipped tool (or null if empty-handed).</param>
+	HighlightProfile GetHighlightProfile(BaseHeldTool activeTool);
+}
 
 /// <summary>
 /// contract for item with an inventory icon.
@@ -8413,6 +9184,431 @@ public class SO_FootStepSoundDef : ScriptableObject
 {
 	public AudioClip leftFootStepClip, 
 					 rightGootStepClip;
+}
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/3-Monobehaviours/Orchestrators/InventoryOrchestrator.cs ==== -->
+﻿using System;
+using System.Linq;
+using System.Collections;
+using System.Collections.Generic;
+
+using UnityEngine;
+using UnityEngine.UI;
+using TMPro;
+
+using SPACE_UTIL;
+
+/// <summary>
+/// I'm the brain(orchestrator) of the inventory system. InventoryUI hands me a DataService on Init — I then
+/// Instantiate 40 Field_InventorySlot prefabs (10 hotbar + 30 extended), attach UIEventRelay to
+/// each for drag-drop, and subscribe to OnToolPickupRequested so I can add tools to slots.
+/// In Update, I route hotbar keys (1-0), scroll wheel, and tool actions (LMB/RMB/R/Q/G) to the
+/// active tool. I also manage drag-drop between slots (swap), drop-outside-UI (tool drops to world),
+/// and the selected item info panel (click slot → show name/icon/desc → equip/drop buttons).
+/// I have zero reference to PlayerMovement — tool.Owner is set via GameEvents.OnToolEquipped by PlayerGrab.
+///
+/// Who uses me: InventoryUI (Init), GameEvents (OnToolPickupRequested).
+/// Events I fire: RaiseToolEquipped, RaiseToolSwitched, RaiseItemPickedUp, RaiseItemDropped, RaiseCloseInventoryView.
+/// </summary>
+public class InventoryOrchestrator : MonoBehaviour
+{
+	#region Inspector Fields
+	[SerializeField] Transform _hotbarContainer;
+	[SerializeField] Transform _extendedContainer;
+	[SerializeField] GameObject _pfInventorySlot;
+	[Header("Drag Ghost")]
+	[SerializeField] GameObject _dragGhostIcon;
+	[SerializeField] Image _dragGhostImage;
+	[SerializeField] TMP_Text _dragGhostAmountText;
+	[Header("Selected Item Info Panel")]
+	[SerializeField] GameObject _selectedItemInfoObj;
+	/*
+	[SerializeField] TMP_Text _selectedItemNameText;
+	[SerializeField] TMP_Text _selectedItemDescText;
+	[SerializeField] TMP_Text _selectedItemAmountText;
+	[SerializeField] Image _selectedItemIcon;
+	[SerializeField] TMP_Text _equipButtonText;
+	[SerializeField] Button _equipButton;
+	[SerializeField] Button _dropButton;
+	*/
+	#endregion
+
+	#region private API
+	InventoryDataService dataService;
+	List<Field_InventorySlot> FIELD_SLOT = new List<Field_InventorySlot>();
+	List<UIEventRelay> RELAY_SLOT = new List<UIEventRelay>();
+	BaseHeldTool previousActiveTool;
+	int dragFromIndex = -1;
+
+	/// <summary> Destroys any existing slot children, then Instantiates 40 Field_InventorySlot
+	/// prefabs (10 under hotbar, 30 under extended). Attaches UIEventRelay to each for drag-drop
+	/// and wires all Action callbacks (beginDrag, drag, endDrag, drop, pointerDown). </summary>
+	void BuildSlotFields()
+	{
+		_hotbarContainer.destroyLeaves();
+		_extendedContainer.destroyLeaves();
+		FIELD_SLOT.Clear();
+		for (int i = 0; i < dataService.GetTotalBarSize(); i++)
+		{
+			var slot = dataService.GetAllSlots()[i];
+			Transform parent = slot.isHotBar ? _hotbarContainer : _extendedContainer;
+			var field = GameObject.Instantiate(_pfInventorySlot, parent).gc<Field_InventorySlot>();
+			field.SetEmpty();
+			field.SetIsHotBar(slot.isHotBar);
+			var relay = field.gameObject.AddComponent<UIEventRelay>();
+			relay.Index = i;
+			relay.onBeginDrag = HandleBeginDrag;
+			relay.onDrag = HandleDrag;
+			relay.onEndDrag = HandleEndDrag;
+			relay.onDrop = HandleDrop;
+			relay.onPointerEnter = (r) => FIELD_SLOT[r.Index].SetHovered(true);
+			relay.onPointerExit = (r) => FIELD_SLOT[r.Index].SetHighlighted(r.Index == dataService.GetActiveSlotIndex());
+			relay.onPointerDown = (r) => UpdateSelectedItemInfo(dataService.GetAllSlots()[r.Index].tool);
+			FIELD_SLOT.Add(field);
+			RELAY_SLOT.Add(relay);
+		}
+	}
+	/// <summary> Loops through all 40 slots and updates each Field_ to match the DataService state —
+	/// shows icon+name+amount for occupied slots, SetEmpty for empty, highlights the active slot. </summary>
+	void RefreshAllSlots()
+	{
+		for (int i = 0; i < FIELD_SLOT.Count; i++)
+		{
+			var slot = dataService.GetAllSlots()[i];
+			if (slot.tool != null)
+			{
+				Sprite icon = (slot.tool is IIconItem iconItem) ? iconItem.GetIcon() : null;
+				FIELD_SLOT[i].SetData(icon, slot.tool.GetName(), slot.tool.GetQty());
+				FIELD_SLOT[i].SetHighlighted(i == dataService.GetActiveSlotIndex());
+			}
+			else
+			{
+				FIELD_SLOT[i].SetEmpty();
+			}
+		}
+	}
+	/// <summary> Called via OnToolPickupRequested when a tool’s “Take” interaction fires. Adds the
+	/// tool to the first empty slot via DataService, deactivates it, equips if EquipWhenPickedUp,
+	/// fires OnItemPickedUp, and refreshes all slot displays. </summary>
+	void HandleToolPickup(BaseHeldTool tool)
+	{
+		int idx = dataService.TryAddTool(tool, -1);
+		if (idx == -1) { Debug.Log("inventory full".colorTag("red")); return; }
+		tool.gameObject.SetActive(false);
+		if (tool.GetShouldEquipWhenPickedUp() && idx < dataService.GetHotBarSize())
+			SwitchToSlot(idx);
+		// purpose: inform other systems that tool was picked up
+		GameEvents.RaiseItemPickedUp(tool);
+		RefreshAllSlots();
+	}
+	/// <summary> Deactivates the previous tool’s GO, activates the new tool’s GO (which triggers
+	/// OnEnable → parents to ViewModelContainer), fires RaiseToolEquipped (PlayerGrab sets Owner),
+	/// fires RaiseToolSwitched, and refreshes all slot highlights. </summary>
+	void SwitchToSlot(int index)
+	{
+		if (previousActiveTool != null) previousActiveTool.gameObject.SetActive(false);
+		var slot = dataService.GetAllSlots()[index];
+		if (slot.tool == previousActiveTool && slot.tool != null)
+		{
+			previousActiveTool.gameObject.SetActive(false);
+			previousActiveTool = null;
+			dataService.SwitchTo(index);
+			RefreshAllSlots();
+			return;
+		}
+		dataService.SwitchTo(index);
+		previousActiveTool = dataService.GetActiveTool();
+		if (previousActiveTool != null)
+		{
+			previousActiveTool.gameObject.SetActive(true);
+			// purpose: PlayerGrab sets tool.Owner = PlayerMovement via this event
+			GameEvents.RaiseToolEquipped(previousActiveTool);
+		}
+		// purpose: notify ObjectHighlighterManager and other systems about tool change
+		GameEvents.RaiseToolSwitched(index);
+		RefreshAllSlots();
+	}
+	/// <summary> Gets the active tool from DataService, calls DropItem (shows WorldModel, applies
+	/// forward velocity), removes from DataService, fires OnItemDropped, refreshes slots. </summary>
+	void HandleDropActiveTool()
+	{
+		BaseHeldTool tool = dataService.GetActiveTool();
+		if (tool == null) return;
+		tool.DropItem();
+		dataService.RemoveTool(tool);
+		previousActiveTool = null;
+		// purpose: inform other systems that tool was dropped
+		GameEvents.RaiseItemDropped(tool);
+		RefreshAllSlots();
+	}
+	#endregion
+
+	#region private API — drag-drop
+	/// <summary> Records which slot the drag started from, hides the slot’s content (SetDragVisible
+	/// false), shows the DragGhostIcon with the tool’s sprite following the cursor. </summary>
+	void HandleBeginDrag(UIEventRelay relay, UnityEngine.EventSystems.PointerEventData e)
+	{
+		var slot = dataService.GetAllSlots()[relay.Index];
+		if (slot.tool == null) return;
+		dragFromIndex = relay.Index;
+		FIELD_SLOT[relay.Index].SetDragVisible(false);
+		_dragGhostIcon.SetActive(true);
+		_dragGhostImage.sprite = (slot.tool is IIconItem icon) ? icon.GetIcon() : null;
+		_dragGhostAmountText.text = slot.tool.GetQty() > 1 ? slot.tool.GetQty().ToString() : "";
+		_dragGhostIcon.transform.SetAsLastSibling();
+	}
+	/// <summary> Every frame during drag — moves the ghost icon to follow the cursor position. </summary>
+	void HandleDrag(UnityEngine.EventSystems.PointerEventData e)
+	{
+		_dragGhostIcon.transform.position = e.position;
+	}
+	/// <summary> Drag ended — restores the source slot’s visibility, hides the ghost. If dropped
+	/// outside any UI slot (e.pointerEnter == null), drops the tool into the world instead. </summary>
+	void HandleEndDrag(UIEventRelay relay, UnityEngine.EventSystems.PointerEventData e)
+	{
+		FIELD_SLOT[relay.Index].SetDragVisible(true);
+		_dragGhostIcon.SetActive(false);
+		if (e.pointerEnter == null && dragFromIndex >= 0)
+		{
+			// dropped outside UI → drop the item
+			var slot = dataService.GetAllSlots()[dragFromIndex];
+			if (slot.tool != null) { slot.tool.DropItem(); dataService.RemoveTool(slot.tool); }
+		}
+		dragFromIndex = -1;
+		RefreshAllSlots();
+	}
+	/// <summary> Drop landed on a target slot — swaps the dragged tool with whatever is in the
+	/// target slot via DataService.Swap, then refreshes all displays. </summary>
+	void HandleDrop(UIEventRelay relay, UnityEngine.EventSystems.PointerEventData e)
+	{
+		if (dragFromIndex < 0 || dragFromIndex == relay.Index) return;
+		dataService.Swap(dragFromIndex, relay.Index);
+		RefreshAllSlots();
+	}
+	#endregion
+
+	#region private API --extra
+	// nice-to-have: selected item info panel — click a slot in extended inventory to see name/desc/icon + equip/drop buttons
+	BaseHeldTool selectedTool;
+	/// <summary> Shows or hides the selected item info panel. If tool is not null, displays its
+	/// name, description, icon, amount, and sets the equip button text (“Equip” or “Build”). </summary>
+	void UpdateSelectedItemInfo(BaseHeldTool tool)
+	{
+		selectedTool = tool;
+		if (tool == null) { this._selectedItemInfoObj.SetActive(false); return; }
+		this._selectedItemInfoObj.SetActive(true);
+		Field_SelectedItemInfo field = this._selectedItemInfoObj.gc<Field_SelectedItemInfo>();
+		field.SetData(
+			sprite: (tool is IIconItem icon) ? icon.GetIcon() : null,
+			name: tool.GetName(),
+			count: tool.GetQty() > 1 ? tool.GetQty().ToString() : "",
+			descr: tool.GetDescr(),
+			equipText: (tool is ToolBuilder) ? "Build" : "Equip"
+		);
+		/*
+		_selectedItemNameText.text = tool.Name;
+		_selectedItemDescText.text = tool.Description;
+		_selectedItemAmountText.text = tool.Quantity > 1 ? tool.Quantity.ToString() : "";
+		_selectedItemIcon.sprite = (tool is IIconItem icon) ? icon.GetIcon() : null;
+		_equipButtonText.text = (tool is ToolBuilder) ? "Build" : "Equip";
+		*/
+	}
+	/// <summary> Equips the currently selected tool by switching to its slot index, then fires
+	/// RaiseCloseInventoryView so the inventory panel closes after equipping. </summary>
+	void EquipSelectedTool()
+	{
+		if (selectedTool == null) return;
+		int idx = dataService.GetIndexForTool(selectedTool);
+		if (idx >= 0) SwitchToSlot(idx);
+		// purpose: close inventory after equipping
+		GameEvents.RaiseCloseInventoryView();
+	}
+	/// <summary> Drops the currently selected tool from the info panel — calls DropItem on the
+	/// tool, removes it from DataService, fires OnItemDropped, and hides the info panel. </summary>
+	void DropSelectedTool()
+	{
+		if (selectedTool == null) return;
+		selectedTool.DropItem();
+		dataService.RemoveTool(selectedTool);
+		// purpose: inform other systems tool dropped
+		GameEvents.RaiseItemDropped(selectedTool);
+		UpdateSelectedItemInfo(null);
+		RefreshAllSlots();
+	}
+	#endregion
+
+	#region private API — subscriptions
+	/// <summary> Subscribes to OnToolPickupRequested (so tools can be added to inventory) and
+	/// OnMoneyChanged (triggers RefreshAllSlots to update any money-dependent displays). </summary>
+	void SubscribeEvents()
+	{
+		// purpose: InventoryOrchestrator adds this tool to hotbar
+		GameEvents.OnToolPickupRequested += HandleToolPickup;
+		// purpose: refresh money display on hotbar (cart total, etc.)
+		GameEvents.OnMoneyChanged += (money) => RefreshAllSlots();
+	}
+	#endregion
+
+	#region public API
+	/// <summary> init from SubManager </summary>
+	public void Init(InventoryDataService dataService)
+	{
+		this.dataService = dataService;
+		this.dataService.Build();
+		BuildSlotFields();
+		RefreshAllSlots();
+		SubscribeEvents();
+		Field_SelectedItemInfo field = this._selectedItemInfoObj.gc<Field_SelectedItemInfo>();
+		field._equipButton.onClick.AddListener(() => EquipSelectedTool());
+		field._dropButton.onClick.AddListener(() => DropSelectedTool());
+		UpdateSelectedItemInfo(null);
+	}
+	/// <summary> expose dataService for test snapshot </summary>
+	public InventoryDataService GetDataServiceForTest() => dataService;
+	#endregion
+
+	#region Unity Life Cycle
+	/// <summary> Every frame (when no menu open): routes hotbar keys 1-0, scroll wheel, and
+	/// tool action keys (LMB/RMB/R/Q/G) to the active tool’s virtual methods. </summary>
+	private void Update()
+	{
+		// → skip all input when any menu is open
+		if (Singleton<UIManager>.Ins.GetIsAnyMenuOpen()) return;
+		// hotbar keys 1-0
+		if (INPUT.K.InstantDown(KeyCode.Alpha1)) SwitchToSlot(0);
+		else if (INPUT.K.InstantDown(KeyCode.Alpha2)) SwitchToSlot(1);
+		else if (INPUT.K.InstantDown(KeyCode.Alpha3)) SwitchToSlot(2);
+		else if (INPUT.K.InstantDown(KeyCode.Alpha4)) SwitchToSlot(3);
+		else if (INPUT.K.InstantDown(KeyCode.Alpha5)) SwitchToSlot(4);
+		else if (INPUT.K.InstantDown(KeyCode.Alpha6)) SwitchToSlot(5);
+		else if (INPUT.K.InstantDown(KeyCode.Alpha7)) SwitchToSlot(6);
+		else if (INPUT.K.InstantDown(KeyCode.Alpha8)) SwitchToSlot(7);
+		else if (INPUT.K.InstantDown(KeyCode.Alpha9)) SwitchToSlot(8);
+		else if (INPUT.K.InstantDown(KeyCode.Alpha0)) SwitchToSlot(9);
+
+		// scroll wheel
+		float scroll = Input.GetAxis("Mouse ScrollWheel");
+		if (scroll != 0f) { dataService.Scroll(scroll > 0f ? 1 : -1); SwitchToSlot(dataService.GetActiveSlotIndex()); }
+
+		// tool actions
+		BaseHeldTool active = dataService.GetActiveTool();
+		if (active != null)
+		{
+			if (INPUT.K.InstantDown(KeyCode.Mouse0)) active.PrimaryFire();
+			if (Input.GetMouseButton(0)) active.PrimaryFireHeld();
+			if (INPUT.K.InstantDown(KeyCode.Mouse1)) active.SecondaryFire();
+			if (Input.GetMouseButton(1)) active.SecondaryFireHeld();
+			if (INPUT.K.InstantDown(KeyCode.R)) active.Reload();
+			if (INPUT.K.InstantDown(KeyCode.Q)) active.QButtonPressed();
+			if (INPUT.K.InstantDown(KeyCode.G)) HandleDropActiveTool();
+		}
+	}
+	/// <summary> Unsubscribes from OnToolPickupRequested to prevent null ref on scene unload. </summary>
+	private void OnDestroy()
+	{
+		GameEvents.OnToolPickupRequested -= HandleToolPickup;
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/3-Monobehaviours/Physics/BasePhysicsObject.cs ==== -->
+﻿using System;
+using System.Linq;
+using System.Collections;
+using System.Collections.Generic;
+
+using UnityEngine;
+using UnityEngine.UI;
+using TMPro;
+
+using SPACE_UTIL;
+
+
+/// <summary>
+/// I'm the base class for any physics object that can sit on conveyors. I cache my Rigidbody
+/// on Awake and set standard drag values. In FixedUpdate I apply accumulated conveyor velocities
+/// (Phase D populates these via RegisterConveyor/UnregisterConveyor stubs). OrePiece and
+/// BaseSellableItem inherit from me. I also expose STANDARD_LINEAR_DAMPING and STANDARD_ANGULAR_DAMPING
+/// constants that OrePiecePoolManager uses when resetting pooled ore.
+///
+/// Who inherits me: BaseSellableItem → BaseHeldTool → all tools, OrePiece → DamageableOrePiece.
+/// </summary>
+public class BasePhysicsObject : MonoBehaviour
+{
+	#region constants
+	public static float standardLinearDampening { get;  } = 0.2f;
+	public static float standardAngularDampening { get; }  = 0.05f;
+	#endregion
+
+	#region private API
+	Vector3 sumVel;
+	float bestY;
+	int count;
+	bool retainY;
+	Rigidbody rb;
+	#endregion
+
+	#region public API
+	public Vector3 GetSumVel() => sumVel;
+	public float GetBestY() => bestY;
+	public int GetCount() => count;
+	public bool GetRetainY() => retainY;
+	public Rigidbody GetRb() => rb;
+	/// <summary> add conveyor velocity contribution </summary>
+	public void AddConveyorVelocity(Vector3 velocity, bool retainY)
+	{
+		if (count == 0) sumVel = velocity;
+		else sumVel += velocity;
+		if (velocity.y > bestY) bestY = velocity.y;
+		count++;
+		if (retainY) this.retainY = true;
+	}
+	/// <summary> reset per-frame accumulation </summary>
+	public void ResetAccum()
+	{
+		sumVel = default;
+		bestY = 0f;
+		count = 0;
+		retainY = false;
+	}
+	#endregion
+
+	#region Unity Life Cycle
+	/// <summary> Caches the Rigidbody reference and sets standard drag values so all physics
+	/// objects start with consistent drag (used as reset values by OrePiecePoolManager). </summary>
+	protected virtual void Awake()
+	{
+		// → cache Rigidbody for conveyor velocity + pool reset
+		rb = GetComponent<Rigidbody>();
+		rb.linearDamping = standardLinearDampening;
+		rb.angularDamping = standardAngularDampening;
+	}
+	protected virtual void OnEnable()
+	{
+		// Phase D: ConveyorBeltManager.Register(this);
+	}
+	protected virtual void OnDisable()
+	{
+		// Phase D: ConveyorBeltManager.Unregister(this);
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/3-Monobehaviours/Physics/BaseSellableItem.cs ==== -->
+﻿/// <summary>
+/// I add a sell value to any physics object. SellerMachine checks for me on trigger enter —
+/// if something has BaseSellableItem, it can be sold for BaseSellValue. OrePiece inherits me
+/// and overrides GetSellValue to multiply by RandomPriceMultiplier. BaseHeldTool also inherits
+/// me (tools are technically sellable, though most have zero sell value).
+///
+/// Who inherits me: BaseHeldTool → all tools, OrePiece → DamageableOrePiece.
+/// </summary>
+public class BaseSellableItem : BasePhysicsObject
+{
+	protected float baseSellValue = 1f;
+
+	/// <summary> base sell value, optionally overridden by OrePiece etc. </summary>
+	public virtual float GetSellValue() => baseSellValue;
 }
 
 <!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/3-Monobehaviours/Player/PlayerCamera.cs ==== -->
@@ -8518,15 +9714,16 @@ public class PlayerCamera : MonoBehaviour
 	/// </summary>
 	private void Update()
 	{
-		if (Time.timeScale == 0f) return;
+		if (Time.timeScale == 0f) // when paused
+			return;
 		// → skip look input when any menu is open
 		if (!isAnyMenuOpen)
 		{
 			HandleLook();
 			HandleCameraBobbing();
 			HandleViewModelBobbing();
+			HandleFOV();
 		}
-		HandleFOV();
 		HandleViewPunchDecay();
 	}
 	/// <summary> Reads Mouse X/Y, applies sensitivity, rotates player around Y-axis (horizontal)
@@ -8544,7 +9741,7 @@ public class PlayerCamera : MonoBehaviour
 	/// </summary>
 	void HandleFOV()
 	{
-		bool sprinting = _pc.SelectedWalkSpeed > _pc.WalkSpeed && _pc.IsGrounded;
+		bool sprinting = _pc.GetSelectedWalkSpeed() > _pc.GetWalkSpeed() && _pc.GetIsGrounded();
 		float targetFOV = sprinting ? _baseFOV * 1.05f : _baseFOV;
 		currentFOV = Mathf.SmoothDamp(currentFOV, targetFOV, ref fovVelocity, 0.1f);
 		_cam.fieldOfView = currentFOV;
@@ -8553,8 +9750,8 @@ public class PlayerCamera : MonoBehaviour
 	/// grounded state. Faster movement = faster + larger bob. Airborne = no bob. </summary>
 	void HandleCameraBobbing()
 	{
-		bool moving = _pc.MoveInput.sqrMagnitude > 0.01f;
-		if (!_pc.IsGrounded)
+		bool moving = _pc.GetMoveInput().sqrMagnitude > 0.01f;
+		if (!_pc.GetIsGrounded())
 		{
 			bobbingPitch = Mathf.SmoothDamp(bobbingPitch, 0f, ref bobbingPitchVel, 0.2f);
 			bobbingYaw = Mathf.SmoothDamp(bobbingYaw, 0f, ref bobbingYawVel, 0.2f);
@@ -8568,7 +9765,7 @@ public class PlayerCamera : MonoBehaviour
 		}
 		else
 		{
-			float speedRatio = _pc.SelectedWalkSpeed / Mathf.Max(_pc.WalkSpeed, 0.01f);
+			float speedRatio = _pc.GetSelectedWalkSpeed() / Mathf.Max(_pc.GetWalkSpeed(), 0.01f);
 			bobbingCounter += Time.deltaTime * _baseBobbingSpeed * speedRatio;
 			if (bobbingCounter > Mathf.PI * 2f) { bobbingCounter -= Mathf.PI * 2f; yawDirMultiplier *= -1f; }
 			float wave = Mathf.Sin(bobbingCounter);
@@ -8576,7 +9773,7 @@ public class PlayerCamera : MonoBehaviour
 			bobbingPitch = Mathf.SmoothDamp(bobbingPitch, wave * _baseBobbingPitchAmount * speedRatio, ref bobbingPitchVel, 0.05f);
 			bobbingYaw = Mathf.SmoothDamp(bobbingYaw, wave * _baseBobbingYawAmount * speedRatio * yawDirMultiplier, ref bobbingYawVel, 0.05f);
 		}
-		Vector3 baseLocal = new Vector3(_cam.transform.localPosition.x, _pc.CC.height / 2f - 0.5f, _cam.transform.localPosition.z);
+		Vector3 baseLocal = new Vector3(_cam.transform.localPosition.x, _pc.GetCC().height / 2f - 0.5f, _cam.transform.localPosition.z);
 		_cam.transform.localPosition = baseLocal + new Vector3(0f, bobbingVerticalOffset, 0f);
 		Quaternion lookRot = Quaternion.Euler(xRot + viewPunchCurrent.x, viewPunchCurrent.y, viewPunchCurrent.z);
 		Quaternion bobRot = Quaternion.Euler(bobbingPitch, bobbingYaw, 0f);
@@ -8587,25 +9784,25 @@ public class PlayerCamera : MonoBehaviour
 	void HandleViewModelBobbing()
 	{
 		if (_viewModelContainer == null) return;
-		bool moving = _pc.MoveInput.sqrMagnitude > 0.01f;
-		bool justJumped = wasGroundedLastFrame && !_pc.IsGrounded;
-		bool justLanded = !wasGroundedLastFrame && _pc.IsGrounded;
+		bool moving = _pc.GetMoveInput().sqrMagnitude > 0.01f;
+		bool justJumped = wasGroundedLastFrame && !_pc.GetIsGrounded();
+		bool justLanded = !wasGroundedLastFrame && _pc.GetIsGrounded();
 		if (justJumped) jumpTargetOffset = _jumpBounceAmount;
 		else if (justLanded) jumpTargetOffset = _landBounceAmount;
 		jumpOffset = Mathf.SmoothDamp(jumpOffset, jumpTargetOffset, ref jumpVelocity, _jumpSmoothTime);
 		jumpTargetOffset = Mathf.MoveTowards(jumpTargetOffset, 0f, Time.deltaTime * Mathf.Abs(jumpTargetOffset / _jumpSmoothTime));
-		wasGroundedLastFrame = _pc.IsGrounded;
+		wasGroundedLastFrame = _pc.GetIsGrounded();
 
-		if (!_pc.IsGrounded || !moving)
+		if (!_pc.GetIsGrounded() || !moving)
 		{
-			float smoothTime = _pc.IsGrounded ? 0.1f : 0.2f;
+			float smoothTime = _pc.GetIsGrounded() ? 0.1f : 0.2f;
 			viewBobPitch = Mathf.SmoothDamp(viewBobPitch, 0f, ref viewBobPitchVel, smoothTime);
 			viewBobYaw = Mathf.SmoothDamp(viewBobYaw, 0f, ref viewBobYawVel, smoothTime);
 			viewBobVertical = Mathf.SmoothDamp(viewBobVertical, 0f, ref viewBobVerticalVel, smoothTime);
 		}
 		else
 		{
-			float sr = _pc.SelectedWalkSpeed / Mathf.Max(_pc.WalkSpeed, 0.01f);
+			float sr = _pc.GetSelectedWalkSpeed() / Mathf.Max(_pc.GetWalkSpeed(), 0.01f);
 			viewBobCounter += Time.deltaTime * _viewModelBobSpeed * sr;
 			if (viewBobCounter > Mathf.PI * 2f) { viewBobCounter -= Mathf.PI * 2f; viewBobYawDir *= -1; }
 			float wave = Mathf.Sin(viewBobCounter);
@@ -8683,31 +9880,31 @@ using SPACE_UTIL;
 public class PlayerController : Singleton<PlayerController>
 {
 	#region Inspector Fields
-	 [Header("Move")]
-    [SerializeField] float _walkSpeed = 3f;
-    [SerializeField] float _sprintSpeed = 5f;
-    [SerializeField] float _duckSpeed = 1.5f;
-    [SerializeField] float _jumpHeight = 2f;
-    [SerializeField] float _gravity = -10f;
-    [SerializeField] float _slideSpeed = 8f;
-    [SerializeField] float _standingSlopeLimit = 60f;
-    [SerializeField] float _duckHeight = 1f;
-    [SerializeField] float _standingHeight = 2f;
-    [SerializeField] float _duckingSpeed = 10f;
-    [SerializeField] CharacterController _cc;
-    [SerializeField] Transform _groundCheck;
-    [SerializeField] LayerMask _groundLayer;
-    // [SerializeField] Transform _characterModel;
+	[Header("Move")]
+	[SerializeField] float _walkSpeed = 3f;
+	[SerializeField] float _sprintSpeed = 5f;
+	[SerializeField] float _duckSpeed = 1.5f;
+	[SerializeField] float _jumpHeight = 2f;
+	[SerializeField] float _gravity = -10f;
+	[SerializeField] float _slideSpeed = 8f;
+	[SerializeField] float _standingSlopeLimit = 60f;
+	[SerializeField] float _duckHeight = 1f;
+	[SerializeField] float _standingHeight = 2f;
+	[SerializeField] float _duckingSpeed = 10f;
+	[SerializeField] CharacterController _cc;
+	[SerializeField] Transform _groundCheck;
+	[SerializeField] LayerMask _groundLayer;
+	// [SerializeField] Transform _characterModel;
 
-    [Header("References (Owner chain)")]
-    [SerializeField] Camera _playerCam;
-    [SerializeField] Transform _viewModelContainer;
-    [SerializeField] Transform _holdPosition;
-    [SerializeField] Transform _magnetToolPosition;
-    [SerializeField] LayerMask _interactLayerMask;
-    [Header("Mining Hat Lights")]
-    [SerializeField] GameObject _nightVisionLight;
-    [SerializeField] GameObject _miningHatLight;
+	[Header("References (Owner chain)")]
+	[SerializeField] Camera _playerCam;
+	[SerializeField] Transform _viewModelContainer;
+	[SerializeField] Transform _holdPosition;
+	[SerializeField] Transform _magnetToolPosition;
+	[SerializeField] LayerMask _interactLayerMask;
+	[Header("Mining Hat Lights")]
+	[SerializeField] GameObject _nightVisionLight;
+	[SerializeField] GameObject _miningHatLight;
 	#endregion
 
 	#region private API fields
@@ -8717,6 +9914,7 @@ public class PlayerController : Singleton<PlayerController>
 	float yRot;
 	bool isGrounded;
 	bool isDucking;
+	bool isInWater;
 	bool isUsingNoclip;
 	bool miningLightEnabled;
 	float cameraHeightVelocity;
@@ -8729,7 +9927,7 @@ public class PlayerController : Singleton<PlayerController>
 	private void OnEnable()
 	{
 		Debug.Log(C.method(this));
-		if(isFirstEnable)
+		if (isFirstEnable)
 		{
 			INPUT.UI.SetCursor(isFpsMode: true);
 			// purpose: lock/unlock movement when menus open
@@ -8746,7 +9944,7 @@ public class PlayerController : Singleton<PlayerController>
 		{
 			#region extra: NoClipMovement
 			if (INPUT.K.InstantDown(KeyCode.V)) ToggleNoclip();
-			if (isUsingNoclip) HandleNoclipMovement(); 
+			if (isUsingNoclip) HandleNoclipMovement();
 			#endregion
 			else
 			{
@@ -8780,7 +9978,7 @@ public class PlayerController : Singleton<PlayerController>
 	/// Smoothly interpolates camera height and scales the character model to match. </summary>
 	void HandleDucking()
 	{
-		bool wantsDuck = Input.GetKey(KeyCode.C);
+		bool wantsDuck = Input.GetKey(KeyCode.LeftControl);
 		bool canStand = true;
 		if (!wantsDuck && isDucking)
 		{
@@ -8872,37 +10070,37 @@ public class PlayerController : Singleton<PlayerController>
 	#endregion
 
 	#region public API fields
-	public Camera PlayerCam => _playerCam;
-	public Transform ViewModelContainer => _viewModelContainer;
-	public Transform HoldPosition => _holdPosition;
-	public Transform MagnetToolPosition => _magnetToolPosition;
-	public CharacterController CC => _cc;
-	public LayerMask InteractLayerMask => _interactLayerMask;
-	public float SelectedWalkSpeed => selectedWalkSpeed;
-	public float WalkSpeed => _walkSpeed;
-	public float SprintSpeed => _sprintSpeed;
-	public float DuckSpeed => _duckSpeed;
-	public Vector2 MoveInput => moveInput;
-	public bool IsGrounded => isGrounded;
-	public bool IsInWater { get; set; }
+	public Camera GetPlayerCam() => _playerCam;
+	public Transform GetViewModelContainer() => _viewModelContainer;
+	public Transform GetHoldPosition() => _holdPosition;
+	public Transform GetMagnetToolPosition() => _magnetToolPosition;
+	public CharacterController GetCC() => _cc;
+	public LayerMask GetInteractLayerMask() => _interactLayerMask;
+	public float GetSelectedWalkSpeed() => selectedWalkSpeed;
+	public float GetWalkSpeed() => _walkSpeed;
+	public float GetSprintSpeed() => _sprintSpeed;
+	public float GetDuckSpeed() => _duckSpeed;
+	public Vector2 GetMoveInput() => moveInput;
+	public bool GetIsGrounded() => isGrounded;
+	public bool SetIsInWater(bool isInWater) => this.isInWater = isInWater;
 	#endregion
 
 	#region public API
 	/// <summary> teleport player to position </summary>
-    public void TeleportPlayer(Vector3 position)
-    {
-        IsInWater = false;
-        bool wasEnabled = _cc.enabled;
-        _cc.enabled = false;
-        transform.position = position;
-        _cc.enabled = wasEnabled;
-    }
-    /// <summary> teleport player to position + rotation </summary>
-    public void TeleportPlayer(Vector3 position, Vector3 rotation)
-    {
-        TeleportPlayer(position);
-        transform.rotation = Quaternion.Euler(rotation);
-    }
+	public void TeleportPlayer(Vector3 position)
+	{
+		isInWater = false;
+		bool wasEnabled = _cc.enabled;
+		_cc.enabled = false;
+		transform.position = position;
+		_cc.enabled = wasEnabled;
+	}
+	/// <summary> teleport player to position + rotation </summary>
+	public void TeleportPlayer(Vector3 position, Vector3 rotation)
+	{
+		TeleportPlayer(position);
+		transform.rotation = Quaternion.Euler(rotation);
+	}
 	#endregion
 }
 
@@ -9014,8 +10212,6 @@ public class PlayerGrab : MonoBehaviour
 		}
 		else _lrRope.enabled = false;
 	}
-	#endregion
-
 	#region private API
 	/// <summary> If menu is open, does nothing. If already holding, releases. Otherwise raycasts
 	/// from camera — if it hits a Grabbable-tagged object, starts the grab via GrabObject. </summary>
@@ -9102,6 +10298,8 @@ public class PlayerGrab : MonoBehaviour
 			body.interpolation = RigidbodyInterpolation.None;
 	} 
 	#endregion
+	#endregion
+
 }
 
 <!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/3-Monobehaviours/Player/PlayerSpawnPoint.cs ==== -->
@@ -9138,70 +10336,402 @@ public class RbDraggerController : MonoBehaviour
 }
 
 <!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/3-Monobehaviours/Tool/BaseHeldTool.cs ==== -->
+using System;
+using System.Linq;
+using System.Collections;
+using System.Collections.Generic;
+using HighlightPlus;
+
+using UnityEngine;
+using UnityEngine.InputSystem;
+using UnityEngine.UI;
+using TMPro;
+
+using SPACE_UTIL;
+
+public class BaseHeldTool : BaseSellableItem, IInteractable, ISaveLoadableObject, IIconItem, IHighlightable
+{
+	#region Inspector Fields
+	[SerializeField] SavableObjectID _savableObjectID;
+	[SerializeField] string _name = "test";
+	[TextArea] [SerializeField] string _description = "description";
+	[SerializeField] Sprite _programmerIcon;
+	[SerializeField] Sprite _inventoryIcon;
+	[SerializeField] int _quantity = 1;
+	[SerializeField] int _maxAmount = 1;
+	[SerializeField] bool _equipWhenPickedUp;
+	[SerializeField] bool _shouldUseInteractionWheel = true;
+	[SerializeField] protected GameObject _worldModel;
+	[SerializeField] protected GameObject _viewModel;
+	[SerializeField] protected Animator _viewModelAnimator;
+	[SerializeField] List<SO_InteractionOption> _interactions;
+	[Header("Highlight")]
+	[SerializeField] HighlightProfile _highlightProfile;
+	#endregion
+
+	#region private API
+	protected PlayerController owner;
+	#endregion
+
+	#region public API � owner, tool identity
+	public PlayerController GetOwner() => owner;
+	public void SetOwner(PlayerController val) => owner = val;
+
+	public string GetName() => _name;
+	public string GetDescr() => _description;
+	public int GetQty() => _quantity;
+	public void SetQty(int val) => _quantity = val;
+	public void AddQty(int val) => _quantity += val;
+	public int GetMaxAmount() => _maxAmount;
+	public bool GetShouldEquipWhenPickedUp() => _equipWhenPickedUp;
+	#endregion
+
+	#region public API � tool actions (virtual)
+	/// <summary> single click fire </summary>
+	public virtual void PrimaryFire()
+	{
+		 _viewModelAnimator?.Play(AnimParamType.attack1.ToString(), -1, 0f);
+	}
+	/// <summary> held fire (continuous) </summary>
+	public virtual void PrimaryFireHeld() { }
+	/// <summary> single right click </summary>
+	public virtual void SecondaryFire() { }
+	/// <summary> held right click </summary>
+	public virtual void SecondaryFireHeld() { }
+	/// <summary> R key </summary>
+	public virtual void Reload() { }
+	/// <summary> Q key </summary>
+	public virtual void QButtonPressed() { }
+	#endregion
+
+	#region public API � equip / drop
+	/// <summary> drop this tool from inventory to world </summary>
+	public virtual void DropItem()
+	{
+		gameObject.SetActive(true);
+		HideWorldModel(hide: false);
+		HideViewModel();
+		Rigidbody rb = GetComponentInChildren<Rigidbody>();
+		if (rb != null && owner != null)
+		{
+			Camera cam = owner.GetPlayerCam();
+			transform.parent = null;
+			rb.isKinematic = false;
+			rb.transform.position = cam.transform.position + cam.transform.forward * 0.5f;
+			rb.linearVelocity = cam.transform.forward * 5f;
+			rb.rotation = cam.transform.rotation;
+		}
+		owner = null;
+	}
+	/// <summary> show/hide view model </summary>
+	protected virtual void HideViewModel(bool hide = true) => _viewModel?.SetActive(!hide);
+	/// <summary> show/hide world model </summary>
+	protected virtual void HideWorldModel(bool hide = true) => _worldModel?.SetActive(!hide);
+	#endregion
+
+	#region public API extra
+	// nice-to-have: Equip/UnEquip � called by InventoryOrchestrator during SwitchTool transitions
+	/// <summary> called when tool becomes active � hides world, shows view </summary>
+	public virtual void Equip() { HideWorldModel(); HideViewModel(hide: false); }
+	/// <summary> called when tool is deactivated � hides view </summary>
+	public virtual void UnEquip() { HideViewModel(); }
+	#endregion
+
+	#region public API � IIconItem
+	/// <summary> returns inventory icon </summary>
+	public virtual Sprite GetIcon() => _inventoryIcon != null ? _inventoryIcon : _programmerIcon;
+	#endregion
+
+	#region public API � IInteractable
+	public bool ShouldUseInteractionWheel() => _shouldUseInteractionWheel;
+	public List<SO_InteractionOption> GetOptions() => _interactions;
+	public string GetObjectName() => _name;
+	public virtual void Interact(SO_InteractionOption selectedOption)
+	{
+		if (selectedOption.interactionType == InteractionType.take)
+		{
+			// purpose: InventoryOrchestrator adds this tool to hotbar
+			GameEvents.RaiseToolPickupRequested(this);
+		}
+		else if (selectedOption.interactionType == InteractionType.destroy)
+		{
+			Destroy(gameObject);
+		}
+	}
+	#endregion
+
+	#region public API � ISaveLoadableObject (stub)
+	public bool hasBeenSaved { get; set; }
+	public bool ShouldBeSaved() => true;
+	public SavableObjectID GetSavableObjectID() => _savableObjectID;
+	public Vector3 GetPosition() => _worldModel != null ? _worldModel.transform.position : transform.position;
+	public Vector3 GetRotation() => _worldModel != null ? _worldModel.transform.rotation.eulerAngles : transform.rotation.eulerAngles;
+	public virtual void LoadFromSave(string json) { /* Phase G */ }
+	public virtual string GetCustomSaveData() => "{}"; /* Phase G */
+	#endregion
+
+	#region public API � IHighlightable
+	/// <summary> Returns the tool's highlight profile (cyan). All tools use the same profile. </summary>
+	public virtual HighlightProfile GetHighlightProfile(BaseHeldTool activeTool) => _highlightProfile;
+	#endregion
+
+	#region Unity Life Cycle
+	protected override void OnEnable()
+	{
+		base.OnEnable();
+		if (owner == null)
+		{
+			HideViewModel();
+			HideWorldModel(hide: false);
+			return;
+		}
+		HideWorldModel();
+		HideViewModel(hide: false);
+		if (transform.parent == null || transform.parent != owner.GetViewModelContainer())
+		{
+			transform.position = owner.GetViewModelContainer().position;
+			transform.rotation = owner.GetViewModelContainer().rotation;
+			transform.parent = owner.GetViewModelContainer();
+		}
+	}
+
+	public SavableObjectID GetSavableObjectTypeId()
+	{
+		throw new NotImplementedException();
+	}
+
+	public Vector3 GetPos()
+	{
+		throw new NotImplementedException();
+	}
+
+	public Vector3 GetRot()
+	{
+		throw new NotImplementedException();
+	}
+
+	public string GetCustomDataJsonSnapshot()
+	{
+		throw new NotImplementedException();
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/3-Monobehaviours/Tool/ToolBuilder.cs ==== -->
+﻿using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
 
-using UnityEngine;
 using SPACE_UTIL;
 
-public class BaseHeldTool : MonoBehaviour, IInteractable, ISaveLoadableObject
+/// <summary>
+/// I show a ghost building preview and place buildings on left-click. Phase B creates the skeleton
+/// — Reload rotates 90°, QButtonPressed cycles alternate prefabs, DropItem spawns a BuildingCrate
+/// instead of raw drop. Phase D completes PrimaryFire (grid snap, ghost material green/red,
+/// conveyor auto-snap) and Update (ghost follows cursor). Currently mostly stubs with comments.
+///
+/// Who uses me: InventoryOrchestrator (PrimaryFire, Reload, QButtonPressed, DropItem).
+/// </summary>
+public class ToolBuilder : BaseHeldTool
 {
-	PlayerController owner;
-	public void SetOwner(PlayerController playerController)
-	{
-		owner = playerController;
-	}
+	#region Inspector Fields
+	[SerializeField] float _useRange = 3f;
+	// Phase D: [SerializeField] SO_BuildingInventoryDefinition _definition;
+	#endregion
 
+	#region private API
+	int currentPrefabIndex;
+	Quaternion currentRotation = Quaternion.identity;
+	#endregion
 
-	public string GetObjectName()
+	#region public API — overrides
+	public override void PrimaryFire()
 	{
-		throw new System.NotImplementedException();
+		// Phase D: full placement logic — grid snap, ghost, instantiate building
 	}
-	public List<SO_InteractionOption> GetOptions()
+	public override void Reload()
 	{
-		throw new System.NotImplementedException();
+		currentRotation *= Quaternion.Euler(0f, 90f, 0f);
+		// Phase D: Singleton<BuildingManager>.Ins.CurrentObjectIsSnapped = false;
 	}
-	public void Interact(SO_InteractionOption selectedInteraction)
+	public override void QButtonPressed()
 	{
-		throw new System.NotImplementedException();
+		// Phase D: cycle alternate building models
+		currentPrefabIndex++;
 	}
-	public bool ShouldUseInteractionWheel()
+	public override void DropItem()
 	{
-		throw new System.NotImplementedException();
+		// Phase D: spawn BuildingCrate instead of raw drop
+		base.DropItem();
 	}
+	#endregion
 
-	public bool hasBeenSaved { get => throw new System.NotImplementedException(); set => throw new System.NotImplementedException(); }
-	public string GetCustomDataJsonSnapshot()
+	#region Unity Life Cycle
+	protected override void OnDisable()
 	{
-		throw new System.NotImplementedException();
+		base.OnDisable();
+		// Phase D: cleanup ghost object
 	}
-	public Vector3 GetPos()
-	{
-		throw new System.NotImplementedException();
-	}
-	public Vector3 GetRot()
-	{
-		throw new System.NotImplementedException();
-	}
-	public SavableObjectID GetSavableObjectTypeId()
-	{
-		throw new System.NotImplementedException();
-	}
-	public void LoadFromSave(string customDataJson)
-	{
-		throw new System.NotImplementedException();
-	}
-	public bool ShouldBeSaved()
-	{
-		throw new System.NotImplementedException();
-	}
+	#endregion
+}
 
-	public int GetMaxAmount() { return -1; }
-	public int GetToolType() { return -1; }
-	public int GetQty() { return -1; }
-	public string GetName() { return $"";  }
-	int qty = 0;
-	public void AddQty(int count) { qty += count; }
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/3-Monobehaviours/Tool/ToolHammer.cs ==== -->
+﻿using UnityEngine;
+using System.Collections;
+using System.Collections.Generic;
+
+using SPACE_UTIL;
+
+/// <summary>
+/// I pick up or pack placed buildings. Left-click raycasts from the camera — Phase D will add
+/// BuildingObject.TryTakeOrPack and BuildingCrate.TryAddToInventory when buildings exist.
+/// Right-click does the same for a secondary action. Currently both are stubs with comments.
+///
+/// Who uses me: InventoryOrchestrator (PrimaryFire, SecondaryFire).
+/// </summary>
+public class ToolHammer : BaseHeldTool
+{
+	#region Inspector Fields
+	[SerializeField] float _useRange = 3f;
+	#endregion
+
+	#region public API — overrides
+	public override void PrimaryFire()
+	{
+		if (owner == null) return;
+		Camera cam = owner.GetPlayerCam();
+		if (cam == null) return;
+		if (!Physics.Raycast(cam.transform.position, cam.transform.forward, out RaycastHit hit, _useRange)) return;
+		// Phase D: BuildingObject / BuildingCrate interaction
+		// BuildingObject bo = hit.collider.GetComponentInParent<BuildingObject>();
+		// if (bo != null) { bo.TryTakeOrPack(); return; }
+		// BuildingCrate bc = hit.collider.GetComponentInParent<BuildingCrate>();
+		// if (bc != null) bc.TryAddToInventory();
+	}
+	public override void SecondaryFire()
+	{
+		if (owner == null) return;
+		Camera cam = owner.GetPlayerCam();
+		if (cam == null) return;
+		if (!Physics.Raycast(cam.transform.position, cam.transform.forward, out RaycastHit hit, _useRange)) return;
+		// Phase D: BuildingObject.Pack()
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/3-Monobehaviours/Tool/ToolPickAxe.cs ==== -->
+﻿using UnityEngine;
+using System.Collections;
+using System.Collections.Generic;
+
+using SPACE_UTIL;
+
+/// <summary>
+/// I'm the pickaxe tool. When the player holds left-click, I play a swing animation then
+/// wait 0.2s before raycasting from the camera. If I hit an IDamageable (OreNode), I call
+/// TakeDamage on it. If I hit an OrePiece, I try TryConvertToCrushed (splits into 2 crushed).
+/// If I hit a plain Rigidbody, I push it with AddForce. I also play the PhysicsSoundPlayer
+/// impact sound on the hit target if it has one. My cooldown prevents swing spam.
+///
+/// Who uses me: InventoryOrchestrator routes PrimaryFireHeld to me.
+/// Events I fire: none directly (IDamageable targets fire their own events when broken).
+/// </summary>
+public class ToolPickaxe : BaseHeldTool
+{
+	#region Inspector Fields
+	[SerializeField] float _useRange = 2f;
+	[SerializeField] float _damage = 10f;
+	[SerializeField] float _attackCooldown = 1f;
+	[SerializeField] LayerMask _hitLayers;
+	[SerializeField] bool _canBreakOreIntoCrushed;
+	#endregion
+
+	#region private API
+	float lastAttackTime = -1f;
+
+	void SwingPickaxe()
+	{
+		if (owner == null) return;
+		Camera cam = owner.GetPlayerCam();
+		if (cam == null) return;
+		_viewModelAnimator?.Play(AnimParamType.attack1.ToString(), -1, 0f);
+		// Phase H: play swing sound
+		StartCoroutine(PerformAttack(0.2f));
+		lastAttackTime = Time.time;
+	}
+	IEnumerator PerformAttack(float delaySeconds)
+	{
+		yield return new WaitForSeconds(delaySeconds);
+		if (!gameObject.activeInHierarchy || owner == null) yield break;
+		Camera cam = owner.GetPlayerCam();
+		if (cam == null) yield break;
+		if (!Physics.Raycast(cam.transform.position, cam.transform.forward, out RaycastHit hit, _useRange, _hitLayers))
+			yield break;
+
+		// Phase C: crushed ore conversion check
+		// Phase C: IDamageable.TakeDamage(hit)
+
+		Rigidbody hitRb = hit.collider.GetComponent<Rigidbody>();
+		if (hitRb != null)
+		{
+			hitRb.AddForceAtPosition(cam.transform.forward * 5f, hit.point, ForceMode.Impulse);
+			/*
+			PhysicsSoundPlayer soundPlayer = hitRb.GetComponent<PhysicsSoundPlayer>();
+			if (soundPlayer != null) soundPlayer.PlayImpactSound();
+			*/
+		}
+	}
+	#endregion
+
+	#region public API — overrides
+	public override void PrimaryFire() { }
+	public override void PrimaryFireHeld()
+	{
+		if (Time.time - lastAttackTime >= _attackCooldown) SwingPickaxe();
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/3-Monobehaviours/UI/UIEventRelay.cs ==== -->
+﻿using System;
+
+using UnityEngine;
+using UnityEngine.EventSystems;
+
+/// <summary>
+/// I relay Unity EventSystem events (drag, drop, pointer enter/exit/down) to Action callbacks.
+/// InventoryOrchestrator adds me to each Field_InventorySlot GO at runtime via AddComponent,
+/// then wires my Action fields (onBeginDrag, onDrag, onEndDrag, onDrop, onPointerDown, etc.)
+/// to its handler methods. This keeps Field_ pure display — zero interfaces on it. I'm reusable
+/// across any UI system that needs drag-drop or pointer events (quest tree, research tree, etc.).
+///
+/// Who uses me: InventoryOrchestrator (wires all Actions in BuildSlotFields).
+/// </summary>
+public class UIEventRelay : MonoBehaviour,
+	IBeginDragHandler, IDragHandler, IEndDragHandler, IDropHandler,
+	IPointerEnterHandler, IPointerExitHandler, IPointerDownHandler
+{
+	#region public API
+	public int Index;
+	public Action<UIEventRelay, PointerEventData> onBeginDrag;
+	public Action<PointerEventData> onDrag;
+	public Action<UIEventRelay, PointerEventData> onEndDrag;
+	public Action<UIEventRelay, PointerEventData> onDrop;
+	public Action<UIEventRelay> onPointerEnter;
+	public Action<UIEventRelay> onPointerExit;
+	public Action<UIEventRelay> onPointerDown;
+	#endregion
+
+	#region relay interface triggers
+	public void OnPointerEnter(PointerEventData e) => onPointerEnter?.Invoke(this);
+	public void OnPointerExit(PointerEventData e) => onPointerExit?.Invoke(this);
+	public void OnPointerDown(PointerEventData e) => onPointerDown?.Invoke(this);
+
+	public void OnBeginDrag(PointerEventData e) => onBeginDrag?.Invoke(this, e);
+	public void OnDrag(PointerEventData e) => onDrag?.Invoke(e);
+	public void OnEndDrag(PointerEventData e) => onEndDrag?.Invoke(this, e);
+	public void OnDrop(PointerEventData e) => onDrop?.Invoke(this, e);
+	#endregion
 }
 
 <!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/4-Utils/PhaseBLOG.cs ==== -->
@@ -9222,7 +10752,7 @@ using SPACE_UTIL;
 /// </summary>
 public static class PhaseBLOG
 {
-	public static string LIST_SLOT__TO__JSON(List<InventoryDataService.Slot> SLOT)
+	public static string LIST_SLOT__TO__JSON(List<InventorySlot> SLOT)
 	{
 		var snapshot = SLOT.map(slot =>
 		{
@@ -9266,6 +10796,95 @@ public static class UtilsPhaseB
 	}
 }
 
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/5-Tests/InventoryTest.cs ==== -->
+﻿using System;
+using System.Collections;
+using System.Collections.Generic;
+
+using UnityEngine;
+using TMPro;
+
+using SPACE_UTIL;
+
+/// <summary>
+/// add/remove/switch tools test — no player movement, no grab, no shop
+/// Prerequisites: InventoryDataService.cs, InventoryOrchestrator.cs, InventoryUI.cs, Field_InventorySlot.cs, BaseHeldTool.cs, GameEvents.cs
+/// NOT required: PlayerMovement, PlayerGrab, shop, interaction
+/// How to test:
+///   Space → fire RaiseToolPickupRequested on _testTool[0]
+///   U → fire RaiseToolPickupRequested on _testTool[1]
+///   1-9-0 → switch hotbar slots
+///   Scroll → cycle hotbar
+///   G → drop active tool
+///   Tab → toggle inventory panel
+///   O → log snapshot
+/// Controls: Space, U, 1-0, Scroll, G, Tab, O
+/// </summary>
+public class InventoryTest : MonoBehaviour
+{
+	#region Inspector Fields
+	[SerializeField] InventoryOrchestrator _orchestrator;
+	[SerializeField] List<BaseHeldTool> _testTools;
+	[TextArea(5, 10)]
+	string README = @"Space → pickup testTool[0]
+U → pickup testTool[1]
+1-0 → switch slots
+Scroll → cycle
+G → drop active
+Tab → toggle inventory
+O → log snapshot";
+	#endregion
+
+	#region Unity Life Cycle
+	bool isFirstEnable = true;
+	private void OnEnable()
+	{
+		Debug.Log(C.method(this));
+		if (isFirstEnable)
+		{
+			INPUT.UI.SetCursor(isFpsMode: true);
+			// purpose: log tool switch events
+			GameEvents.OnToolSwitched += (idx) => Debug.Log($"[InventoryTest] ToolSwitched to slot {idx}".colorTag("lime"));
+			// purpose: log tool pickup events
+			GameEvents.OnItemPickedUp += (tool) => Debug.Log($"[InventoryTest] Picked up: {tool.GetName()}".colorTag("cyan"));
+			// purpose: log tool drop events
+			GameEvents.OnItemDropped += (tool) => Debug.Log($"[InventoryTest] Dropped: {tool.GetName()}".colorTag("orange"));
+			// purpose: log inventory view events
+			GameEvents.OnOpenInventoryView += () => Debug.Log("[InventoryTest] Inventory OPENED".colorTag("lime"));
+			GameEvents.OnCloseInventoryView += () => Debug.Log("[InventoryTest] Inventory CLOSED".colorTag("orange"));
+			isFirstEnable = false;
+		}
+	}
+	//
+	private void Update()
+	{
+		INPUT.UI.SetCursor(isFpsMode: !Singleton<UIManager>.Ins.GetIsAnyMenuOpen());
+		//
+		if (INPUT.K.InstantDown(KeyCode.Space))
+		{
+			// purpose: simulate tool pickup from world
+			if (_testTools.Count > 0)
+				GameEvents.RaiseToolPickupRequested(_testTools[0]);
+		}
+		else if (INPUT.K.InstantDown(KeyCode.U))
+		{
+			// purpose: simulate second tool pickup from world
+			if (_testTools.Count > 1)
+				GameEvents.RaiseToolPickupRequested(_testTools[1]);
+		}
+		else if (INPUT.K.InstantDown(KeyCode.O))
+		{
+			LOG.AddLog(this._orchestrator.GetDataServiceForTest().GetSnapshot("inventory test"), "json");
+		}
+		else if (INPUT.K.InstantDown(KeyCode.Tab))
+		{
+			// purpose: toggle inventory view
+			GameEvents.RaiseOpenInventoryView();
+		}
+	}
+	#endregion
+}
+
 <!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/5-Tests/PlayerControllerTest.cs ==== -->
 using UnityEngine;
 using SPACE_UTIL;
@@ -9292,6 +10911,69 @@ public class PlayerControllerTest : MonoBehaviour
 		if (INPUT.K.InstantDown(KeyCode.N))
 			GameEvents.RaiseMenuStateChanged(isAnyMenuOpen: false);
 	}
+}
+
+<!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/5-Tests/ToolActionTest.cs ==== -->
+﻿using System;
+using System.Linq;
+using System.Collections;
+using System.Collections.Generic;
+
+using UnityEngine;
+using UnityEngine.InputSystem;
+using UnityEngine.UI;
+using TMPro;
+
+using SPACE_UTIL;
+
+/// <summary>
+/// Pickaxe + Magnet + Hammer + MiningHat usage test — needs player + inventory + tools in scene
+/// Prerequisites: PlayerMovement, PlayerCamera, InventoryOrchestrator, BaseHeldTool, ToolPickaxe, ToolMagnet, ToolHammer, ToolMiningHat, GameEvents
+/// NOT required: Shop, interaction system, ore nodes, buildings
+/// How to test:
+///   Space/U/I/O → pickup each tool from world
+///   1-4 → switch between equipped tools
+///   Left-click hold → pickaxe swing / magnet launch
+///   Right-click hold → magnet pull
+///   R → magnet gentle drop, Q → cycle mode, G → drop tool
+/// Controls: Space, U, I, O, 1-4, Mouse0, Mouse1, R, Q, G
+/// </summary>
+public class ToolActionTest : MonoBehaviour
+{
+	#region Inspector Fields
+	[SerializeField] List<BaseHeldTool> _testTools;
+	[TextArea(5, 10)]
+	string README = @"Space → pickup testTools[0] (Pickaxe)
+U → pickup testTools[1] (Magnet)
+I → pickup testTools[2] (Hammer)
+O → pickup testTools[3] (MiningHat)
+1-4 → switch tools
+Hold LMB → pickaxe swing / magnet launch
+Hold RMB → magnet pull
+R → magnet drop, Q → cycle mode, G → drop tool";
+	#endregion
+
+	#region Unity Life Cycle
+	private void Start()
+	{
+		INPUT.UI.SetCursor(isFpsMode: true);
+		// purpose: log tool switch
+		GameEvents.OnToolSwitched += (idx) => Debug.Log($"[ToolActionTest] Switched to slot {idx}".colorTag("lime"));
+		// purpose: log tool pickup
+		GameEvents.OnItemPickedUp += (tool) => Debug.Log($"[ToolActionTest] Picked up: {tool.GetName()}".colorTag("cyan"));
+		// purpose: log tool drop
+		GameEvents.OnItemDropped += (tool) => Debug.Log($"[ToolActionTest] Dropped: {tool.GetName()}".colorTag("orange"));
+	}
+	private void Update()
+	{
+		// purpose: pickup tools from world into inventory
+		if (INPUT.K.InstantDown(KeyCode.Space) && _testTools.Count > 0) GameEvents.RaiseToolPickupRequested(_testTools[0]);
+		else if (INPUT.K.InstantDown(KeyCode.U) && _testTools.Count > 1) GameEvents.RaiseToolPickupRequested(_testTools[1]);
+		else if (INPUT.K.InstantDown(KeyCode.I) && _testTools.Count > 2) GameEvents.RaiseToolPickupRequested(_testTools[2]);
+		else if (INPUT.K.InstantDown(KeyCode.O) && _testTools.Count > 3) GameEvents.RaiseToolPickupRequested(_testTools[3]);
+	}
+	#endregion
+
 }
 
 <!-- ==== FILE: learn/handTyped(latest)/Scripts/phase-b/DEBUG_CheckB.cs ==== -->
@@ -11776,7 +13458,9 @@ phase-b(New)/
 **What you need to type first:** `InventoryDataService.cs`, `InventoryOrchestrator.cs`, `InventoryUI.cs`, `Field_InventorySlot.cs`, `UIEventRelay.cs`, `BaseHeldTool.cs`, `GameEvents.cs`
 **What you DON'T need:** Player movement, grab, shop, interaction
 
-**Step-by-step scene setup:** Follow `Manual/InventoryUITest.md` Steps 1-14 for the full Canvas + hotbar + extended panel + InventoryOrchestrator wiring. Then add an `InventoryTest` GO with the test component and wire `_testTools` to 2-3 BaseHeldTool instances in the scene.
+**Step-by-step scene setup:** Follow `Manual/InventoryUITest.md` Steps 1-11 for the full Canvas + hotbar + extended panel + InventoryOrchestrator wiring + **tool scene instances + test script wiring**. 
+
+> **CRITICAL:** Tool prefab instances must exist as **GameObjects in the scene** (not just prefabs in Project). The test's `_testTools` list must reference **scene instances** (drag from Hierarchy panel, not Project panel). See InventoryUITest.md Step 10 + Step 11 for details.
 
 **How to test:**
 
@@ -11818,12 +13502,14 @@ phase-b(New)/
 **What you need to type first:** All tool scripts + PlayerMovement + PlayerCamera + InventoryOrchestrator + InventoryUI + GameEvents
 **What you DON'T need:** Shop, interaction system, ore nodes, buildings
 
-**Step-by-step scene setup:** Follow `Manual/ToolViewModelTest.md` Steps 1-5 for the full player + inventory + tool prefab setup. Key additions:
-1. Create `ToolActionTest` GO → add `ToolActionTest` component
-2. Wire `_testTools` list with 4 tool instances in scene (Pickaxe, Magnet, Hammer, MiningHat)
-3. Place 5-6 cubes with `Rigidbody`, tag `Grabbable`, layer `Interact` (magnet pull targets)
-4. Place 1 wall cube, layer `Interact`, no tag (pickaxe hit target)
-5. Press Play
+**Step-by-step scene setup:** Follow `Manual/ToolViewModelTest.md` Steps 1-6 for the full player + inventory + tool prefab + **scene instances** + test script wiring.
+
+> **CRITICAL:** Tool prefab instances must exist as **GameObjects in the scene** — drag from Project into Hierarchy. Wire `_testTools` to these **scene instances** (not Project prefabs). See ToolViewModelTest.md Step 5.
+
+Additional scene objects:
+1. Place 5-6 cubes with `Rigidbody`, tag `Grabbable`, layer `Interact` (magnet pull targets)
+2. Place 1 wall cube, layer `Interact`, no tag (pickaxe hit target)
+3. Press Play
 
 **How to test:**
 
@@ -15706,6 +17392,49 @@ SelectedItemInfoPanel
 4. Add `bgUI` component (from Phase A)
 5. Move **behind** all panels in hierarchy (renders first = behind)
 
+### Step 10 — Place Tool Instances in the Scene
+
+> **CRITICAL:** The inventory test picks up tools via `RaiseToolPickupRequested`. For this to work,
+> actual **tool prefab instances must exist as GameObjects in the scene** — NOT just prefabs in the
+> Project folder. The InventoryTest script fires pickup events on these scene GOs.
+
+1. Create (or drag from Project) 4 tool prefab **instances** into the scene root:
+
+| Tool GO Name | Component | Position | Notes |
+|-------------|-----------|----------|-------|
+| `ToolPickaxe_01` | `ToolPickaxe` | (-3, 0.2, 3) | Must have WorldModel child with Collider + Rigidbody, tag Grabbable, layer Interact |
+| `ToolMagnet_01` | `ToolMagnet` | (-1, 0.2, 3) | Same WorldModel/ViewModel structure |
+| `ToolHammer_01` | `ToolHammer` | (1, 0.2, 3) | Same |
+| `ToolMiningHat_01` | `ToolMiningHat` | (3, 0.2, 3) | Same + WorldModelLight + ViewModelLight |
+
+2. Each tool GO needs:
+   - `BaseHeldTool` (or subclass) component on root
+   - `_name` field set (e.g. "Pickaxe")
+   - `_inventoryIcon` assigned (any sprite — used for hotbar display)
+   - WorldModel child: `MeshFilter` + `MeshRenderer` + `BoxCollider` + `Rigidbody`, tag `Grabbable`, layer `Interact`
+   - ViewModel child: `MeshFilter` + `MeshRenderer` (no collider), optional `Animator`
+
+3. Place them **on the floor** in front of the player spawn — these are the tools the test picks up.
+
+> **Common mistake:** If you only have the prefab in the Project panel but no instance in the scene,
+> `RaiseToolPickupRequested` has nothing to pick up and nothing happens. The tool GO must be
+> **in the scene hierarchy** at play time.
+
+### Step 11 — InventoryTest Script
+
+1. Create Empty GO → name `InventoryTest`
+2. Add `InventoryTest` component (or your test script)
+3. Wire `_testTools` list with the 4 tool **scene instances** from Step 10:
+
+| Field | Drag From |
+|-------|-----------|
+| `_testTools[0]` | `ToolPickaxe_01` (from **scene hierarchy**, NOT Project) |
+| `_testTools[1]` | `ToolMagnet_01` (from scene) |
+| `_testTools[2]` | `ToolHammer_01` (from scene) |
+| `_testTools[3]` | `ToolMiningHat_01` (from scene) |
+
+> **Drag from the scene Hierarchy panel**, not the Project panel. Inspector shows the instance name, not "None (GameObject)".
+
 ### Final Canvas Hierarchy (top to bottom)
 
 ```
@@ -15717,6 +17446,29 @@ Canvas
 ├── SelectedItemInfoPanel     — tool details + equip/drop, starts inactive
 ├── DragGhostIcon             — follows cursor during drag, starts inactive, LAST = on top
 └── EventSystem
+```
+
+### Final Scene Hierarchy (non-UI GOs)
+
+```
+Scene Root
+├── Player (CharacterController, PlayerController, PlayerCamera, PlayerGrab)
+│   ├── Camera
+│   │   ├── ViewModelContainer
+│   │   └── HoldPosition
+│   ├── RigidbodyDragger (inactive)
+│   └── LineRenderer
+├── Canvas (with all UI from above)
+├── EventSystem
+├── UIManager (phase-All)
+├── EconomyManager (phase-All)
+├── ToolPickaxe_01 (on floor — WorldModel visible, ToolPickaxe component)
+├── ToolMagnet_01 (on floor)
+├── ToolHammer_01 (on floor)
+├── ToolMiningHat_01 (on floor)
+├── InventoryTest (test script, _testTools wired to 4 tool instances above)
+├── Floor (Plane, layer Ground)
+└── PlayerSpawnPoint
 ```
 
 > Order matters: later siblings render ON TOP of earlier siblings.
@@ -16056,20 +17808,42 @@ Create the full player hierarchy per GUIDE.md Scene Setup items 1-12. Key compon
 - **InventoryOrchestrator** GO → wired per InventoryUITest.md Step 7
 - **InventoryUI** GO → wired to Orchestrator
 
-### Step 3 — ToolActionTest Script
-
-1. Create Empty GO → name `ToolActionTest`
-2. Add `ToolActionTest` component
-3. Wire `_testTools` list with 4 tool prefab instances in scene (order: Pickaxe, Magnet, Hammer, MiningHat)
-
-### Step 4 — Grabbable Cubes (for magnet test)
+### Step 3 — Grabbable Cubes (for magnet test)
 
 - 5-6 cubes with `Rigidbody`, tag `"Grabbable"`, layer `"Interact"`
 - Place near player spawn
 
-### Step 5 — Tool Prefabs (create 4, place on ground)
+### Step 4 — Tool Prefabs (create 4, save as prefab)
 
-Each tool needs the WorldModel/ViewModel hierarchy below. **Save each as prefab** then place instances in the scene.
+Each tool needs the WorldModel/ViewModel hierarchy below (see "Tool Prefab Hierarchies" section further down). **Save each as prefab** in the Project panel.
+
+### Step 5 — Place Tool Instances in Scene
+
+> **CRITICAL:** After creating prefabs, you must **drag them from the Project panel into the scene**
+> to create instances. The test script references these **scene instances**, not the prefabs.
+
+1. Drag each tool prefab from Project → Scene hierarchy:
+
+| Tool GO Name | Position | Notes |
+|-------------|----------|-------|
+| `ToolPickaxe_01` | (-3, 0.2, 3) | On floor, WorldModel visible |
+| `ToolMagnet_01` | (-1, 0.2, 3) | On floor |
+| `ToolHammer_01` | (1, 0.2, 3) | On floor |
+| `ToolMiningHat_01` | (3, 0.2, 3) | On floor |
+
+2. Verify each instance:
+   - WorldModel child: has `Rigidbody`, `Collider`, tag `Grabbable`, layer `Interact`
+   - ViewModel child: has `MeshRenderer` (no collider), optional `Animator`
+   - Root: has the tool component (`ToolPickaxe`, `ToolMagnet`, etc.) with `_name` and `_inventoryIcon` set
+
+> **Common mistake:** If you wire the test to a *prefab asset* instead of a *scene instance*,
+> the tool won't exist in the game world and pickup fails silently.
+
+### Step 6 — ToolActionTest Script
+
+1. Create Empty GO → name `ToolActionTest`
+2. Add `ToolActionTest` component
+3. Wire `_testTools` list with the 4 tool **scene instances** from Step 5:
 
 ## Tool Prefab Hierarchies
 
@@ -19235,6 +21009,18 @@ When the player uses **ToolSupportsWrench** on a building, `BuildingObject.Enabl
 <!-- ==== FILE: learn/phase-d(New)/GUIDE.md ==== -->
 # Phase D — Building & Conveyor System (15%)
 
+> ## ⚠️ BEFORE YOU START — Read This First
+>
+> Phase D has **6 cross-phase modifications** to Phase B and C scripts that MUST be applied before
+> anything compiles or runs. Without them you'll get `MissingMethodException` or silent failures.
+> See "Modifications to Earlier Phases" section below for exact code.
+>
+> Phase D also requires **2 custom layers** (`BuildingGhost`, `BuildingObject`) created in Project Settings.
+> If missing, placement silently fails — ghost collides with everything, no error shown.
+>
+> Phase D uses **static lists** (`AllConveyorBelts`, `BuildingPlacementNode.All`) that survive editor
+> domain reload — second Play press may show one-frame NullRefs. This is expected.
+
 ## What It Looks Like When Running
 
 ```
@@ -22098,6 +23884,29 @@ M/N → menu toggle";
 - SO_BuildingInventoryDefinition asset with a conveyor belt prefab assigned
 - Camera in scene (for raycast placement)
 
+### ⚠️ Cross-Phase Modifications (MUST be applied BEFORE testing)
+
+> Phase D requires changes to Phase B and Phase C scripts. If these are missing, you'll get
+> compile errors or silent runtime failures. See `phase-d(New)/GUIDE.md` "Modifications to Earlier Phases"
+> for exact code to add.
+
+| # | File | What to add | What fails if missing |
+|---|------|------------|----------------------|
+| 1 | `BasePhysicsObject.cs` (Phase B) | `AddConveyorVelocity()`, `RemoveTouchingConveyorBelt()`, `ResetAccum()` fields | `MissingMethodException` when ore touches conveyor belt |
+| 2 | `GlobalEnumsB.cs` (Phase B) | `pack`, `switchDirection` in InteractionType | `BuildingObject.Interact` can't match Pack action |
+| 3 | `FresnelHighlighter.cs` (Phase B) | Building highlight checks | Buildings won't outline with hammer/wrench |
+| 4 | `AutoMiner.cs` (Phase C) | `SetResourceDefinition()` method | `MissingMethodException` when building placed on node |
+
+### ⚠️ Static List Warning (Editor Play Mode)
+
+> `ConveyorBelt.AllConveyorBelts` and `BuildingPlacementNode.All` are **static lists** that survive
+> Unity's domain reload between Play sessions. On **second Play press**, these lists contain destroyed
+> references (nulls). `ConveyorBeltManager.Update()` does round-robin cleanup that handles this,
+> but you may see `NullReferenceException` on the first frame of the second Play press.
+>
+> **Fix:** Add `[RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]`
+> to clear static lists, OR just accept the one-frame null cleanup.
+
 ---
 
 ## Setup Guide
@@ -22111,9 +23920,29 @@ M/N → menu toggle";
 
 ### Step 2 — Layers
 
-Create in Edit → Project Settings → Tags and Layers:
-- `BuildingGhost` — ghost objects during placement
-- `BuildingObject` — placed buildings' physical colliders
+> **⚠️ CRITICAL — SILENT FAILURE IF MISSING:** If these layers don't exist, `LayerMask.NameToLayer("BuildingGhost")`
+> returns `-1`. Unity then sets the GO to layer 0 (Default). The ghost will collide with placement checks
+> and **every placement will be rejected as "overlapping"** — but you'll see NO error in console. It just
+> silently fails. You'll press Space and nothing happens, with no clue why.
+
+Create in **Edit → Project Settings → Tags and Layers → User Layers:**
+
+| Layer Name | Slot | What Happens If Missing |
+|-----------|------|------------------------|
+| `BuildingGhost` | Any free slot (e.g. 8) | Ghost collides with overlap checks → all placements rejected → nothing places |
+| `BuildingObject` | Any free slot (e.g. 9) | Placed buildings don't detect each other → overlapping buildings allowed |
+
+**Verify:** After creating, open any BuildingManager LayerMask field in inspector → both layers should appear in the dropdown.
+
+> **Also configure BuildingManager's LayerMask fields:**
+> - `_buildingPlacementCollisionLayers` → check `BuildingObject` + `Default` (what the ghost checks against)
+> - `_scaffoldingPlacementCollisionLayers` → check `BuildingObject` + `Default`
+> - `_buildingSupportsCollisionLayers` → check `BuildingObject`
+> - `_scaffoldingSupportsCollisionLayers` → check `BuildingObject`
+> - `_collisionLayersExcludeGround` → check `BuildingObject` only (NOT Ground)
+> - `_buildingObjectLayer` → check `BuildingObject` only
+>
+> If ANY LayerMask is left at "Nothing" (all unchecked), that check always passes/fails → placement logic breaks silently.
 
 ### Step 3 — Materials
 
@@ -22279,15 +24108,49 @@ ConveyorBelt_Prefab (root)
 - ConveyorTest script on a GO
 - Pre-placed conveyor belt chain in scene (3-4 belts end-to-end)
 
+### ⚠️ Cross-Phase Modification Required
+
+> **BasePhysicsObject.cs (Phase B) MUST have conveyor stubs completed** before this test works.
+> Without `AddConveyorVelocity()`, `RemoveTouchingConveyorBelt()`, `ResetAccum()`, `SumVelocity`,
+> `Count`, `RetainY`, `BestY` fields — ore will enter the belt trigger but **never move**.
+> ConveyorBelt.FixedUpdate calls `obj.AddConveyorVelocity(...)` → `MissingMethodException`.
+>
+> See `phase-d(New)/GUIDE.md` "Modifications to Earlier Phases" → item #3 for exact code.
+
+### ⚠️ Conveyor Belt Trigger Setup
+
+> **SILENT FAILURE:** Each ConveyorBelt prefab needs TWO colliders:
+> - **Physical collider** (child GO) — `IsTrigger = false`, layer `BuildingObject` — stops ore from falling through
+> - **Trigger collider** (child GO) — `IsTrigger = true`, slightly larger — detects ore entering/exiting
+>
+> If the trigger collider is missing or `IsTrigger = false`, `OnTriggerEnter` never fires → ore sits
+> on the belt but doesn't move. No console error — it just doesn't work.
+>
+> **Verify:** Select the ConveyorBelt prefab → look for two BoxCollider children. One has IsTrigger checked.
+
+### ⚠️ Execution Order
+
+> `ConveyorBeltManager` has `[DefaultExecutionOrder(-10)]` — this makes it run **before** ConveyorBelt
+> in FixedUpdate. If you accidentally remove this attribute, belts accumulate velocity but the manager
+> applies it in the wrong frame → ore stutters or doesn't move smoothly.
+>
+> **Don't remove** `[DefaultExecutionOrder(-10)]` from ConveyorBeltManager.
+
 ---
 
 ## Setup Guide
 
 ### Step 1 — Conveyor Belt Chain
 
-Place 3-4 ConveyorBelt prefabs end-to-end on the floor:
-- Each has `ConveyorBelt` component with `Speed = 0.8`, trigger collider `IsTrigger = true`
-- Align forward directions (blue arrow in Scene view) so ore flows left→right
+Place 3-4 ConveyorBelt prefab **instances** in the scene end-to-end on the floor:
+
+> **Drag from Project into Hierarchy** — these must be scene instances, not just prefabs.
+
+- Each has `ConveyorBelt` component with `Speed = 0.8`
+- Each has a child GO with `BoxCollider` where `IsTrigger = true` (the push trigger)
+- Each has a separate child GO with `BoxCollider` where `IsTrigger = false` (physical surface)
+- Align **forward directions** (blue Z-arrow in Scene view) so ore flows left→right
+- Place belts **touching or slightly overlapping** — gaps let ore fall through
 
 ### Step 2 — Conveyor Variants (optional, place alongside chain)
 
@@ -22417,6 +24280,22 @@ Place a SellerMachine trigger at the end of the belt chain to verify full flow.
 - A placed BuildingObject with ModularBuildingSupports or ScaffoldingSupportLeg child components
 - Ground/floor below the building at varying heights
 
+### ⚠️ LayerMask Configuration Required
+
+> Scaffolding legs raycast **downward** using `BuildingManager.GetBuildingSupportsCollisionLayers()`
+> and `GetScaffoldingSupportsCollisionLayers()`. If these LayerMask fields on BuildingManager are
+> set to "Nothing" (all unchecked), the raycast hits nothing → **zero legs spawn** → building floats
+> with no supports. No error in console.
+>
+> **Verify:** Select BuildingManager GO → `_buildingSupportsCollisionLayers` → must include `BuildingObject`.
+> `_scaffoldingSupportsCollisionLayers` → must include `BuildingObject`.
+
+### ⚠️ Support Prefabs Must Be Assigned
+
+> ModularBuildingSupports has `_topSupportPrefab`, `_middleSupportPrefab`, `_bottomCapPrefab`.
+> ScaffoldingSupportLeg has `_supportPrefab`. If ANY of these are null → `Instantiate(null)` →
+> **NullReferenceException** on scene start. Each prefab is just a simple mesh GO (no scripts needed).
+
 ---
 
 ## Setup Guide
@@ -22529,6 +24408,415 @@ TestBuilding (root)
 - [ ] No ground → no legs, no error
 - [ ] Different SupportType connections (Roller, Conveyor, etc.) use matching prefabs
 - [ ] Zero console errors
+
+<!-- ==== FILE: learn/prototype/Proto_SlotDragDrop.cs ==== -->
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UI;
+using UnityEngine.EventSystems;
+using TMPro;
+
+/// <summary>
+/// STANDALONE prototype — drop on an empty scene with Canvas + EventSystem and press Play.
+/// Tests: UI slot drag-drop, swap, add slot via button, select slot, ghost icon follows cursor.
+/// Zero external dependencies — no GameEvents, no DataService, no InventoryOrchestrator.
+/// Everything is created at runtime from code.
+///
+/// SETUP (takes 30 seconds):
+///   1. Create new empty scene
+///   2. GameObject → UI → Canvas (auto-creates EventSystem)
+///   3. Create empty GO → name "Proto_SlotDragDrop" → add this script
+///   4. Wire: _canvas → the Canvas GO
+///   5. Press Play
+///
+/// CONTROLS:
+///   A       → add a new "tool" to first empty slot (simulates pickup)
+///   1-5     → select slot (highlight changes)
+///   Drag    → drag slot icon to another slot → swap on drop
+///   Click   → select slot (logs to console)
+///
+/// WHAT TO VERIFY:
+///   - Slots appear in a row (HorizontalLayoutGroup)
+///   - A key adds colored squares to empty slots
+///   - Clicking a slot highlights it (green border)
+///   - Dragging a slot shows ghost icon following cursor
+///   - Dropping on another slot swaps their contents
+///   - Dragging outside all slots → item "dropped" (slot empties)
+///   - Console logs every action
+/// </summary>
+public class Proto_SlotDragDrop : MonoBehaviour
+{
+	[SerializeField] Canvas _canvas;
+
+	// runtime data
+	struct SlotData 
+	{ 
+		public bool hasItem; 
+		public Color color;
+		public string name; 
+	}
+	List<SlotData> slots = new List<SlotData>();
+	List<GameObject> slotGOs = new List<GameObject>();
+	GameObject ghostGO;
+	Image ghostImage;
+	GameObject infoPanelGO;
+	TMP_Text infoNameText;
+	int selectedIndex = 0;
+	int dragFromIndex = -1;
+	int slotCount = 5;
+	int toolCounter = 0;
+	string[] toolNames = { "Pickaxe", "Magnet", "Hammer", "Hat", "Wrench", "Scanner", "Builder" };
+
+	void Start()
+	{
+		// → create slot container with HorizontalLayoutGroup
+		var container = CreateSlotContainer();
+		// → create slots
+		for (int i = 0; i < slotCount; i++)
+		{
+			slots.Add(new SlotData { hasItem = false, color = Color.clear, name = "" });
+			slotGOs.Add(CreateSlotGO(container, i));
+		}
+		// → create ghost (starts hidden)
+		ghostGO = CreateGhost();
+		// → create Add button
+		CreateAddButton();
+		// → create info panel with Equip + Drop buttons (starts hidden)
+		infoPanelGO = CreateInfoPanel();
+		// → select first slot
+		SelectSlot(0);
+		Debug.Log("[Proto] Ready. Press A to add tool, 1-5 to select, drag to swap.");
+	}
+
+	void Update()
+	{
+		// A → add tool to first empty slot
+		if (Input.GetKeyDown(KeyCode.A)) AddTool();
+		// 1-5 → select slot
+		if (Input.GetKeyDown(KeyCode.Alpha1)) SelectSlot(0);
+		if (Input.GetKeyDown(KeyCode.Alpha2)) SelectSlot(1);
+		if (Input.GetKeyDown(KeyCode.Alpha3)) SelectSlot(2);
+		if (Input.GetKeyDown(KeyCode.Alpha4)) SelectSlot(3);
+		if (Input.GetKeyDown(KeyCode.Alpha5)) SelectSlot(4);
+	}
+
+	// ─── SLOT ACTIONS ───────────────────────────────────────────
+
+	void AddTool()
+	{
+		for (int i = 0; i < slots.Count; i++)
+		{
+			if (!slots[i].hasItem)
+			{
+				string name = toolNames[toolCounter % toolNames.Length];
+				Color color = Color.HSVToRGB((toolCounter * 0.15f) % 1f, 0.7f, 0.9f);
+				slots[i] = new SlotData { hasItem = true, color = color, name = name };
+				toolCounter++;
+				RefreshAllSlots();
+				Debug.Log($"[Proto] Added '{name}' to slot {i}");
+				return;
+			}
+		}
+		Debug.Log("[Proto] All slots full!");
+	}
+
+	void SelectSlot(int index)
+	{
+		if (index < 0 || index >= slots.Count) return;
+		selectedIndex = index;
+		RefreshAllSlots();
+		var s = slots[index];
+		Debug.Log($"[Proto] Selected slot {index}" + (s.hasItem ? $" ({s.name})" : " (empty)"));
+	}
+
+	void SwapSlots(int a, int b)
+	{
+		if (a < 0 || b < 0 || a >= slots.Count || b >= slots.Count || a == b) return;
+		var temp = slots[a];
+		slots[a] = slots[b];
+		slots[b] = temp;
+		RefreshAllSlots();
+		Debug.Log($"[Proto] Swapped slot {a} ↔ {b}");
+	}
+
+	void ClearSlot(int index)
+	{
+		if (index < 0 || index >= slots.Count) return;
+		string name = slots[index].name;
+		slots[index] = new SlotData { hasItem = false, color = Color.clear, name = "" };
+		RefreshAllSlots();
+		Debug.Log($"[Proto] Dropped '{name}' from slot {index}");
+	}
+
+	void RefreshAllSlots()
+	{
+		for (int i = 0; i < slotGOs.Count; i++)
+		{
+			var bg = slotGOs[i].GetComponent<Image>();
+			var icon = slotGOs[i].transform.Find("Icon").GetComponent<Image>();
+			var label = slotGOs[i].transform.Find("Label").GetComponent<TMP_Text>();
+
+			// → background: green if selected, dark grey otherwise
+			bg.color = (i == selectedIndex)
+				? new Color(0.3f, 0.8f, 0.4f, 0.3f)
+				: new Color(0.2f, 0.2f, 0.2f, 0.5f);
+
+			if (slots[i].hasItem)
+			{
+				icon.enabled = true;
+				icon.color = slots[i].color;
+				label.text = slots[i].name;
+			}
+			else
+			{
+				icon.enabled = false;
+				label.text = "";
+			}
+		}
+	}
+
+	// ─── DRAG-DROP HANDLERS ─────────────────────────────────────
+
+	void OnSlotBeginDrag(int index, PointerEventData e)
+	{
+		if (!slots[index].hasItem) return;
+		dragFromIndex = index;
+		// → hide source slot content
+		slotGOs[index].transform.Find("Icon").gameObject.SetActive(false);
+		slotGOs[index].transform.Find("Label").gameObject.SetActive(false);
+		// → show ghost
+		ghostGO.SetActive(true);
+		ghostImage.color = slots[index].color;
+		ghostGO.transform.SetAsLastSibling();
+		Debug.Log($"[Proto] Begin drag from slot {index} ({slots[index].name})");
+	}
+
+	void OnSlotDrag(PointerEventData e)
+	{
+		if (dragFromIndex < 0) return;
+		ghostGO.transform.position = e.position;
+	}
+
+	void OnSlotEndDrag(int index, PointerEventData e)
+	{
+		// → restore source slot visuals
+		slotGOs[index].transform.Find("Icon").gameObject.SetActive(true);
+		slotGOs[index].transform.Find("Label").gameObject.SetActive(true);
+		ghostGO.SetActive(false);
+
+		// → if dropped outside any slot (no valid drop target received OnDrop)
+		if (dragFromIndex >= 0 && e.pointerEnter == null)
+			ClearSlot(dragFromIndex);
+
+		dragFromIndex = -1;
+		RefreshAllSlots();
+	}
+
+	void OnSlotDrop(int targetIndex, PointerEventData e)
+	{
+		if (dragFromIndex < 0 || dragFromIndex == targetIndex) return;
+		SwapSlots(dragFromIndex, targetIndex);
+	}
+
+	void OnSlotClick(int index)
+	{
+		SelectSlot(index);
+		// → show info panel if slot has item, hide if empty
+		ShowInfoPanel(index);
+	}
+
+	void ShowInfoPanel(int index)
+	{
+		var s = slots[index];
+		if (!s.hasItem) { infoPanelGO.SetActive(false); return; }
+		infoPanelGO.SetActive(true);
+		infoNameText.text = s.name;
+		Debug.Log($"[Proto] Info panel: {s.name} — Equip or Drop?");
+	}
+
+	void EquipSelected()
+	{
+		// → "equip" just means select it (highlight green)
+		if (!slots[selectedIndex].hasItem) return;
+		Debug.Log($"[Proto] EQUIPPED: {slots[selectedIndex].name} (slot {selectedIndex} highlighted)");
+		infoPanelGO.SetActive(false);
+	}
+
+	void DropSelected()
+	{
+		if (!slots[selectedIndex].hasItem) return;
+		string name = slots[selectedIndex].name;
+		ClearSlot(selectedIndex);
+		infoPanelGO.SetActive(false);
+		Debug.Log($"[Proto] DROPPED: {name} from slot {selectedIndex}");
+	}
+
+	// ─── UI CREATION (all runtime) ──────────────────────────────
+
+	Transform CreateSlotContainer()
+	{
+		var go = new GameObject("SlotContainer", typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(Image));
+		go.transform.SetParent(_canvas.transform, false);
+		var rt = go.GetComponent<RectTransform>();
+		rt.anchorMin = new Vector2(0.5f, 0f);
+		rt.anchorMax = new Vector2(0.5f, 0f);
+		rt.pivot = new Vector2(0.5f, 0f);
+		rt.anchoredPosition = new Vector2(0, 20);
+		rt.sizeDelta = new Vector2(slotCount * 80 + 20, 90);
+		var hlg = go.GetComponent<HorizontalLayoutGroup>();
+		hlg.spacing = 5;
+		hlg.padding = new RectOffset(5, 5, 5, 5);
+		hlg.childAlignment = TextAnchor.MiddleCenter;
+		go.GetComponent<Image>().color = new Color(0.1f, 0.1f, 0.1f, 0.8f);
+		return go.transform;
+	}
+
+	GameObject CreateSlotGO(Transform parent, int index)
+	{
+		// → slot background
+		var slotGO = new GameObject($"Slot_{index}", typeof(RectTransform), typeof(Image));
+		slotGO.transform.SetParent(parent, false);
+		var rt = slotGO.GetComponent<RectTransform>();
+		rt.sizeDelta = new Vector2(70, 70);
+		slotGO.GetComponent<Image>().color = new Color(0.2f, 0.2f, 0.2f, 0.5f);
+		// → IMPORTANT: raycastTarget = true on the slot background (receives drop events)
+		slotGO.GetComponent<Image>().raycastTarget = true;
+
+		// → icon (colored square representing a tool)
+		var iconGO = new GameObject("Icon", typeof(RectTransform), typeof(Image));
+		iconGO.transform.SetParent(slotGO.transform, false);
+		var iconRT = iconGO.GetComponent<RectTransform>();
+		iconRT.anchorMin = Vector2.zero; iconRT.anchorMax = Vector2.one;
+		iconRT.offsetMin = new Vector2(8, 16); iconRT.offsetMax = new Vector2(-8, -8);
+		iconGO.GetComponent<Image>().enabled = false;
+		iconGO.GetComponent<Image>().raycastTarget = false; // icon must NOT block drop events
+
+		// → label
+		var labelGO = new GameObject("Label", typeof(RectTransform), typeof(TextMeshProUGUI));
+		labelGO.transform.SetParent(slotGO.transform, false);
+		var labelRT = labelGO.GetComponent<RectTransform>();
+		labelRT.anchorMin = new Vector2(0, 0); labelRT.anchorMax = new Vector2(1, 0.3f);
+		labelRT.offsetMin = Vector2.zero; labelRT.offsetMax = Vector2.zero;
+		var tmp = labelGO.GetComponent<TMP_Text>();
+		tmp.fontSize = 8; tmp.alignment = TextAlignmentOptions.Center;
+		tmp.raycastTarget = false;
+
+		// → add EventSystem relay (inline — no separate UIEventRelay script needed)
+		var relay = slotGO.AddComponent<SlotRelay>();
+		int idx = index; // capture for closure
+		relay.onBeginDrag = (e) => OnSlotBeginDrag(idx, e);
+		relay.onDrag = (e) => OnSlotDrag(e);
+		relay.onEndDrag = (e) => OnSlotEndDrag(idx, e);
+		relay.onDrop = (e) => OnSlotDrop(idx, e);
+		relay.onPointerDown = (e) => OnSlotClick(idx);
+
+		return slotGO;
+	}
+
+	GameObject CreateGhost()
+	{
+		var go = new GameObject("DragGhost", typeof(RectTransform), typeof(Image));
+		go.transform.SetParent(_canvas.transform, false);
+		var rt = go.GetComponent<RectTransform>();
+		rt.sizeDelta = new Vector2(50, 50);
+		ghostImage = go.GetComponent<Image>();
+		ghostImage.raycastTarget = false; // CRITICAL: ghost must not block drop targets
+		go.SetActive(false);
+		return go;
+	}
+
+	GameObject CreateInfoPanel()
+	{
+		// → panel background
+		var panel = new GameObject("InfoPanel", typeof(RectTransform), typeof(Image), typeof(VerticalLayoutGroup));
+		panel.transform.SetParent(_canvas.transform, false);
+		var rt = panel.GetComponent<RectTransform>();
+		rt.anchorMin = new Vector2(1f, 0f);
+		rt.anchorMax = new Vector2(1f, 0f);
+		rt.pivot = new Vector2(1f, 0f);
+		rt.anchoredPosition = new Vector2(-20, 20);
+		rt.sizeDelta = new Vector2(180, 130);
+		panel.GetComponent<Image>().color = new Color(0.15f, 0.15f, 0.15f, 0.95f);
+		var vlg = panel.GetComponent<VerticalLayoutGroup>();
+		vlg.spacing = 5; vlg.padding = new RectOffset(10, 10, 10, 10);
+		vlg.childForceExpandWidth = true; vlg.childForceExpandHeight = false;
+
+		// → tool name text
+		var nameGO = new GameObject("NameText", typeof(RectTransform), typeof(TextMeshProUGUI));
+		nameGO.transform.SetParent(panel.transform, false);
+		infoNameText = nameGO.GetComponent<TMP_Text>();
+		infoNameText.text = ""; infoNameText.fontSize = 18;
+		infoNameText.alignment = TextAlignmentOptions.Center; infoNameText.color = Color.white;
+		var nameLE = nameGO.AddComponent<LayoutElement>();
+		nameLE.preferredHeight = 30;
+
+		// → equip button
+		CreatePanelButton(panel.transform, "Equip", new Color(0.2f, 0.6f, 0.8f, 1f), () => EquipSelected());
+		// → drop button
+		CreatePanelButton(panel.transform, "Drop", new Color(0.8f, 0.3f, 0.2f, 1f), () => DropSelected());
+
+		panel.SetActive(false);
+		return panel;
+	}
+
+	void CreatePanelButton(Transform parent, string label, Color color, UnityEngine.Events.UnityAction onClick)
+	{
+		var btnGO = new GameObject(label + "Btn", typeof(RectTransform), typeof(Image), typeof(Button), typeof(LayoutElement));
+		btnGO.transform.SetParent(parent, false);
+		btnGO.GetComponent<Image>().color = color;
+		btnGO.GetComponent<Button>().onClick.AddListener(onClick);
+		btnGO.GetComponent<LayoutElement>().preferredHeight = 35;
+
+		var textGO = new GameObject("Text", typeof(RectTransform), typeof(TextMeshProUGUI));
+		textGO.transform.SetParent(btnGO.transform, false);
+		var textRT = textGO.GetComponent<RectTransform>();
+		textRT.anchorMin = Vector2.zero; textRT.anchorMax = Vector2.one;
+		textRT.offsetMin = Vector2.zero; textRT.offsetMax = Vector2.zero;
+		var tmp = textGO.GetComponent<TMP_Text>();
+		tmp.text = label; tmp.fontSize = 16;
+		tmp.alignment = TextAlignmentOptions.Center; tmp.color = Color.white;
+		tmp.raycastTarget = false;
+	}
+
+	void CreateAddButton()
+	{
+		var go = new GameObject("AddButton", typeof(RectTransform), typeof(Image), typeof(Button));
+		go.transform.SetParent(_canvas.transform, false);
+		var rt = go.GetComponent<RectTransform>();
+		rt.anchorMin = new Vector2(0.5f, 0f);
+		rt.anchorMax = new Vector2(0.5f, 0f);
+		rt.pivot = new Vector2(0.5f, 0f);
+		rt.anchoredPosition = new Vector2(0, 120);
+		rt.sizeDelta = new Vector2(200, 40);
+		go.GetComponent<Image>().color = new Color(0.2f, 0.6f, 0.3f, 1f);
+		go.GetComponent<Button>().onClick.AddListener(() => AddTool());
+
+		var textGO = new GameObject("Text", typeof(RectTransform), typeof(TextMeshProUGUI));
+		textGO.transform.SetParent(go.transform, false);
+		var textRT = textGO.GetComponent<RectTransform>();
+		textRT.anchorMin = Vector2.zero; textRT.anchorMax = Vector2.one;
+		textRT.offsetMin = Vector2.zero; textRT.offsetMax = Vector2.zero;
+		var tmp = textGO.GetComponent<TMP_Text>();
+		tmp.text = "Add Tool (or press A)";
+		tmp.fontSize = 16; tmp.alignment = TextAlignmentOptions.Center;
+		tmp.color = Color.white; tmp.raycastTarget = false;
+	}
+}
+
+/// <summary>
+/// Minimal inline EventSystem relay — same concept as UIEventRelay but self-contained.
+/// No external dependencies. Wired via Action callbacks from the prototype.
+/// </summary>
+public class SlotRelay : MonoBehaviour,
+	IBeginDragHandler, IDragHandler, IEndDragHandler, IDropHandler, IPointerDownHandler
+{
+	public System.Action<PointerEventData> onBeginDrag, onDrag, onEndDrag, onDrop, onPointerDown;
+	public void OnBeginDrag(PointerEventData e) => onBeginDrag?.Invoke(e);
+	public void OnDrag(PointerEventData e) => onDrag?.Invoke(e);
+	public void OnEndDrag(PointerEventData e) => onEndDrag?.Invoke(e);
+	public void OnDrop(PointerEventData e) => onDrop?.Invoke(e);
+	public void OnPointerDown(PointerEventData e) => onPointerDown?.Invoke(e);
+}
 
 <!-- ==== FILE: learn/surfer.md ==== -->
 # Surfer — Critical Thoughts Log
@@ -23305,4 +25593,21 @@ The PlayerController is a textbook God Object but splitting it would be a refact
 - **Tradeoffs considered:** Could have generated one massive document vs per-package docs. Chose per-package because: (1) each package is independent, (2) different team members might only need one, (3) INDEX.md provides the cross-reference and use-case navigation.
 - **What I deliberately avoided:** Didn't include the Phase B/D scripts verbatim — referenced them and showed the diff. Didn't document every single one of the 80+ feedbacks in detail (listed them in tables instead). Didn't create docs for each GUI ZIP's internal contents since they're just PNG sprites.
 - **Quality gates:** Every API example uses the correct namespace, correct class name, correct method signature verified from source. No hallucinated APIs.
+
+## Prompt: "TODO.md bugs — tool pickup + drag-drop not working in Phase B"
+
+**What I thought:**
+- **Root cause of tool pickup failure:** HotBar was a CHILD of InventoryUI in the hand-typed scene. When InventoryUI self-disables (`SetActive(false)` in first OnEnable), ALL children including HotBar become invisible. The event subscription still fires, DataService adds the tool, but the Field_ slots are on disabled GOs → nothing visible. The generated GUIDE.md showed the correct sibling hierarchy but never explicitly warned "HotBar must NOT be a child."
+- **Root cause of drag-drop failure:** Two issues: (1) DragGhostIcon's Image `raycastTarget` likely `true` → ghost steals pointer events from slots underneath → hover flickers, drop never reaches target slot. (2) `InventoryDataService.Swap()` swaps entire InventorySlot objects instead of just the `tool` field → after swap, `isHotBar` (derived from `index`) is wrong for both slots.
+- **Created Proto_SlotDragDrop.cs** — standalone prototype that builds the entire UI from code at runtime. Only needs Canvas + EventSystem. Tests drag-drop, swap, add/select/equip/drop. If prototype works but real system doesn't → wiring bug confirmed. Explicitly sets `raycastTarget = false` on ghost and icons, `true` on slot backgrounds.
+- **The guides were correct but not explicit enough.** The hierarchy diagrams showed sibling structure, but a beginner who sees "InventoryUI panel containing HotBar" in their mind naturally nests HotBar under InventoryUI. Needed a bold WARNING saying "if you put HotBar as child, it WILL break."
+
+## Prompt: "Pitfall rules — 10 mandatory warnings for all Manual tests"
+
+**What I thought:**
+- **4 original pitfalls from Phase B bugs:** SetActive cascading, scene instance vs prefab, raycastTarget, swap contents. These were the bugs the user actually hit.
+- **6 new pitfalls from Phase D audit:** Missing layers (silent -1 return), LayerMask fields at Nothing (raycasts return empty), cross-phase mods not applied (compile or runtime failure), dual collider setup (trigger + physical), static lists surviving domain reload, execution order attributes. These haven't been hit yet but WOULD cause the same "no error, just doesn't work" experience.
+- **All 10 rules added to GOAL.md + NewAgent.md.** Each rule says: what goes wrong, why it's silent, what the Manual test must include. The agent checks every Manual/*.md against these 10 rules before delivery.
+- **Phase D Manual tests updated:** BuildingPlacementTest.md got layer warning with "What Happens If Missing" table + LayerMask field configuration list + cross-phase prerequisites + static list warning. ConveyorFlowTest.md got BasePhysicsObject stub warning + dual collider warning + execution order warning. ScaffoldingTest.md got LayerMask + prefab assignment warnings. GUIDE.md got top-of-file ⚠️ warning box.
+- **Prototype convention documented:** `learn/prototype/` — one .cs = one mechanic, zero dependencies. User decides which prototypes are needed.
 
