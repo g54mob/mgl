@@ -3052,6 +3052,515 @@ svg.call(zoom.transform, d3.zoomIdentity.translate(W*0.1, H*0.1).scale(0.8));
 </body>
 </html>
 
+<!-- ==== FILE: web-tools/minemgl-grid-canvas.html ==== -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+<title>MineMGL — Dependency Grid (Canvas)</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
+*{margin:0;padding:0;box-sizing:border-box;}
+:root{
+  --bg:#101014;--bg2:#16161b;--bg3:#1e1e24;--border:#2a2a33;--text:#d4d4d4;
+  --muted:#808090;--accent:#e5a210;--accent2:#c48a0e;
+}
+body{font-family:'JetBrains Mono','Courier New',monospace;background:var(--bg);color:var(--text);overflow:hidden;height:100vh;width:100vw;}
+::-webkit-scrollbar{height:3px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+#header{position:fixed;top:0;left:0;right:0;z-index:200;background:var(--bg2);border-bottom:1px solid var(--border);padding:6px 12px;display:flex;align-items:center;gap:8px;height:38px;}
+#header h1{font-size:12px;font-weight:600;color:var(--accent);white-space:nowrap;}
+#header .sub{font-size:9px;color:var(--muted);white-space:nowrap;display:none;}
+#search{font-family:inherit;font-size:10px;padding:4px 10px;width:140px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);outline:none;margin-left:auto;}
+#search:focus{border-color:var(--accent);}
+#search::placeholder{color:#555;}
+#edge-bar{position:fixed;top:38px;left:0;right:0;z-index:190;background:var(--bg2);border-bottom:1px solid var(--border);padding:4px 8px;display:flex;gap:3px;flex-wrap:nowrap;height:28px;align-items:center;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;}
+.edge-btn{font-family:inherit;font-size:9px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);cursor:pointer;transition:all .12s;display:flex;align-items:center;gap:4px;-webkit-tap-highlight-color:transparent;touch-action:manipulation;white-space:nowrap;flex-shrink:0;}
+.edge-btn:hover{background:var(--bg3);}.edge-btn.active{background:var(--bg3);border-color:var(--muted);}.edge-btn.off{opacity:0.35;}
+.edge-swatch{width:14px;height:2px;display:inline-block;}
+canvas{position:fixed;top:66px;left:0;right:0;bottom:0;display:block;touch-action:none;}
+#info{position:fixed;z-index:180;background:var(--bg2)ee;border:1px solid var(--border);border-radius:8px;padding:12px 14px;font-size:10px;overflow-y:auto;display:none;box-shadow:0 4px 24px rgba(0,0,0,0.4);}
+#info .close-btn{position:absolute;top:8px;right:10px;background:none;border:none;color:var(--muted);font-size:16px;cursor:pointer;font-family:inherit;padding:4px;}
+#info .close-btn:hover{color:var(--text);}
+#info h3{font-size:13px;color:var(--accent);margin-bottom:3px;font-weight:600;}
+#info .meta{color:var(--muted);margin-bottom:8px;font-size:9px;}
+#info .section-title{font-size:9px;color:var(--accent2);font-weight:600;margin-top:8px;margin-bottom:3px;text-transform:uppercase;letter-spacing:0.5px;}
+#info .dep{padding:2px 0;color:#b0b0b0;font-size:9px;}
+#info .dep .dir{color:var(--accent);font-weight:700;}
+#info .dep .etype{color:var(--muted);font-size:8px;}
+@media(min-width:768px){#header .sub{display:inline;}#info{top:70px;right:12px;width:280px;max-height:calc(100vh - 82px);}}
+@media(max-width:767px){#info{bottom:0;left:0;right:0;top:auto;max-height:55vh;border-radius:12px 12px 0 0;width:100%;}}
+</style>
+</head>
+<body>
+<div id="header">
+  <h1>MineMGL — Grid (Canvas)</h1>
+  <span class="sub">pinch zoom · drag pan · tap inspect</span>
+  <input type="text" id="search" placeholder="Search..." />
+</div>
+<div id="edge-bar"></div>
+<canvas id="c"></canvas>
+<div id="info">
+  <button class="close-btn" id="info-close" title="Close">&#10005;</button>
+  <h3 id="i-name"></h3>
+  <div class="meta" id="i-meta"></div>
+  <div id="i-deps"></div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+// CONFIG
+// ═══════════════════════════════════════════════════════════════
+const PHASES=['all','a','a1','b','c','d'];
+const PHASE_LABELS={all:'Phase-All',a:'Phase-A',a1:'Phase-A1',b:'Phase-B',c:'Phase-C',d:'Phase-D'};
+const PHASE_COLORS={all:'#b89eff',a:'#6cb4ff',a1:'#7af0ff',b:'#45eaad',c:'#ffd04a',d:'#ff8080'};
+const LAYERS=['0-Core','1-Managers','2-Data','3-MonoBehaviours','4-Utils','5-Tests'];
+const LAYER_LABELS={'0-Core':'Core','1-Managers':'Managers','2-Data':'Data','3-MonoBehaviours':'MonoBehaviours','4-Utils':'Utils','5-Tests':'Tests'};
+const COL_W=280,NODE_W=120,NODE_H=28,NODE_PAD=4,MARGIN={top:50,left:130,right:40,bottom:40};
+const EDGE_TYPES=['inherit','interface','get','set','event-sub','event-raise','singleton','creates','uses-util'];
+const EDGE_LABELS={inherit:'Inherits',interface:'Interface',get:'Get()',set:'Set()','event-sub':'Event +=','event-raise':'Raise()','singleton':'Singleton.Ins','creates':'Creates','uses-util':'Utils'};
+const EDGE_COLORS={inherit:'#b89eff',interface:'#7af0ff',get:'#5aeaad',set:'#ff8080','event-sub':'#ffe066','event-raise':'#ffab57',singleton:'#d4a0ff',creates:'#ff85c8','uses-util':'#62bfff'};
+const EDGE_DASH={inherit:null,interface:[5,3],get:null,set:[4,2],'event-sub':[2,2],'event-raise':null,singleton:[6,4],creates:[3,3],'uses-util':[3,2]};
+const EDGE_WIDTH={inherit:2,interface:1.2,get:1.2,set:1.2,'event-sub':2,'event-raise':2,singleton:1.2,creates:1.2,'uses-util':1};
+const EDGE_ALPHA={inherit:0.7,interface:0.6,get:0.55,set:0.6,'event-sub':0.7,'event-raise':0.7,singleton:0.55,creates:0.55,'uses-util':0.45};
+const activeEdges=new Set(EDGE_TYPES);
+
+// ═══════════════════════════════════════════════════════════════
+// NODE + EDGE DATA (identical to SVG version)
+// ═══════════════════════════════════════════════════════════════
+const nodes=[
+  {id:'GameEvents_All',label:'GameEvents',phase:'all',layer:'0-Core',type:'static partial'},
+  {id:'Singleton',label:'Singleton<T>',phase:'all',layer:'0-Core',type:'abstract'},
+  {id:'EconomyManager',label:'EconomyManager',phase:'all',layer:'1-Managers',type:'Singleton'},
+  {id:'UIManager',label:'UIManager',phase:'all',layer:'1-Managers',type:'Singleton'},
+  {id:'GlobalEnumsAll',label:'GlobalEnumsAll',phase:'all',layer:'2-Data',type:'TagType'},
+  {id:'IEnumUtils',label:'IEnumerableUtils',phase:'all',layer:'4-Utils',type:'(empty)'},
+  {id:'UtilsAll',label:'UtilsPhaseAll',phase:'all',layer:'4-Utils',type:'HasTag/SetTag'},
+  {id:'GE_A',label:'GameEvents(A)',phase:'a',layer:'0-Core',type:'partial'},
+  {id:'InteractionWheelUI',label:'InteractionWheelUI',phase:'a',layer:'1-Managers',type:'Singleton SubMgr'},
+  {id:'ShopUI',label:'ShopUI',phase:'a',layer:'1-Managers',type:'SubManager'},
+  {id:'bgUI',label:'bgUI',phase:'a',layer:'1-Managers',type:'SubManager'},
+  {id:'moneyUI',label:'moneyUI',phase:'a',layer:'1-Managers',type:'SubManager'},
+  {id:'ShopDataService',label:'ShopDataService',phase:'a',layer:'2-Data',type:'C# service'},
+  {id:'WShopItem',label:'WShopItem',phase:'a',layer:'2-Data',type:'wrapper'},
+  {id:'F_InteractionOpt',label:'Field_InteractionOpt',phase:'a',layer:'2-Data',type:'UI field'},
+  {id:'F_ShopCartItem',label:'Field_ShopCartItem',phase:'a',layer:'2-Data',type:'UI field'},
+  {id:'F_ShopCategory',label:'Field_ShopCategory',phase:'a',layer:'2-Data',type:'UI field'},
+  {id:'F_ShopItem',label:'Field_ShopItem',phase:'a',layer:'2-Data',type:'UI field'},
+  {id:'IInteractable',label:'IInteractable',phase:'a',layer:'2-Data',type:'interface'},
+  {id:'SO_InteractionOpt',label:'SO_InteractionOption',phase:'a',layer:'2-Data',type:'SO'},
+  {id:'SO_ShopCategory',label:'SO_ShopCategory',phase:'a',layer:'2-Data',type:'SO'},
+  {id:'SO_ShopItemDef',label:'SO_ShopItemDef',phase:'a',layer:'2-Data',type:'SO'},
+  {id:'InteractableComputer',label:'InteractableComputer',phase:'a',layer:'3-MonoBehaviours',type:'IInteractable'},
+  {id:'ShopUIOrch',label:'ShopUIOrchestrator',phase:'a',layer:'3-MonoBehaviours',type:'Orchestrator'},
+  {id:'ShopSpawnPoint',label:'ShopSpawnPoint',phase:'a',layer:'3-MonoBehaviours',type:'static'},
+  {id:'SimplePlayerCtrl',label:'SimplePlayerCtrl',phase:'a',layer:'3-MonoBehaviours',type:'Singleton'},
+  {id:'SimplePlayerIntr',label:'SimplePlayerInteraction',phase:'a',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
+  {id:'PhaseALOG',label:'PhaseALOG',phase:'a',layer:'4-Utils',type:'logger'},
+  {id:'UtilsA',label:'UtilsPhaseA',phase:'a',layer:'4-Utils',type:'formatMoney/Spawn'},
+  {id:'ShopUITest',label:'ShopUITest',phase:'a',layer:'5-Tests',type:'Test'},
+  {id:'GE_A1',label:'GameEvents(A1)',phase:'a1',layer:'0-Core',type:'partial'},
+  {id:'CameraShaker',label:'CameraShaker',phase:'a1',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
+  {id:'StartingElevator',label:'StartingElevator',phase:'a1',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
+  {id:'ElevatorTest',label:'ElevatorTest',phase:'a1',layer:'5-Tests',type:'Test'},
+  {id:'GE_B',label:'GameEvents(B)',phase:'b',layer:'0-Core',type:'partial'},
+  {id:'InventoryUI',label:'InventoryUI',phase:'b',layer:'1-Managers',type:'SubManager'},
+  {id:'InvDataService',label:'InventoryDataService',phase:'b',layer:'2-Data',type:'C# service'},
+  {id:'GlobalEnumsB',label:'GlobalEnumsB',phase:'b',layer:'2-Data',type:'InteractionType+'},
+  {id:'F_InvSlot',label:'Field_InvSlot',phase:'b',layer:'2-Data',type:'UI field'},
+  {id:'IIconItem',label:'IIconItem',phase:'b',layer:'2-Data',type:'interface'},
+  {id:'ISaveLoadObj',label:'ISaveLoadableObj',phase:'b',layer:'2-Data',type:'interface'},
+  {id:'SO_FootstepDef',label:'SO_FootstepDef',phase:'b',layer:'2-Data',type:'SO'},
+  {id:'FresnelHL',label:'FresnelHighlighter',phase:'b',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
+  {id:'IHighlightable',label:'IHighlightable',phase:'b',layer:'2-Data',type:'interface'},
+  {id:'InvOrch',label:'InventoryOrchestrator',phase:'b',layer:'3-MonoBehaviours',type:'Orchestrator'},
+  {id:'BasePhysObj',label:'BasePhysicsObject',phase:'b',layer:'3-MonoBehaviours',type:'base class'},
+  {id:'BaseSellable',label:'BaseSellableItem',phase:'b',layer:'3-MonoBehaviours',type:'base class'},
+  {id:'PhysicsGib',label:'PhysicsGib',phase:'b',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
+  {id:'PhysSoundPlayer',label:'PhysicsSoundPlayer',phase:'b',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
+  {id:'PlayerCam',label:'PlayerCamera',phase:'b',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
+  {id:'PlayerFoot',label:'PlayerFootsteps',phase:'b',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
+  {id:'PlayerGrab',label:'PlayerGrab',phase:'b',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
+  {id:'PlayerMov',label:'PlayerMovement',phase:'b',layer:'3-MonoBehaviours',type:'Singleton'},
+  {id:'PlayerSpawn',label:'PlayerSpawnPoint',phase:'b',layer:'3-MonoBehaviours',type:'static list'},
+  {id:'RbDragger',label:'RbDraggerCtrl',phase:'b',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
+  {id:'BaseHeldTool',label:'BaseHeldTool',phase:'b',layer:'3-MonoBehaviours',type:'base tool'},
+  {id:'ToolBuilder',label:'ToolBuilder',phase:'b',layer:'3-MonoBehaviours',type:'Tool'},
+  {id:'ToolHammer',label:'ToolHammer',phase:'b',layer:'3-MonoBehaviours',type:'Tool'},
+  {id:'ToolPickaxe',label:'ToolPickaxe',phase:'b',layer:'3-MonoBehaviours',type:'Tool'},
+  {id:'ToolMagnet',label:'ToolMagnet',phase:'b',layer:'3-MonoBehaviours',type:'Tool'},
+  {id:'ToolMiningHat',label:'ToolMiningHat',phase:'b',layer:'3-MonoBehaviours',type:'Tool'},
+  {id:'ToolResScanner',label:'ToolResScanner',phase:'b',layer:'3-MonoBehaviours',type:'Tool'},
+  {id:'ToolWrench',label:'ToolSupportsWrench',phase:'b',layer:'3-MonoBehaviours',type:'Tool'},
+  {id:'UIEventRelay',label:'UIEventRelay',phase:'b',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
+  {id:'UtilsB',label:'UtilsPhaseB',phase:'b',layer:'4-Utils',type:'physics helpers'},
+  {id:'PhaseBLOG',label:'PhaseBLOG',phase:'b',layer:'4-Utils',type:'logger'},
+  {id:'GE_C',label:'GameEvents(C)',phase:'c',layer:'0-Core',type:'partial'},
+  {id:'OreLimitMgr',label:'OreLimitManager',phase:'c',layer:'1-Managers',type:'Singleton'},
+  {id:'OreMgr',label:'OreManager',phase:'c',layer:'1-Managers',type:'Singleton'},
+  {id:'OrePoolMgr',label:'OrePiecePoolMgr',phase:'c',layer:'1-Managers',type:'Singleton'},
+  {id:'ParticleMgr',label:'ParticleManager',phase:'c',layer:'1-Managers',type:'Singleton'},
+  {id:'OreDataService',label:'OreDataService',phase:'c',layer:'2-Data',type:'C# service'},
+  {id:'GlobalEnumsC',label:'GlobalEnumsC',phase:'c',layer:'2-Data',type:'ResourceType+'},
+  {id:'IDamageable',label:'IDamageable',phase:'c',layer:'2-Data',type:'interface'},
+  {id:'SO_AutoMinerDef',label:'SO_AutoMinerDef',phase:'c',layer:'2-Data',type:'SO'},
+  {id:'OrePieceKey',label:'OrePieceKey',phase:'c',layer:'2-Data',type:'struct'},
+  {id:'ResourceDesc',label:'ResourceDescription',phase:'c',layer:'2-Data',type:'entity'},
+  {id:'WNodeDrop',label:'WeightedNodeDrop',phase:'c',layer:'2-Data',type:'entity'},
+  {id:'WOreChance',label:'WeightedOreChance',phase:'c',layer:'2-Data',type:'entity'},
+  {id:'AutoMiner',label:'AutoMiner',phase:'c',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
+  {id:'DmgOrePiece',label:'DamageableOrePiece',phase:'c',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
+  {id:'OreNode',label:'OreNode',phase:'c',layer:'3-MonoBehaviours',type:'IDamageable'},
+  {id:'OrePiece',label:'OrePiece',phase:'c',layer:'3-MonoBehaviours',type:'BaseSellable'},
+  {id:'PhysLimitWarn',label:'PhysLimitUIWarning',phase:'c',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
+  {id:'SellerMachine',label:'SellerMachine',phase:'c',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
+  {id:'UtilsC',label:'UtilsPhaseC',phase:'c',layer:'4-Utils',type:'WeightedRandom'},
+  {id:'PhaseCLOG',label:'PhaseCLOG',phase:'c',layer:'4-Utils',type:'logger'},
+  {id:'GE_D',label:'GameEvents(D)',phase:'d',layer:'0-Core',type:'partial'},
+  {id:'BuildingMgr',label:'BuildingManager',phase:'d',layer:'1-Managers',type:'Singleton'},
+  {id:'ConveyorMgr',label:'ConveyorBeltMgr',phase:'d',layer:'1-Managers',type:'Singleton'},
+  {id:'BuildDataSvc',label:'BuildingDataService',phase:'d',layer:'2-Data',type:'C# service'},
+  {id:'GlobalEnumsD',label:'GlobalEnumsD',phase:'d',layer:'2-Data',type:'CanPlace+'},
+  {id:'SO_BuildInvDef',label:'SO_BuildingInvDef',phase:'d',layer:'2-Data',type:'SO'},
+  {id:'BuildRotInfo',label:'BuildingRotInfo',phase:'d',layer:'2-Data',type:'entity'},
+  {id:'BuildingObj',label:'BuildingObject',phase:'d',layer:'3-MonoBehaviours',type:'IInteractable'},
+  {id:'BuildingCrate',label:'BuildingCrate',phase:'d',layer:'3-MonoBehaviours',type:'IInteractable'},
+  {id:'BuildPlaceNode',label:'BuildPlaceNode',phase:'d',layer:'3-MonoBehaviours',type:'static list'},
+  {id:'BaseModSupp',label:'BaseModularSupports',phase:'d',layer:'3-MonoBehaviours',type:'abstract'},
+  {id:'ModBuildSupp',label:'ModBuildSupports',phase:'d',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
+  {id:'ConveyorBelt',label:'ConveyorBelt',phase:'d',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
+  {id:'ConvShaker',label:'ConveyorShaker',phase:'d',layer:'3-MonoBehaviours',type:'inherits Belt'},
+  {id:'ConvShakerH',label:'ConveyorShakerH',phase:'d',layer:'3-MonoBehaviours',type:'inherits Belt'},
+  {id:'ConvBlocker',label:'ConveyorBlocker',phase:'d',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
+  {id:'ConvSplitter',label:'ConveyorSplitterT2',phase:'d',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
+  {id:'RoutConveyor',label:'RoutingConveyor',phase:'d',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
+  {id:'UtilsD',label:'UtilsPhaseD',phase:'d',layer:'4-Utils',type:'grid/overlap'},
+];
+const links=[
+  {s:'EconomyManager',t:'Singleton',type:'inherit'},{s:'UIManager',t:'Singleton',type:'inherit'},
+  {s:'InteractionWheelUI',t:'Singleton',type:'inherit'},{s:'SimplePlayerCtrl',t:'Singleton',type:'inherit'},
+  {s:'PlayerMov',t:'Singleton',type:'inherit'},{s:'OreLimitMgr',t:'Singleton',type:'inherit'},
+  {s:'OreMgr',t:'Singleton',type:'inherit'},{s:'OrePoolMgr',t:'Singleton',type:'inherit'},
+  {s:'ParticleMgr',t:'Singleton',type:'inherit'},{s:'BuildingMgr',t:'Singleton',type:'inherit'},
+  {s:'ConveyorMgr',t:'Singleton',type:'inherit'},
+  {s:'BaseSellable',t:'BasePhysObj',type:'inherit'},{s:'PhysicsGib',t:'BaseSellable',type:'inherit'},
+  {s:'BaseHeldTool',t:'BaseSellable',type:'inherit'},{s:'OrePiece',t:'BaseSellable',type:'inherit'},
+  {s:'DmgOrePiece',t:'OrePiece',type:'inherit'},{s:'BuildingCrate',t:'BaseSellable',type:'inherit'},
+  {s:'ToolBuilder',t:'BaseHeldTool',type:'inherit'},{s:'ToolHammer',t:'BaseHeldTool',type:'inherit'},
+  {s:'ToolPickaxe',t:'BaseHeldTool',type:'inherit'},{s:'ToolMagnet',t:'BaseHeldTool',type:'inherit'},
+  {s:'ToolMiningHat',t:'BaseHeldTool',type:'inherit'},{s:'ToolResScanner',t:'BaseHeldTool',type:'inherit'},
+  {s:'ToolWrench',t:'BaseHeldTool',type:'inherit'},
+  {s:'ConvShaker',t:'ConveyorBelt',type:'inherit'},{s:'ConvShakerH',t:'ConveyorBelt',type:'inherit'},
+  {s:'ModBuildSupp',t:'BaseModSupp',type:'inherit'},
+  {s:'InteractableComputer',t:'IInteractable',type:'interface'},{s:'InteractableComputer',t:'IHighlightable',type:'interface'},
+  {s:'BaseHeldTool',t:'IInteractable',type:'interface'},{s:'BaseHeldTool',t:'IHighlightable',type:'interface'},
+  {s:'BaseHeldTool',t:'IIconItem',type:'interface'},{s:'BaseHeldTool',t:'ISaveLoadObj',type:'interface'},
+  {s:'BuildingObj',t:'IInteractable',type:'interface'},{s:'BuildingObj',t:'IHighlightable',type:'interface'},
+  {s:'BuildingCrate',t:'IInteractable',type:'interface'},
+  {s:'OreNode',t:'IDamageable',type:'interface'},{s:'DmgOrePiece',t:'IDamageable',type:'interface'},
+  {s:'ShopUI',t:'UIManager',type:'singleton',lbl:'CloseAll'},{s:'InteractionWheelUI',t:'UIManager',type:'singleton',lbl:'CloseAll'},
+  {s:'moneyUI',t:'EconomyManager',type:'singleton',lbl:'GetMoney'},{s:'ShopDataService',t:'EconomyManager',type:'singleton',lbl:'GetMoney'},
+  {s:'ShopUIOrch',t:'EconomyManager',type:'singleton',lbl:'Get/AddMoney'},
+  {s:'SimplePlayerIntr',t:'UIManager',type:'singleton',lbl:'GetIsAnyMenuOpen'},{s:'InvOrch',t:'UIManager',type:'singleton',lbl:'isAnyMenuOpen'},
+  {s:'AutoMiner',t:'OreLimitMgr',type:'singleton',lbl:'ShouldBlock'},{s:'AutoMiner',t:'OrePoolMgr',type:'singleton',lbl:'SpawnPooledOre'},
+  {s:'OreNode',t:'OrePoolMgr',type:'singleton',lbl:'SpawnPooledOre'},{s:'OreNode',t:'ParticleMgr',type:'singleton',lbl:'CreateParticle'},
+  {s:'DmgOrePiece',t:'ParticleMgr',type:'singleton',lbl:'CreateParticle'},
+  {s:'OrePiece',t:'OrePoolMgr',type:'singleton',lbl:'ReturnToPool'},{s:'OrePiece',t:'EconomyManager',type:'singleton',lbl:'AddMoney'},
+  {s:'SellerMachine',t:'EconomyManager',type:'singleton',lbl:'AddMoney'},
+  {s:'BuildingObj',t:'BuildingMgr',type:'singleton',lbl:'GetCratePrefab'},{s:'BuildingCrate',t:'EconomyManager',type:'singleton',lbl:'GetMoney'},
+  {s:'ShopUITest',t:'EconomyManager',type:'singleton',lbl:'AddMoney'},
+  {s:'UIManager',t:'GameEvents_All',type:'event-sub'},{s:'InteractionWheelUI',t:'GE_A',type:'event-sub'},
+  {s:'ShopUI',t:'GE_A',type:'event-sub'},{s:'bgUI',t:'GameEvents_All',type:'event-sub'},
+  {s:'moneyUI',t:'GameEvents_All',type:'event-sub'},{s:'ShopUIOrch',t:'GameEvents_All',type:'event-sub'},
+  {s:'ShopUIOrch',t:'GE_A',type:'event-sub'},{s:'SimplePlayerCtrl',t:'GameEvents_All',type:'event-sub'},
+  {s:'InventoryUI',t:'GE_B',type:'event-sub'},{s:'InvOrch',t:'GE_B',type:'event-sub'},
+  {s:'InvOrch',t:'GameEvents_All',type:'event-sub'},{s:'PlayerMov',t:'GameEvents_All',type:'event-sub'},
+  {s:'PlayerCam',t:'GameEvents_All',type:'event-sub'},{s:'PlayerGrab',t:'GameEvents_All',type:'event-sub'},
+  {s:'PlayerGrab',t:'GE_B',type:'event-sub'},{s:'StartingElevator',t:'GE_A1',type:'event-sub'},
+  {s:'CameraShaker',t:'GE_A1',type:'event-sub'},{s:'PhysLimitWarn',t:'GE_C',type:'event-sub'},
+  {s:'FresnelHL',t:'GameEvents_All',type:'event-sub'},{s:'FresnelHL',t:'GE_B',type:'event-sub'},
+  {s:'EconomyManager',t:'GameEvents_All',type:'event-raise'},{s:'UIManager',t:'GE_A',type:'event-raise'},
+  {s:'InteractionWheelUI',t:'GameEvents_All',type:'event-raise'},{s:'ShopUI',t:'GameEvents_All',type:'event-raise'},
+  {s:'InventoryUI',t:'GameEvents_All',type:'event-raise'},{s:'InventoryUI',t:'GE_B',type:'event-raise'},
+  {s:'InteractableComputer',t:'GE_A',type:'event-raise'},{s:'SimplePlayerIntr',t:'GE_A',type:'event-raise'},
+  {s:'ShopUIOrch',t:'GE_A',type:'event-raise'},{s:'BaseHeldTool',t:'GE_B',type:'event-raise'},
+  {s:'InvOrch',t:'GE_B',type:'event-raise'},{s:'StartingElevator',t:'GE_A1',type:'event-raise'},
+  {s:'ElevatorTest',t:'GE_A1',type:'event-raise'},
+  {s:'OreNode',t:'GE_C',type:'event-raise'},{s:'OrePiece',t:'GE_C',type:'event-raise'},
+  {s:'OreLimitMgr',t:'GE_C',type:'event-raise'},{s:'SellerMachine',t:'GE_C',type:'event-raise'},
+  {s:'BuildingObj',t:'GE_D',type:'event-raise'},{s:'BuildingCrate',t:'GE_D',type:'event-raise'},
+  {s:'ShopUIOrch',t:'ShopDataService',type:'get'},{s:'ShopUI',t:'ShopDataService',type:'creates'},
+  {s:'ShopUI',t:'ShopUIOrch',type:'get'},{s:'InventoryUI',t:'InvDataService',type:'creates'},
+  {s:'InventoryUI',t:'InvOrch',type:'get'},{s:'InvOrch',t:'InvDataService',type:'get'},
+  {s:'InvOrch',t:'F_InvSlot',type:'get'},{s:'InvOrch',t:'UIEventRelay',type:'creates'},
+  {s:'InvOrch',t:'BaseHeldTool',type:'get'},{s:'InvOrch',t:'IIconItem',type:'get'},
+  {s:'InteractionWheelUI',t:'IInteractable',type:'get'},{s:'InteractionWheelUI',t:'F_InteractionOpt',type:'set'},
+  {s:'ShopUIOrch',t:'F_ShopItem',type:'set'},{s:'ShopUIOrch',t:'F_ShopCartItem',type:'set'},
+  {s:'ShopUIOrch',t:'F_ShopCategory',type:'set'},{s:'ShopUIOrch',t:'WShopItem',type:'get'},
+  {s:'PlayerCam',t:'PlayerMov',type:'get'},{s:'PlayerFoot',t:'PlayerMov',type:'get'},
+  {s:'PlayerGrab',t:'PlayerMov',type:'get'},{s:'RbDragger',t:'PlayerGrab',type:'get'},
+  {s:'PlayerMov',t:'PlayerSpawn',type:'get'},{s:'FresnelHL',t:'IHighlightable',type:'get'},
+  {s:'ToolPickaxe',t:'PhysSoundPlayer',type:'get'},{s:'ToolMagnet',t:'UtilsB',type:'uses-util'},
+  {s:'ToolMagnet',t:'BasePhysObj',type:'get'},{s:'BaseHeldTool',t:'PlayerMov',type:'get'},
+  {s:'BaseHeldTool',t:'GlobalEnumsB',type:'get'},{s:'BaseHeldTool',t:'SO_InteractionOpt',type:'get'},
+  {s:'SO_InteractionOpt',t:'GlobalEnumsB',type:'get'},{s:'InteractableComputer',t:'GlobalEnumsB',type:'get'},
+  {s:'OreMgr',t:'OreDataService',type:'creates'},{s:'OreMgr',t:'OrePiece',type:'get'},
+  {s:'OreLimitMgr',t:'OrePiece',type:'get'},{s:'OrePoolMgr',t:'OrePieceKey',type:'get'},
+  {s:'OrePoolMgr',t:'BasePhysObj',type:'get'},{s:'OrePoolMgr',t:'UtilsAll',type:'uses-util'},
+  {s:'OreNode',t:'UtilsC',type:'uses-util'},{s:'OreNode',t:'WNodeDrop',type:'get'},
+  {s:'AutoMiner',t:'SO_AutoMinerDef',type:'get'},{s:'AutoMiner',t:'UtilsC',type:'uses-util'},
+  {s:'SellerMachine',t:'OrePiece',type:'get'},{s:'SellerMachine',t:'BaseSellable',type:'get'},
+  {s:'SellerMachine',t:'UtilsAll',type:'uses-util'},{s:'UtilsC',t:'WOreChance',type:'get'},
+  {s:'OreDataService',t:'ResourceDesc',type:'get'},{s:'OreDataService',t:'GlobalEnumsC',type:'get'},
+  {s:'PhaseALOG',t:'ShopDataService',type:'get'},{s:'UtilsA',t:'ShopSpawnPoint',type:'get'},
+  {s:'UtilsA',t:'SO_ShopItemDef',type:'get'},{s:'ShopDataService',t:'SO_ShopCategory',type:'get'},
+  {s:'ShopDataService',t:'SO_ShopItemDef',type:'get'},{s:'ShopUITest',t:'ShopUI',type:'get'},
+  {s:'ElevatorTest',t:'StartingElevator',type:'get'},{s:'ElevatorTest',t:'CameraShaker',type:'get'},
+  {s:'BuildingMgr',t:'BuildDataSvc',type:'creates'},{s:'BuildingMgr',t:'BuildingObj',type:'get'},
+  {s:'BuildingMgr',t:'BuildPlaceNode',type:'get'},{s:'BuildingMgr',t:'UtilsD',type:'uses-util'},
+  {s:'BuildingMgr',t:'UtilsB',type:'uses-util'},{s:'BuildDataSvc',t:'BuildingObj',type:'get'},
+  {s:'BuildDataSvc',t:'BuildRotInfo',type:'get'},{s:'ConveyorMgr',t:'BasePhysObj',type:'get'},
+  {s:'ConveyorMgr',t:'ConveyorBelt',type:'get'},{s:'ConveyorBelt',t:'BasePhysObj',type:'set'},
+  {s:'BuildingObj',t:'SO_BuildInvDef',type:'get'},{s:'BuildingObj',t:'BaseModSupp',type:'get'},
+  {s:'BuildingObj',t:'GlobalEnumsB',type:'get'},{s:'BuildingCrate',t:'SO_BuildInvDef',type:'get'},
+  {s:'BuildingCrate',t:'GlobalEnumsB',type:'get'},
+  {s:'PlayerGrab',t:'BaseHeldTool',type:'set'},{s:'DmgOrePiece',t:'UtilsB',type:'uses-util'},
+  {s:'PlayerGrab',t:'UtilsB',type:'uses-util'},{s:'BuildingObj',t:'UtilsB',type:'uses-util'},
+  {s:'OrePiece',t:'UtilsAll',type:'uses-util'},
+];
+
+// ═══════════════════════════════════════════════════════════════
+// GRID LAYOUT
+// ═══════════════════════════════════════════════════════════════
+const cells={};
+nodes.forEach(n=>{const k=n.phase+'|'+n.layer;if(!cells[k])cells[k]=[];cells[k].push(n);});
+const rowMax={};
+LAYERS.forEach(l=>{let mx=0;PHASES.forEach(p=>{const k=p+'|'+l;mx=Math.max(mx,(cells[k]||[]).length);});rowMax[l]=mx;});
+const rowY={};let cumY=MARGIN.top;
+LAYERS.forEach(l=>{rowY[l]=cumY;cumY+=Math.max(160,Math.max(rowMax[l],1)*(NODE_H+NODE_PAD)+50);});
+const totalH=cumY+MARGIN.bottom;
+const colX={};PHASES.forEach((p,i)=>{colX[p]=MARGIN.left+i*COL_W;});
+const totalW=MARGIN.left+PHASES.length*COL_W+MARGIN.right;
+nodes.forEach(n=>{const k=n.phase+'|'+n.layer;const ci=cells[k];const idx=ci.indexOf(n);n.x=colX[n.phase]+20;n.y=rowY[n.layer]+30+idx*(NODE_H+NODE_PAD);n.cx=n.x+NODE_W/2;n.cy=n.y+NODE_H/2;});
+const nodeMap={};nodes.forEach(n=>{nodeMap[n.id]=n;});
+
+// ═══════════════════════════════════════════════════════════════
+// CANVAS SETUP
+// ═══════════════════════════════════════════════════════════════
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+let W,H,dpr;
+function resize(){W=window.innerWidth;H=window.innerHeight-66;dpr=Math.min(window.devicePixelRatio||1,2);canvas.width=W*dpr;canvas.height=H*dpr;canvas.style.width=W+'px';canvas.style.height=H+'px';draw();}
+window.addEventListener('resize',resize);
+
+// Transform state
+let tx=10,ty=0,scale=window.innerWidth<768?0.45:0.7;
+let selectedId=null;
+let searchIds=null;
+
+function toWorld(screenX,screenY){
+  const rect=canvas.getBoundingClientRect();
+  const cx=screenX-rect.left, cy=screenY-rect.top;
+  return[(cx-tx)/scale,(cy-ty)/scale];
+}
+
+// ═══════════════════════════════════════════════════════════════
+// DRAW
+// ═══════════════════════════════════════════════════════════════
+function draw(){
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,W,H);
+  ctx.save();
+  ctx.translate(tx,ty);
+  ctx.scale(scale,scale);
+
+  // Phase column bgs + headers
+  PHASES.forEach((p,i)=>{
+    const x=colX[p]-10;
+    ctx.fillStyle=PHASE_COLORS[p];ctx.globalAlpha=0.035;
+    ctx.fillRect(x,MARGIN.top-30,COL_W-10,totalH-MARGIN.top);
+    ctx.globalAlpha=1;
+    ctx.fillStyle=PHASE_COLORS[p];ctx.font='bold 11px JetBrains Mono';ctx.textAlign='center';
+    ctx.fillText(PHASE_LABELS[p],x+(COL_W-10)/2,MARGIN.top-14);
+  });
+  // Layer row lines + headers
+  ctx.textAlign='right';ctx.font='500 10px JetBrains Mono';
+  LAYERS.forEach(l=>{
+    const y=rowY[l];
+    ctx.strokeStyle='#2a2a33';ctx.lineWidth=0.5;ctx.setLineDash([4,4]);ctx.globalAlpha=0.3;
+    ctx.beginPath();ctx.moveTo(MARGIN.left-20,y);ctx.lineTo(totalW,y);ctx.stroke();
+    ctx.globalAlpha=1;ctx.setLineDash([]);
+    ctx.fillStyle='#808090';ctx.fillText(LAYER_LABELS[l],MARGIN.left-25,y+16);
+  });
+
+  // Edges
+  const connected=selectedId?new Set([selectedId]):null;
+  if(connected){links.forEach(l=>{if(l.s===selectedId)connected.add(l.t);if(l.t===selectedId)connected.add(l.s);});}
+  links.forEach(l=>{
+    if(!activeEdges.has(l.type))return;
+    const src=nodeMap[l.s],tgt=nodeMap[l.t];
+    if(!src||!tgt)return;
+    const dimmed=selectedId&&!(l.s===selectedId||l.t===selectedId);
+    const searched=searchIds&&!(searchIds.has(l.s)||searchIds.has(l.t));
+    let alpha=EDGE_ALPHA[l.type]||0.5;
+    if(dimmed||searched)alpha=0.04;
+    ctx.globalAlpha=alpha;
+    ctx.strokeStyle=EDGE_COLORS[l.type];
+    ctx.lineWidth=EDGE_WIDTH[l.type]||1.2;
+    const dash=EDGE_DASH[l.type];
+    ctx.setLineDash(dash||[]);
+    let sx,sy,ex,ey;
+    if(src.x+NODE_W<tgt.x){sx=src.x+NODE_W;sy=src.cy;ex=tgt.x;ey=tgt.cy;}
+    else if(tgt.x+NODE_W<src.x){sx=src.x;sy=src.cy;ex=tgt.x+NODE_W;ey=tgt.cy;}
+    else if(src.y<tgt.y){sx=src.cx;sy=src.y+NODE_H;ex=tgt.cx;ey=tgt.y;}
+    else{sx=src.cx;sy=src.y;ex=tgt.cx;ey=tgt.y+NODE_H;}
+    const dx=ex-sx,dy=ey-sy;
+    let cx1,cy1,cx2,cy2;
+    if(Math.abs(dx)>Math.abs(dy)){cx1=sx+dx*0.3;cy1=sy;cx2=ex-dx*0.3;cy2=ey;}
+    else{cx1=sx;cy1=sy+dy*0.3;cx2=ex;cy2=ey-dy*0.3;}
+    ctx.beginPath();ctx.moveTo(sx,sy);ctx.bezierCurveTo(cx1,cy1,cx2,cy2,ex,ey);ctx.stroke();
+    // arrowhead
+    const angle=Math.atan2(ey-cy2,ex-cx2);
+    ctx.setLineDash([]);ctx.fillStyle=EDGE_COLORS[l.type];
+    ctx.beginPath();ctx.moveTo(ex,ey);ctx.lineTo(ex-6*Math.cos(angle-0.4),ey-6*Math.sin(angle-0.4));ctx.lineTo(ex-6*Math.cos(angle+0.4),ey-6*Math.sin(angle+0.4));ctx.closePath();ctx.fill();
+  });
+
+  // Nodes
+  ctx.setLineDash([]);
+  nodes.forEach(n=>{
+    const dimmed=selectedId&&!connected?.has(n.id);
+    const searched=searchIds&&!searchIds.has(n.id)&&!(()=>{let ok=false;links.forEach(l=>{if(searchIds.has(l.s)&&l.t===n.id)ok=true;if(searchIds.has(l.t)&&l.s===n.id)ok=true;});return ok;})();
+    const isHL=n.id===selectedId;
+    let alpha=dimmed||searched?0.06:0.9;
+    ctx.globalAlpha=alpha;
+    // bg rect
+    const c=PHASE_COLORS[n.phase];
+    ctx.fillStyle=hexAlpha(c,0.15);ctx.strokeStyle=c;ctx.lineWidth=isHL?2.5:1;
+    roundRect(ctx,n.x,n.y,NODE_W,NODE_H,4);ctx.fill();ctx.stroke();
+    // label
+    ctx.fillStyle=isHL?'#fff':'#d4d4d4';ctx.font=(isHL?'bold ':'')+' 8.5px JetBrains Mono';ctx.textAlign='left';ctx.textBaseline='middle';
+    ctx.fillText(n.label,n.x+5,n.y+NODE_H/2-3,NODE_W-10);
+    // type
+    ctx.fillStyle='#808090';ctx.font='7px JetBrains Mono';
+    ctx.fillText(n.type,n.x+5,n.y+NODE_H/2+8,NODE_W-10);
+  });
+
+  ctx.restore();
+  ctx.globalAlpha=1;ctx.setLineDash([]);
+}
+
+function roundRect(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.lineTo(x+w-r,y);c.quadraticCurveTo(x+w,y,x+w,y+r);c.lineTo(x+w,y+h-r);c.quadraticCurveTo(x+w,y+h,x+w-r,y+h);c.lineTo(x+r,y+h);c.quadraticCurveTo(x,y+h,x,y+h-r);c.lineTo(x,y+r);c.quadraticCurveTo(x,y,x+r,y);c.closePath();}
+function hexAlpha(hex,a){const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);return`rgba(${r},${g},${b},${a})`;}
+
+// ═══════════════════════════════════════════════════════════════
+// PAN + ZOOM (mouse + touch)
+// ═══════════════════════════════════════════════════════════════
+let dragging=false,lastX,lastY,startX,startY,totalMoved=0;
+canvas.addEventListener('pointerdown',e=>{dragging=true;lastX=startX=e.clientX;lastY=startY=e.clientY;totalMoved=0;canvas.setPointerCapture(e.pointerId);});
+canvas.addEventListener('pointermove',e=>{if(!dragging)return;const dx=e.clientX-lastX,dy=e.clientY-lastY;tx+=dx;ty+=dy;totalMoved+=Math.abs(dx)+Math.abs(dy);lastX=e.clientX;lastY=e.clientY;draw();});
+canvas.addEventListener('pointerup',()=>{dragging=false;});
+// Zoom around pointer position (canvas-local coords)
+function zoomAt(cx,cy,factor){
+  const newScale=Math.max(0.15,Math.min(3,scale*factor));
+  const r=newScale/scale;
+  tx=cx-(cx-tx)*r;
+  ty=cy-(cy-ty)*r;
+  scale=newScale;
+  draw();
+}
+canvas.addEventListener('wheel',e=>{
+  e.preventDefault();
+  const rect=canvas.getBoundingClientRect();
+  const cx=e.clientX-rect.left;
+  const cy=e.clientY-rect.top;
+  const z=e.deltaY<0?1.08:1/1.08;
+  zoomAt(cx,cy,z);
+},{passive:false});
+// Pinch zoom
+let pinchDist=0,pinchMidX=0,pinchMidY=0;
+canvas.addEventListener('touchstart',e=>{
+  if(e.touches.length===2){
+    const dx=e.touches[0].clientX-e.touches[1].clientX,dy=e.touches[0].clientY-e.touches[1].clientY;
+    pinchDist=Math.sqrt(dx*dx+dy*dy);
+    const rect=canvas.getBoundingClientRect();
+    pinchMidX=(e.touches[0].clientX+e.touches[1].clientX)/2-rect.left;
+    pinchMidY=(e.touches[0].clientY+e.touches[1].clientY)/2-rect.top;
+  }
+},{passive:true});
+canvas.addEventListener('touchmove',e=>{
+  if(e.touches.length===2&&pinchDist>0){
+    const dx=e.touches[0].clientX-e.touches[1].clientX,dy=e.touches[0].clientY-e.touches[1].clientY;
+    const d=Math.sqrt(dx*dx+dy*dy);
+    const rect=canvas.getBoundingClientRect();
+    const cx=(e.touches[0].clientX+e.touches[1].clientX)/2-rect.left;
+    const cy=(e.touches[0].clientY+e.touches[1].clientY)/2-rect.top;
+    // zoom around midpoint
+    zoomAt(cx,cy,d/pinchDist);
+    // also pan to follow midpoint movement
+    tx+=cx-pinchMidX;ty+=cy-pinchMidY;
+    pinchMidX=cx;pinchMidY=cy;
+    pinchDist=d;
+    draw();
+  }
+},{passive:true});
+
+// ═══════════════════════════════════════════════════════════════
+// CLICK HIT-TEST
+// ═══════════════════════════════════════════════════════════════
+canvas.addEventListener('click',e=>{
+  if(totalMoved>5)return; // was a pan, not a tap
+  const[wx,wy]=toWorld(e.clientX,e.clientY);
+  let hit=null;
+  for(const n of nodes){if(wx>=n.x&&wx<=n.x+NODE_W&&wy>=n.y&&wy<=n.y+NODE_H){hit=n;break;}}
+  if(!hit){selectedId=null;searchIds=null;document.getElementById('info').style.display='none';draw();return;}
+  if(selectedId===hit.id){selectedId=null;document.getElementById('info').style.display='none';draw();return;}
+  selectedId=hit.id;searchIds=null;
+  showInfo(hit);draw();
+});
+
+function showInfo(d){
+  const panel=document.getElementById('info');panel.style.display='block';
+  document.getElementById('i-name').textContent=d.label;
+  document.getElementById('i-meta').textContent=`${PHASE_LABELS[d.phase]} \u00b7 ${LAYER_LABELS[d.layer]} \u00b7 ${d.type}`;
+  const depDiv=document.getElementById('i-deps');depDiv.innerHTML='';
+  const outgoing=links.filter(l=>l.s===d.id),incoming=links.filter(l=>l.t===d.id);
+  if(outgoing.length){depDiv.innerHTML+=`<div class="section-title">Depends on (${outgoing.length})</div>`;outgoing.forEach(l=>{const t=nodeMap[l.t];depDiv.innerHTML+=`<div class="dep"><span class="dir">\u2192</span> ${t?.label||l.t} <span class="etype">[${EDGE_LABELS[l.type]}]${l.lbl?' '+l.lbl:''}</span></div>`;});}
+  if(incoming.length){depDiv.innerHTML+=`<div class="section-title">Used by (${incoming.length})</div>`;incoming.forEach(l=>{const s=nodeMap[l.s];depDiv.innerHTML+=`<div class="dep"><span class="dir">\u2190</span> ${s?.label||l.s} <span class="etype">[${EDGE_LABELS[l.type]}]${l.lbl?' '+l.lbl:''}</span></div>`;});}
+}
+document.getElementById('info-close').onclick=()=>{selectedId=null;document.getElementById('info').style.display='none';draw();};
+
+// ═══════════════════════════════════════════════════════════════
+// EDGE TOGGLES + SEARCH
+// ═══════════════════════════════════════════════════════════════
+const edgeBar=document.getElementById('edge-bar');
+const edgeBtns=[];
+EDGE_TYPES.forEach(t=>{
+  const btn=document.createElement('button');btn.className='edge-btn active';
+  btn.innerHTML=`<span class="edge-swatch" style="background:${EDGE_COLORS[t]}"></span>${EDGE_LABELS[t]}`;
+  btn.onclick=()=>{if(activeEdges.has(t)){activeEdges.delete(t);btn.classList.add('off');btn.classList.remove('active');}else{activeEdges.add(t);btn.classList.remove('off');btn.classList.add('active');}draw();};
+  edgeBar.appendChild(btn);edgeBtns.push(btn);
+});
+const sep=document.createElement('span');sep.style.cssText='width:1px;height:16px;background:var(--border);margin:0 3px;';edgeBar.appendChild(sep);
+const noneBtn=document.createElement('button');noneBtn.className='edge-btn';noneBtn.textContent='None';noneBtn.style.cssText='color:var(--muted);font-style:italic;';
+noneBtn.onclick=()=>{activeEdges.clear();edgeBtns.forEach(b=>{b.classList.add('off');b.classList.remove('active');});draw();};edgeBar.appendChild(noneBtn);
+const allBtn=document.createElement('button');allBtn.className='edge-btn';allBtn.textContent='All';allBtn.style.cssText='color:var(--accent);font-weight:600;';
+allBtn.onclick=()=>{EDGE_TYPES.forEach(t=>activeEdges.add(t));edgeBtns.forEach(b=>{b.classList.remove('off');b.classList.add('active');});draw();};edgeBar.appendChild(allBtn);
+
+document.getElementById('search').addEventListener('input',e=>{
+  const q=e.target.value.toLowerCase().trim();
+  if(!q){searchIds=null;selectedId=null;draw();return;}
+  const matches=nodes.filter(n=>n.label.toLowerCase().includes(q)||n.id.toLowerCase().includes(q));
+  if(!matches.length){searchIds=new Set();draw();return;}
+  searchIds=new Set(matches.map(n=>n.id));
+  links.forEach(l=>{if(searchIds.has(l.s))searchIds.add(l.t);if(searchIds.has(l.t))searchIds.add(l.s);});
+  selectedId=null;draw();
+});
+
+resize();
+</script>
+</body>
+</html>
+
 <!-- ==== FILE: web-tools/minemgl-grid.html ==== -->
 <!DOCTYPE html>
 <html lang="en">
@@ -3088,8 +3597,11 @@ body{font-family:'JetBrains Mono','Courier New',monospace;background:var(--bg);c
 #search::placeholder{color:#555;}
 
 /* ── EDGE TOGGLE BAR ── */
-#edge-bar{position:fixed;top:38px;left:0;right:0;z-index:190;background:var(--bg2);backdrop-filter:blur(10px);border-bottom:1px solid var(--border);padding:4px 8px;display:flex;gap:3px;flex-wrap:wrap;min-height:28px;align-items:center;align-content:flex-start;}
-.edge-btn{font-family:inherit;font-size:9px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);cursor:pointer;transition:all .12s;display:flex;align-items:center;gap:4px;-webkit-tap-highlight-color:transparent;touch-action:manipulation;}
+#edge-bar{position:fixed;top:38px;left:0;right:0;z-index:190;background:var(--bg2);backdrop-filter:blur(10px);border-bottom:1px solid var(--border);padding:4px 8px;display:flex;gap:3px;flex-wrap:nowrap;height:28px;align-items:center;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;}
+#edge-bar::-webkit-scrollbar{height:3px;}
+#edge-bar::-webkit-scrollbar-track{background:transparent;}
+#edge-bar::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+.edge-btn{font-family:inherit;font-size:9px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);cursor:pointer;transition:all .12s;display:flex;align-items:center;gap:4px;-webkit-tap-highlight-color:transparent;touch-action:manipulation;white-space:nowrap;flex-shrink:0;}
 .edge-btn:hover{background:var(--bg3);}
 .edge-btn.active{background:var(--bg3);border-color:var(--muted);}
 .edge-btn.off{opacity:0.35;}
@@ -3098,6 +3610,7 @@ body{font-family:'JetBrains Mono','Courier New',monospace;background:var(--bg);c
 /* ── CANVAS ── */
 #canvas-wrap{position:fixed;top:66px;left:0;right:0;bottom:0;overflow:hidden;touch-action:pan-x pan-y pinch-zoom;}
 svg{width:100%;height:100%;}
+svg g{will-change:transform;}
 
 /* Grid: phase column headers */
 .phase-col-header{font-size:11px;font-weight:700;text-anchor:middle;fill:var(--muted);}
@@ -3116,7 +3629,7 @@ svg{width:100%;height:100%;}
 .node.highlighted text{fill:#fff;font-weight:600;}
 
 /* Edges */
-.edge{fill:none;stroke-width:1.2;opacity:0.55;pointer-events:none;}
+.edge{fill:none;stroke-width:1.2;opacity:0.55;pointer-events:none;shape-rendering:optimizeSpeed;}
 .edge.dimmed{opacity:0.04!important;}
 .edge.highlighted{opacity:0.95!important;stroke-width:2.5;}
 .edge.inherit{stroke:var(--edge-inherit);stroke-width:2;opacity:0.7;}
@@ -3177,6 +3690,13 @@ svg{width:100%;height:100%;}
   #edge-bar{gap:2px;padding:3px 6px;}
   .node text{font-size:7px!important;}
   .node .type-label{font-size:6px!important;}
+}
+@media (max-width:768px){
+  /* perf: disable expensive effects on mobile */
+  #header,#edge-bar{backdrop-filter:none!important;}
+  .node rect{transition:none!important;}
+  .edge{shape-rendering:crispEdges!important;}
+  .edge.highlighted{filter:none!important;}
 }
 </style>
 </head>
@@ -3257,7 +3777,7 @@ const nodes = [
   {id:'EconomyManager',label:'EconomyManager',phase:'all',layer:'1-Managers',type:'Singleton'},
   {id:'UIManager',label:'UIManager',phase:'all',layer:'1-Managers',type:'Singleton'},
   {id:'GlobalEnumsAll',label:'GlobalEnumsAll',phase:'all',layer:'2-Data',type:'TagType'},
-  {id:'IEnumUtils',label:'IEnumerableUtils',phase:'all',layer:'4-Utils',type:'extensions'},
+  {id:'IEnumUtils',label:'IEnumerableUtils',phase:'all',layer:'4-Utils',type:'(empty→SPACE_UTIL)'},
   {id:'UtilsAll',label:'UtilsPhaseAll',phase:'all',layer:'4-Utils',type:'HasTag/SetTag'},
   // Phase-A
   {id:'GE_A',label:'GameEvents(A)',phase:'a',layer:'0-Core',type:'partial'},
@@ -3424,6 +3944,7 @@ const links = [
   {s:'InteractionWheelUI',t:'GameEvents_All',type:'event-raise',lbl:'RaiseMenuStateChanged'},
   {s:'ShopUI',t:'GameEvents_All',type:'event-raise',lbl:'RaiseMenuStateChanged'},
   {s:'InventoryUI',t:'GameEvents_All',type:'event-raise',lbl:'RaiseMenuStateChanged'},{s:'InventoryUI',t:'GE_B',type:'event-raise',lbl:'RaiseCloseInventoryView'},
+  {s:'InteractableComputer',t:'GlobalEnumsB',type:'get',lbl:'InteractionType.openShopView'},
   {s:'InteractableComputer',t:'GE_A',type:'event-raise',lbl:'RaiseOpenShopView'},
   {s:'SimplePlayerIntr',t:'GE_A',type:'event-raise',lbl:'RaiseOpenInteractionView'},
   {s:'ShopUIOrch',t:'GE_A',type:'event-raise',lbl:'RaiseCloseShopView'},
@@ -3465,19 +3986,18 @@ const links = [
   {s:'BaseHeldTool',t:'PlayerMov',type:'get',lbl:'ViewModelContainer/Cam'},
   {s:'BaseHeldTool',t:'GlobalEnumsB',type:'get',lbl:'InteractionType'},
   {s:'BaseHeldTool',t:'SO_InteractionOpt',type:'get',lbl:'interactionType'},
+  {s:'SO_InteractionOpt',t:'GlobalEnumsB',type:'get',lbl:'InteractionType field'},
   {s:'OreMgr',t:'OreDataService',type:'creates',lbl:'new OreDataService()'},
   {s:'OreMgr',t:'OrePiece',type:'get',lbl:'AllOrePieces'},
   {s:'OreLimitMgr',t:'OrePiece',type:'get',lbl:'AllOrePieces/Rb'},
   {s:'OrePoolMgr',t:'OrePieceKey',type:'get',lbl:'lookup key'},
   {s:'OrePoolMgr',t:'BasePhysObj',type:'get',lbl:'STANDARD_DAMPING'},
   {s:'OrePoolMgr',t:'UtilsAll',type:'uses-util',lbl:'SetTag()'},
-  {s:'OrePoolMgr',t:'IEnumUtils',type:'uses-util',lbl:'GetOrCreate()'},
   {s:'OreNode',t:'UtilsC',type:'uses-util',lbl:'WeightedRandom()'},{s:'OreNode',t:'WNodeDrop',type:'get',lbl:'_possibleDrops'},
   {s:'AutoMiner',t:'SO_AutoMinerDef',type:'get',lbl:'SpawnProb/Rate/Prefabs'},{s:'AutoMiner',t:'UtilsC',type:'uses-util',lbl:'PickOrePrefab()'},
   {s:'SellerMachine',t:'OrePiece',type:'get',lbl:'SellAfterDelay()'},
   {s:'SellerMachine',t:'BaseSellable',type:'get',lbl:'GetSellValue()'},
   {s:'SellerMachine',t:'UtilsAll',type:'uses-util',lbl:'HasTag()'},
-  {s:'UtilsC',t:'IEnumUtils',type:'uses-util',lbl:'.sum()'},
   {s:'UtilsC',t:'WOreChance',type:'get',lbl:'WeightedRandom list'},
   {s:'OreDataService',t:'ResourceDesc',type:'get',lbl:'descriptions'},{s:'OreDataService',t:'GlobalEnumsC',type:'get',lbl:'ResourceType'},
   {s:'PhaseALOG',t:'ShopDataService',type:'get',lbl:'CartItem fields'},
@@ -3486,7 +4006,7 @@ const links = [
   {s:'ShopDataService',t:'SO_ShopCategory',type:'get',lbl:'ITEM_DEF'},{s:'ShopDataService',t:'SO_ShopItemDef',type:'get',lbl:'price/locked'},
   {s:'ShopUITest',t:'ShopUI',type:'get',lbl:'GetDataServiceForTest()'},
   {s:'ElevatorTest',t:'StartingElevator',type:'get',lbl:'_elevator ref'},{s:'ElevatorTest',t:'CameraShaker',type:'get',lbl:'ApplyViewPunch()'},
-  {s:'StartingElevator',t:'SimplePlayerCtrl',type:'get',lbl:'FindObjectOfType'},
+  
   {s:'BuildingMgr',t:'BuildDataSvc',type:'creates',lbl:'new BuildDataSvc()'},
   {s:'BuildingMgr',t:'BuildingObj',type:'get',lbl:'ghost/fields'},
   {s:'BuildingMgr',t:'BuildPlaceNode',type:'get',lbl:'.All list'},
@@ -4784,6 +5304,7 @@ const EDGES=[
   {s:'InteractionWheelUI',t:'GameEvents_All',type:'event-raise',lbl:'RaiseMenuStateChanged'},
   {s:'ShopUI',t:'GameEvents_All',type:'event-raise',lbl:'RaiseMenuStateChanged'},
   {s:'InventoryUI',t:'GameEvents_All',type:'event-raise',lbl:'RaiseMenuStateChanged'},{s:'InventoryUI',t:'GE_B',type:'event-raise',lbl:'RaiseCloseInventoryView'},
+  {s:'InteractableComputer',t:'GlobalEnumsB',type:'get',lbl:'InteractionType.openShopView'},
   {s:'InteractableComputer',t:'GE_A',type:'event-raise',lbl:'RaiseOpenShopView'},
   {s:'SimplePlayerIntr',t:'GE_A',type:'event-raise',lbl:'RaiseOpenInteractionView'},
   {s:'ShopUIOrch',t:'GE_A',type:'event-raise',lbl:'RaiseCloseShopView'},
@@ -4810,20 +5331,22 @@ const EDGES=[
   {s:'ToolPickaxe',t:'PhysSoundPlayer',type:'get',lbl:'PlayImpactSound()'},{s:'ToolMagnet',t:'UtilsB',type:'uses-util',lbl:'IgnoreAllCollisions'},
   {s:'ToolMagnet',t:'BasePhysObj',type:'get',lbl:'STANDARD_DAMPING'},{s:'BaseHeldTool',t:'PlayerMov',type:'get',lbl:'ViewModelContainer'},
   {s:'BaseHeldTool',t:'GlobalEnumsB',type:'get',lbl:'InteractionType'},{s:'BaseHeldTool',t:'SO_InteractionOpt',type:'get',lbl:'interactionType'},
+  {s:'InteractableComputer',t:'GlobalEnumsB',type:'get',lbl:'InteractionType field'},
+  {s:'SO_InteractionOpt',t:'GlobalEnumsB',type:'get',lbl:'InteractionType field'},
   {s:'OreMgr',t:'OreDataService',type:'creates',lbl:'new()'},{s:'OreMgr',t:'OrePiece',type:'get',lbl:'AllOrePieces'},
   {s:'OreLimitMgr',t:'OrePiece',type:'get',lbl:'AllOrePieces/Rb'},{s:'OrePoolMgr',t:'OrePieceKey',type:'get',lbl:'lookup'},
   {s:'OrePoolMgr',t:'BasePhysObj',type:'get',lbl:'STANDARD_DAMPING'},{s:'OrePoolMgr',t:'UtilsAll',type:'uses-util',lbl:'SetTag()'},
-  {s:'OrePoolMgr',t:'IEnumUtils',type:'uses-util',lbl:'GetOrCreate()'},{s:'OreNode',t:'UtilsC',type:'uses-util',lbl:'WeightedRandom()'},
+  {s:'OreNode',t:'UtilsC',type:'uses-util',lbl:'WeightedRandom()'},
   {s:'OreNode',t:'WNodeDrop',type:'get',lbl:'_possibleDrops'},{s:'AutoMiner',t:'SO_AutoMinerDef',type:'get',lbl:'SpawnProb/Rate'},
   {s:'AutoMiner',t:'UtilsC',type:'uses-util',lbl:'PickOrePrefab()'},{s:'SellerMachine',t:'OrePiece',type:'get',lbl:'SellAfterDelay()'},
   {s:'SellerMachine',t:'BaseSellable',type:'get',lbl:'GetSellValue()'},{s:'SellerMachine',t:'UtilsAll',type:'uses-util',lbl:'HasTag()'},
-  {s:'UtilsC',t:'IEnumUtils',type:'uses-util',lbl:'.sum()'},{s:'UtilsC',t:'WOreChance',type:'get',lbl:'WeightedRandom'},
+{s:'UtilsC',t:'WOreChance',type:'get',lbl:'WeightedRandom'},
   {s:'OreDataService',t:'ResourceDesc',type:'get',lbl:'descriptions'},{s:'OreDataService',t:'GlobalEnumsC',type:'get',lbl:'ResourceType'},
   {s:'PhaseALOG',t:'ShopDataService',type:'get',lbl:'CartItem'},{s:'UtilsA',t:'ShopSpawnPoint',type:'get',lbl:'GetRandomSpawnPoint()'},
   {s:'UtilsA',t:'SO_ShopItemDef',type:'get',lbl:'pfObject'},{s:'ShopDataService',t:'SO_ShopCategory',type:'get',lbl:'ITEM_DEF'},
   {s:'ShopDataService',t:'SO_ShopItemDef',type:'get',lbl:'price/locked'},{s:'ShopUITest',t:'ShopUI',type:'get',lbl:'GetDataServiceForTest()'},
   {s:'ElevatorTest',t:'StartingElevator',type:'get',lbl:'_elevator'},{s:'ElevatorTest',t:'CameraShaker',type:'get',lbl:'ApplyViewPunch()'},
-  {s:'StartingElevator',t:'SimplePlayerCtrl',type:'get',lbl:'FindObjectOfType'},
+  
   {s:'BuildingMgr',t:'BuildDataSvc',type:'creates',lbl:'new()'},{s:'BuildingMgr',t:'BuildingObj',type:'get',lbl:'ghost/fields'},
   {s:'BuildingMgr',t:'BuildPlaceNode',type:'get',lbl:'.All list'},{s:'BuildingMgr',t:'UtilsD',type:'uses-util',lbl:'IsOverlapping'},
   {s:'BuildingMgr',t:'UtilsB',type:'uses-util',lbl:'SetLayerRecursively'},{s:'BuildDataSvc',t:'BuildingObj',type:'get',lbl:'SnapPositions'},
