@@ -15184,19 +15184,27 @@ public class MockTool : MonoBehaviour, IInventoryItem
     public void HandleActiveInput() { /* no-op — mock has no actions */ }
     public void SetOwnerContext(Camera cam, Transform vmc, Transform mag) { ownerCam = cam; }
 
-    /// <summary> Drop one from stack — create a simple visual prop (cube with same color) 
-    /// that drops with physics. No MockTool component — just a mesh + rigidbody. </summary>
+    /// <summary> Drop one from stack — clone this GO with same mesh/material/scale.
+    /// Immediately destroy MockTool on clone so it can't equip/pickup/LateUpdate. </summary>
     public void DropOneFromStack(Camera cam)
     {
-        // → create a fresh cube prop (not Instantiate — avoids MockTool component issues)
-        var prop = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        prop.name = $"{_name}_dropped";
-        prop.transform.localScale = originalScale;
-        prop.GetComponent<Renderer>().material.color = _color;
-        var rb = prop.AddComponent<Rigidbody>();
+        // → clone this GO — gets exact same mesh, material, color, scale
+        var clone = Instantiate(gameObject);
+        // → IMMEDIATELY destroy MockTool on clone (before any Update/LateUpdate runs)
+        DestroyImmediate(clone.GetComponent<MockTool>());
+        // → setup as a world physics prop
+        clone.name = $"{_name}_dropped";
+        clone.SetActive(true);
+        clone.transform.parent = null;
+        clone.transform.localScale = originalScale;
+        var col = clone.GetComponent<Collider>();
+        if (col != null) col.enabled = true;
+        var rb = clone.GetComponent<Rigidbody>();
+        if (rb == null) rb = clone.AddComponent<Rigidbody>();
+        rb.isKinematic = false;
         if (cam != null)
         {
-            prop.transform.position = cam.transform.position + cam.transform.forward * 1.5f;
+            clone.transform.position = cam.transform.position + cam.transform.forward * 1.5f;
             rb.linearVelocity = cam.transform.forward * 5f + Vector3.up * 2f;
         }
         Debug.Log($"[MockTool] Dropped 1 of {_name}, remaining: {qty}");
