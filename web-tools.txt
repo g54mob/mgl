@@ -3114,8 +3114,8 @@ canvas{position:fixed;top:66px;left:0;right:0;bottom:0;display:block;touch-actio
 const PHASES=['all','a','a1','b','c','d'];
 const PHASE_LABELS={all:'Phase-All',a:'Phase-A',a1:'Phase-A1',b:'Phase-B',c:'Phase-C',d:'Phase-D'};
 const PHASE_COLORS={all:'#b89eff',a:'#6cb4ff',a1:'#7af0ff',b:'#45eaad',c:'#ffd04a',d:'#ff8080'};
-const LAYERS=['0-Core','1-Managers','2-Data','3-MonoBehaviours','4-Utils','5-Tests'];
-const LAYER_LABELS={'0-Core':'Core','1-Managers':'Managers','2-Data':'Data','3-MonoBehaviours':'MonoBehaviours','4-Utils':'Utils','5-Tests':'Tests'};
+const LAYERS=['0-Core','1-Managers','2-Data','3-MonoBehaviours','_-Systems','4-Utils','5-Tests'];
+const LAYER_LABELS={'0-Core':'Core','1-Managers':'Managers','2-Data':'Data','3-MonoBehaviours':'MonoBehaviours','_-Systems':'_-Systems','4-Utils':'Utils','5-Tests':'Tests'};
 const COL_W=280,NODE_W=120,NODE_H=28,NODE_PAD=4,MARGIN={top:50,left:130,right:40,bottom:40};
 const EDGE_TYPES=['inherit','interface','get','set','event-sub','event-raise','singleton','creates','uses-util'];
 const EDGE_LABELS={inherit:'Inherits',interface:'Interface',get:'Get()',set:'Set()','event-sub':'Event +=','event-raise':'Raise()','singleton':'Singleton.Ins','creates':'Creates','uses-util':'Utils'};
@@ -3163,38 +3163,42 @@ const nodes=[
   {id:'CameraShaker',label:'CameraShaker',phase:'a1',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
   {id:'StartingElevator',label:'StartingElevator',phase:'a1',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
   {id:'ElevatorTest',label:'ElevatorTest',phase:'a1',layer:'5-Tests',type:'Test'},
-  {id:'GE_B',label:'GameEvents(B)',phase:'b',layer:'0-Core',type:'partial'},
-  {id:'InventoryUI',label:'InventoryUI',phase:'b',layer:'1-Managers',type:'SubManager'},
-  {id:'InvDataService',label:'InventoryDataService',phase:'b',layer:'2-Data',type:'C# service'},
-  {id:'GlobalEnumsB',label:'GlobalEnumsB',phase:'b',layer:'2-Data',type:'InteractionType+'},
-  {id:'F_InvSlot',label:'Field_InvSlot',phase:'b',layer:'2-Data',type:'UI field'},
-  {id:'IIconItem',label:'IIconItem',phase:'b',layer:'2-Data',type:'interface'},
-  {id:'ISaveLoadObj',label:'ISaveLoadableObj',phase:'b',layer:'2-Data',type:'interface'},
-  {id:'SO_FootstepDef',label:'SO_FootstepDef',phase:'b',layer:'2-Data',type:'SO'},
-  {id:'FresnelHL',label:'FresnelHighlighter',phase:'b',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
-  {id:'IHighlightable',label:'IHighlightable',phase:'b',layer:'2-Data',type:'interface'},
-  {id:'InvOrch',label:'InventoryOrchestrator',phase:'b',layer:'3-MonoBehaviours',type:'Orchestrator'},
-  {id:'BasePhysObj',label:'BasePhysicsObject',phase:'b',layer:'3-MonoBehaviours',type:'base class'},
-  {id:'BaseSellable',label:'BaseSellableItem',phase:'b',layer:'3-MonoBehaviours',type:'base class'},
-  {id:'PhysicsGib',label:'PhysicsGib',phase:'b',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
-  {id:'PhysSoundPlayer',label:'PhysicsSoundPlayer',phase:'b',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
-  {id:'PlayerCam',label:'PlayerCamera',phase:'b',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
-  {id:'PlayerFoot',label:'PlayerFootsteps',phase:'b',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
-  {id:'PlayerGrab',label:'PlayerGrab',phase:'b',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
-  {id:'PlayerMov',label:'PlayerMovement',phase:'b',layer:'3-MonoBehaviours',type:'Singleton'},
-  {id:'PlayerSpawn',label:'PlayerSpawnPoint',phase:'b',layer:'3-MonoBehaviours',type:'static list'},
-  {id:'RbDragger',label:'RbDraggerCtrl',phase:'b',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
-  {id:'BaseHeldTool',label:'BaseHeldTool',phase:'b',layer:'3-MonoBehaviours',type:'base tool'},
-  {id:'ToolBuilder',label:'ToolBuilder',phase:'b',layer:'3-MonoBehaviours',type:'Tool'},
-  {id:'ToolHammer',label:'ToolHammer',phase:'b',layer:'3-MonoBehaviours',type:'Tool'},
-  {id:'ToolPickaxe',label:'ToolPickaxe',phase:'b',layer:'3-MonoBehaviours',type:'Tool'},
-  {id:'ToolMagnet',label:'ToolMagnet',phase:'b',layer:'3-MonoBehaviours',type:'Tool'},
-  {id:'ToolMiningHat',label:'ToolMiningHat',phase:'b',layer:'3-MonoBehaviours',type:'Tool'},
-  {id:'ToolResScanner',label:'ToolResScanner',phase:'b',layer:'3-MonoBehaviours',type:'Tool'},
-  {id:'ToolWrench',label:'ToolSupportsWrench',phase:'b',layer:'3-MonoBehaviours',type:'Tool'},
-  {id:'UIEventRelay',label:'UIEventRelay',phase:'b',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
-  {id:'UtilsB',label:'UtilsPhaseB',phase:'b',layer:'4-Utils',type:'physics helpers'},
-  {id:'PhaseBLOG',label:'PhaseBLOG',phase:'b',layer:'4-Utils',type:'logger'},
+  {id:'GE_B',label:'GameEvents(B)',phase:'b',layer:'0-Core',type:'partial',file:'0-Core/GameEvents.cs'},
+  {id:'GlobalEnumsB',label:'GlobalEnumsB',phase:'b',layer:'2-Data',type:'enums',file:'2-Data/Enums/GlobalEnumsB.cs'},
+  {id:'ISaveLoadObj',label:'ISaveLoadableObj',phase:'b',layer:'2-Data',type:'interface',file:'2-Data/Interface/ISaveLoadableObject.cs'},
+  {id:'SO_FootstepDef',label:'SO_FootstepDef',phase:'b',layer:'2-Data',type:'SO',file:'2-Data/SO_FootstepSoundDefinition.cs'},
+  {id:'BasePhysObj',label:'BasePhysicsObject',phase:'b',layer:'3-MonoBehaviours',type:'base class',file:'3-Mono/Physics/BasePhysicsObject.cs'},
+  {id:'BaseSellable',label:'BaseSellableItem',phase:'b',layer:'3-MonoBehaviours',type:'base class',file:'3-Mono/Physics/BaseSellableItem.cs'},
+  {id:'PhysicsGib',label:'PhysicsGib',phase:'b',layer:'3-MonoBehaviours',type:'MonoBehaviour',file:'3-Mono/Physics/PhysicsGib.cs'},
+  {id:'PhysSoundPlayer',label:'PhysicsSoundPlayer',phase:'b',layer:'3-MonoBehaviours',type:'MonoBehaviour',file:'3-Mono/Physics/PhysicsSoundPlayer.cs'},
+  {id:'UtilsB',label:'UtilsPhaseB',phase:'b',layer:'4-Utils',type:'static utils',file:'4-Utils/UtilsPhaseB.cs'},
+  {id:'PhaseBLOG',label:'PhaseBLOG',phase:'b',layer:'4-Utils',type:'logger',file:'4-Utils/PhaseBLOG.cs'},
+  {id:'IHighlightable',label:'IHighlightable',phase:'b',layer:'_-Systems',type:'interface',file:'_-Sys/HighlightSystem/HighlightSystem.cs'},
+  {id:'ObjHLMgr',label:'ObjHighlighterMgr',phase:'b',layer:'_-Systems',type:'Singleton',file:'_-Sys/HighlightSystem/HighlightSystem.cs'},
+  {id:'IInventoryItem',label:'IInventoryItem',phase:'b',layer:'_-Systems',type:'interface',file:'_-Sys/InventorySystem/InventoryData.cs'},
+  {id:'InvSlot',label:'InventorySlot',phase:'b',layer:'_-Systems',type:'entity',file:'_-Sys/InventorySystem/InventoryData.cs'},
+  {id:'InvDataService',label:'InvDataService',phase:'b',layer:'_-Systems',type:'service',file:'_-Sys/InventorySystem/InventoryData.cs'},
+  {id:'UIEventRelay',label:'UIEventRelay',phase:'b',layer:'_-Systems',type:'relay',file:'_-Sys/InventorySystem/InventorySystem.cs'},
+  {id:'InvOrch',label:'InvOrchestrator',phase:'b',layer:'_-Systems',type:'orchestrator',file:'_-Sys/InventorySystem/InventorySystem.cs'},
+  {id:'InventoryUI',label:'InventoryUI',phase:'b',layer:'_-Systems',type:'SubManager',file:'_-Sys/InventorySystem/InventorySystem.cs'},
+  {id:'F_InvSlot',label:'Field_InvSlot',phase:'b',layer:'_-Systems',type:'UI field',file:'_-Sys/InventorySystem/Field_InventorySlot.cs'},
+  {id:'F_SelItemInfo',label:'Field_SelItemInfo',phase:'b',layer:'_-Systems',type:'UI field',file:'_-Sys/InventorySystem/Field_InventorySlot.cs'},
+  {id:'PlayerCam',label:'PlayerCamera',phase:'b',layer:'_-Systems',type:'MonoBehaviour',file:'_-Sys/PlayerSystem/PlayerCamera.cs'},
+  {id:'PlayerFoot',label:'PlayerFootsteps',phase:'b',layer:'_-Systems',type:'MonoBehaviour',file:'_-Sys/PlayerSystem/PlayerFootsteps.cs'},
+  {id:'PlayerGrab',label:'PlayerGrab',phase:'b',layer:'_-Systems',type:'MonoBehaviour',file:'_-Sys/PlayerSystem/PlayerGrab.cs'},
+  {id:'PlayerMov',label:'PlayerMovement',phase:'b',layer:'_-Systems',type:'Singleton',file:'_-Sys/PlayerSystem/PlayerMovement.cs'},
+  {id:'PlayerSpawn',label:'PlayerSpawnPoint',phase:'b',layer:'_-Systems',type:'static list',file:'_-Sys/PlayerSystem/PlayerSpawnPoint.cs'},
+  {id:'RbDragger',label:'RbDraggerCtrl',phase:'b',layer:'_-Systems',type:'MonoBehaviour',file:'_-Sys/PlayerSystem/RigidbodyDraggerController.cs'},
+  {id:'ItemEquipBridge',label:'ItemEquipBridge',phase:'b',layer:'_-Systems',type:'bridge',file:'_-Sys/ToolSystem/ItemEquipBridge.cs'},
+  {id:'BaseHeldTool',label:'BaseHeldTool',phase:'b',layer:'_-Systems',type:'base tool',file:'_-Sys/ToolSystem/ToolBase.cs'},
+  {id:'ToolPickaxe',label:'ToolPickaxe',phase:'b',layer:'_-Systems',type:'Tool',file:'_-Sys/ToolSystem/Tools.cs'},
+  {id:'ToolHardHat',label:'ToolHardHat',phase:'b',layer:'_-Systems',type:'Tool',file:'_-Sys/ToolSystem/Tools.cs'},
+  {id:'ToolMagnet',label:'ToolMagnet',phase:'b',layer:'_-Systems',type:'Tool',file:'_-Sys/ToolSystem/Tools.cs'},
+  {id:'ToolHammer',label:'ToolHammer',phase:'b',layer:'_-Systems',type:'Tool',file:'_-Sys/ToolSystem/Tools.cs'},
+  {id:'ToolMiningHat',label:'ToolMiningHat',phase:'b',layer:'_-Systems',type:'Tool',file:'_-Sys/ToolSystem/Tools.cs'},
+  {id:'ToolWrench',label:'ToolSupportsWrench',phase:'b',layer:'_-Systems',type:'Tool',file:'_-Sys/ToolSystem/Tools.cs'},
+  {id:'ToolResScanner',label:'ToolResScanner',phase:'b',layer:'_-Systems',type:'Tool',file:'_-Sys/ToolSystem/Tools.cs'},
+  {id:'ToolBuilder',label:'ToolBuilder',phase:'b',layer:'_-Systems',type:'Tool',file:'_-Sys/ToolSystem/Tools.cs'},
   {id:'GE_C',label:'GameEvents(C)',phase:'c',layer:'0-Core',type:'partial'},
   {id:'OreLimitMgr',label:'OreLimitManager',phase:'c',layer:'1-Managers',type:'Singleton'},
   {id:'OreMgr',label:'OreManager',phase:'c',layer:'1-Managers',type:'Singleton'},
@@ -3242,19 +3246,19 @@ const links=[
   {s:'PlayerMov',t:'Singleton',type:'inherit'},{s:'OreLimitMgr',t:'Singleton',type:'inherit'},
   {s:'OreMgr',t:'Singleton',type:'inherit'},{s:'OrePoolMgr',t:'Singleton',type:'inherit'},
   {s:'ParticleMgr',t:'Singleton',type:'inherit'},{s:'BuildingMgr',t:'Singleton',type:'inherit'},
-  {s:'ConveyorMgr',t:'Singleton',type:'inherit'},
+  {s:'ConveyorMgr',t:'Singleton',type:'inherit'},{s:'ObjHLMgr',t:'Singleton',type:'inherit'},
   {s:'BaseSellable',t:'BasePhysObj',type:'inherit'},{s:'PhysicsGib',t:'BaseSellable',type:'inherit'},
   {s:'BaseHeldTool',t:'BaseSellable',type:'inherit'},{s:'OrePiece',t:'BaseSellable',type:'inherit'},
   {s:'DmgOrePiece',t:'OrePiece',type:'inherit'},{s:'BuildingCrate',t:'BaseSellable',type:'inherit'},
   {s:'ToolBuilder',t:'BaseHeldTool',type:'inherit'},{s:'ToolHammer',t:'BaseHeldTool',type:'inherit'},
   {s:'ToolPickaxe',t:'BaseHeldTool',type:'inherit'},{s:'ToolMagnet',t:'BaseHeldTool',type:'inherit'},
   {s:'ToolMiningHat',t:'BaseHeldTool',type:'inherit'},{s:'ToolResScanner',t:'BaseHeldTool',type:'inherit'},
-  {s:'ToolWrench',t:'BaseHeldTool',type:'inherit'},
+  {s:'ToolWrench',t:'BaseHeldTool',type:'inherit'},{s:'ToolHardHat',t:'BaseHeldTool',type:'inherit'},
   {s:'ConvShaker',t:'ConveyorBelt',type:'inherit'},{s:'ConvShakerH',t:'ConveyorBelt',type:'inherit'},
   {s:'ModBuildSupp',t:'BaseModSupp',type:'inherit'},
   {s:'InteractableComputer',t:'IInteractable',type:'interface'},{s:'InteractableComputer',t:'IHighlightable',type:'interface'},
   {s:'BaseHeldTool',t:'IInteractable',type:'interface'},{s:'BaseHeldTool',t:'IHighlightable',type:'interface'},
-  {s:'BaseHeldTool',t:'IIconItem',type:'interface'},{s:'BaseHeldTool',t:'ISaveLoadObj',type:'interface'},
+  {s:'BaseHeldTool',t:'IInventoryItem',type:'interface'},{s:'BaseHeldTool',t:'ISaveLoadObj',type:'interface'},
   {s:'BuildingObj',t:'IInteractable',type:'interface'},{s:'BuildingObj',t:'IHighlightable',type:'interface'},
   {s:'BuildingCrate',t:'IInteractable',type:'interface'},
   {s:'OreNode',t:'IDamageable',type:'interface'},{s:'DmgOrePiece',t:'IDamageable',type:'interface'},
@@ -3276,9 +3280,9 @@ const links=[
   {s:'InventoryUI',t:'GE_B',type:'event-sub'},{s:'InvOrch',t:'GE_B',type:'event-sub'},
   {s:'InvOrch',t:'GameEvents_All',type:'event-sub'},{s:'PlayerMov',t:'GameEvents_All',type:'event-sub'},
   {s:'PlayerCam',t:'GameEvents_All',type:'event-sub'},{s:'PlayerGrab',t:'GameEvents_All',type:'event-sub'},
-  {s:'PlayerGrab',t:'GE_B',type:'event-sub'},{s:'StartingElevator',t:'GE_A1',type:'event-sub'},
+  {s:'ItemEquipBridge',t:'GE_B',type:'event-sub'},{s:'ItemEquipBridge',t:'IInventoryItem',type:'get'},{s:'StartingElevator',t:'GE_A1',type:'event-sub'},
   {s:'CameraShaker',t:'GE_A1',type:'event-sub'},{s:'PhysLimitWarn',t:'GE_C',type:'event-sub'},
-  {s:'FresnelHL',t:'GameEvents_All',type:'event-sub'},{s:'FresnelHL',t:'GE_B',type:'event-sub'},
+  
   {s:'EconomyManager',t:'GameEvents_All',type:'event-raise'},{s:'UIManager',t:'GE_A',type:'event-raise'},
   {s:'InteractionWheelUI',t:'GameEvents_All',type:'event-raise'},{s:'ShopUI',t:'GameEvents_All',type:'event-raise'},
   {s:'InventoryUI',t:'GameEvents_All',type:'event-raise'},{s:'InventoryUI',t:'GE_B',type:'event-raise'},
@@ -3292,14 +3296,17 @@ const links=[
   {s:'ShopUIOrch',t:'ShopDataService',type:'get'},{s:'ShopUI',t:'ShopDataService',type:'creates'},
   {s:'ShopUI',t:'ShopUIOrch',type:'get'},{s:'InventoryUI',t:'InvDataService',type:'creates'},
   {s:'InventoryUI',t:'InvOrch',type:'get'},{s:'InvOrch',t:'InvDataService',type:'get'},
-  {s:'InvOrch',t:'F_InvSlot',type:'get'},{s:'InvOrch',t:'UIEventRelay',type:'creates'},
-  {s:'InvOrch',t:'BaseHeldTool',type:'get'},{s:'InvOrch',t:'IIconItem',type:'get'},
+  {s:'InvOrch',t:'IInventoryItem',type:'get'},{s:'InvOrch',t:'F_InvSlot',type:'set'},
+  {s:'InvOrch',t:'F_SelItemInfo',type:'set'},{s:'InvOrch',t:'UIEventRelay',type:'creates'},
+  {s:'InvOrch',t:'IInventoryItem',type:'get'},  
+  {s:'InvSlot',t:'IInventoryItem',type:'get'},{s:'InvDataService',t:'InvSlot',type:'creates'},
   {s:'InteractionWheelUI',t:'IInteractable',type:'get'},{s:'InteractionWheelUI',t:'F_InteractionOpt',type:'set'},
   {s:'ShopUIOrch',t:'F_ShopItem',type:'set'},{s:'ShopUIOrch',t:'F_ShopCartItem',type:'set'},
   {s:'ShopUIOrch',t:'F_ShopCategory',type:'set'},{s:'ShopUIOrch',t:'WShopItem',type:'get'},
   {s:'PlayerCam',t:'PlayerMov',type:'get'},{s:'PlayerFoot',t:'PlayerMov',type:'get'},
   {s:'PlayerGrab',t:'PlayerMov',type:'get'},{s:'RbDragger',t:'PlayerGrab',type:'get'},
-  {s:'PlayerMov',t:'PlayerSpawn',type:'get'},{s:'FresnelHL',t:'IHighlightable',type:'get'},
+  {s:'PlayerMov',t:'PlayerSpawn',type:'get'},{s:'ObjHLMgr',t:'IHighlightable',type:'get'},
+  {s:'ObjHLMgr',t:'GameEvents_All',type:'event-sub'},{s:'ObjHLMgr',t:'GE_B',type:'event-sub'},
   {s:'ToolPickaxe',t:'PhysSoundPlayer',type:'get'},{s:'ToolMagnet',t:'UtilsB',type:'uses-util'},
   {s:'ToolMagnet',t:'BasePhysObj',type:'get'},{s:'BaseHeldTool',t:'PlayerMov',type:'get'},
   {s:'BaseHeldTool',t:'GlobalEnumsB',type:'get'},{s:'BaseHeldTool',t:'SO_InteractionOpt',type:'get'},
@@ -3544,7 +3551,7 @@ canvas.addEventListener('click',e=>{
 function showInfo(d){
   const panel=document.getElementById('info');panel.style.display='block';
   document.getElementById('i-name').textContent=d.label;
-  document.getElementById('i-meta').textContent=`${PHASE_LABELS[d.phase]} \u00b7 ${LAYER_LABELS[d.layer]} \u00b7 ${d.type}`;
+  document.getElementById('i-meta').innerHTML=`${PHASE_LABELS[d.phase]} \u00b7 ${LAYER_LABELS[d.layer]} \u00b7 ${d.type}${d.file?'<br><span style="color:#e5a210;font-size:8px;">\ud83d\udcc4 '+d.file+'</span>':''}`;
   const depDiv=document.getElementById('i-deps');depDiv.innerHTML='';
   const outgoing=links.filter(l=>l.s===d.id),incoming=links.filter(l=>l.t===d.id);
   if(outgoing.length){depDiv.innerHTML+=`<div class="section-title">Depends on (${outgoing.length})</div>`;outgoing.forEach(l=>{const t=nodeMap[l.t];depDiv.innerHTML+=`<div class="dep"><span class="dir">\u2192</span> ${t?.label||l.t} <span class="etype">[${EDGE_LABELS[l.type]}]${l.lbl?' '+l.lbl:''}</span></div>`;});}
@@ -3775,8 +3782,8 @@ svg g{will-change:transform;}
 const PHASES = ['all','a','a1','b','c','d'];
 const PHASE_LABELS = {all:'Phase-All',a:'Phase-A',a1:'Phase-A1',b:'Phase-B',c:'Phase-C',d:'Phase-D'};
 const PHASE_COLORS = {all:'#b89eff',a:'#6cb4ff',a1:'#7af0ff',b:'#45eaad',c:'#ffd04a',d:'#ff8080'};
-const LAYERS = ['0-Core','1-Managers','2-Data','3-MonoBehaviours','4-Utils','5-Tests'];
-const LAYER_LABELS = {'0-Core':'Core','1-Managers':'Managers','2-Data':'Data','3-MonoBehaviours':'MonoBehaviours','4-Utils':'Utils','5-Tests':'Tests'};
+const LAYERS = ['0-Core','1-Managers','2-Data','3-MonoBehaviours','_-Systems','4-Utils','5-Tests'];
+const LAYER_LABELS = {'0-Core':'Core','1-Managers':'Managers','2-Data':'Data','3-MonoBehaviours':'MonoBehaviours','_-Systems':'_-Systems','4-Utils':'Utils','5-Tests':'Tests'};
 
 const COL_W = 280;  // width per phase column
 const ROW_H = 160;  // height per layer row (will expand)
@@ -3831,39 +3838,54 @@ const nodes = [
   {id:'CameraShaker',label:'CameraShaker',phase:'a1',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
   {id:'StartingElevator',label:'StartingElevator',phase:'a1',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
   {id:'ElevatorTest',label:'ElevatorTest',phase:'a1',layer:'5-Tests',type:'Test'},
-  // Phase-B
-  {id:'GE_B',label:'GameEvents(B)',phase:'b',layer:'0-Core',type:'partial'},
-  {id:'InventoryUI',label:'InventoryUI',phase:'b',layer:'1-Managers',type:'SubManager'},
-  {id:'InvDataService',label:'InventoryDataService',phase:'b',layer:'2-Data',type:'C# service'},
-  {id:'GlobalEnumsB',label:'GlobalEnumsB',phase:'b',layer:'2-Data',type:'InteractionType+'},
-  {id:'F_InvSlot',label:'Field_InvSlot',phase:'b',layer:'2-Data',type:'UI field'},
-  {id:'IIconItem',label:'IIconItem',phase:'b',layer:'2-Data',type:'interface'},
-  {id:'ISaveLoadObj',label:'ISaveLoadableObj',phase:'b',layer:'2-Data',type:'interface'},
-  {id:'SO_FootstepDef',label:'SO_FootstepDef',phase:'b',layer:'2-Data',type:'SO'},
-  {id:'FresnelHL',label:'FresnelHighlighter',phase:'b',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
-  {id:'IHighlightable',label:'IHighlightable',phase:'b',layer:'2-Data',type:'interface'},
-  {id:'InvOrch',label:'InventoryOrchestrator',phase:'b',layer:'3-MonoBehaviours',type:'Orchestrator'},
-  {id:'BasePhysObj',label:'BasePhysicsObject',phase:'b',layer:'3-MonoBehaviours',type:'base class'},
-  {id:'BaseSellable',label:'BaseSellableItem',phase:'b',layer:'3-MonoBehaviours',type:'base class'},
-  {id:'PhysicsGib',label:'PhysicsGib',phase:'b',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
-  {id:'PhysSoundPlayer',label:'PhysicsSoundPlayer',phase:'b',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
-  {id:'PlayerCam',label:'PlayerCamera',phase:'b',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
-  {id:'PlayerFoot',label:'PlayerFootsteps',phase:'b',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
-  {id:'PlayerGrab',label:'PlayerGrab',phase:'b',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
-  {id:'PlayerMov',label:'PlayerMovement',phase:'b',layer:'3-MonoBehaviours',type:'Singleton'},
-  {id:'PlayerSpawn',label:'PlayerSpawnPoint',phase:'b',layer:'3-MonoBehaviours',type:'static list'},
-  {id:'RbDragger',label:'RbDraggerCtrl',phase:'b',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
-  {id:'BaseHeldTool',label:'BaseHeldTool',phase:'b',layer:'3-MonoBehaviours',type:'base tool'},
-  {id:'ToolBuilder',label:'ToolBuilder',phase:'b',layer:'3-MonoBehaviours',type:'Tool'},
-  {id:'ToolHammer',label:'ToolHammer',phase:'b',layer:'3-MonoBehaviours',type:'Tool'},
-  {id:'ToolPickaxe',label:'ToolPickaxe',phase:'b',layer:'3-MonoBehaviours',type:'Tool'},
-  {id:'ToolMagnet',label:'ToolMagnet',phase:'b',layer:'3-MonoBehaviours',type:'Tool'},
-  {id:'ToolMiningHat',label:'ToolMiningHat',phase:'b',layer:'3-MonoBehaviours',type:'Tool'},
-  {id:'ToolResScanner',label:'ToolResScanner',phase:'b',layer:'3-MonoBehaviours',type:'Tool'},
-  {id:'ToolWrench',label:'ToolSupportsWrench',phase:'b',layer:'3-MonoBehaviours',type:'Tool'},
-  {id:'UIEventRelay',label:'UIEventRelay',phase:'b',layer:'3-MonoBehaviours',type:'MonoBehaviour'},
-  {id:'UtilsB',label:'UtilsPhaseB',phase:'b',layer:'4-Utils',type:'physics helpers'},
-  {id:'PhaseBLOG',label:'PhaseBLOG',phase:'b',layer:'4-Utils',type:'logger'},
+  // Phase-B: 0-Core
+  {id:'GE_B',label:'GameEvents(B)',phase:'b',layer:'0-Core',type:'partial',file:'0-Core/GameEvents.cs'},
+  // Phase-B: 2-Data
+  {id:'GlobalEnumsB',label:'GlobalEnumsB',phase:'b',layer:'2-Data',type:'enums',file:'2-Data/Enums/GlobalEnumsB.cs'},
+  {id:'ISaveLoadObj',label:'ISaveLoadableObj',phase:'b',layer:'2-Data',type:'interface',file:'2-Data/Interface/ISaveLoadableObject.cs'},
+  {id:'SO_FootstepDef',label:'SO_FootstepDef',phase:'b',layer:'2-Data',type:'SO',file:'2-Data/SO_FootstepSoundDefinition.cs'},
+  // Phase-B: 3-MonoBehaviours/Physics
+  {id:'BasePhysObj',label:'BasePhysicsObject',phase:'b',layer:'3-MonoBehaviours',type:'base class',file:'3-Mono/Physics/BasePhysicsObject.cs'},
+  {id:'BaseSellable',label:'BaseSellableItem',phase:'b',layer:'3-MonoBehaviours',type:'base class',file:'3-Mono/Physics/BaseSellableItem.cs'},
+  {id:'PhysicsGib',label:'PhysicsGib',phase:'b',layer:'3-MonoBehaviours',type:'MonoBehaviour',file:'3-Mono/Physics/PhysicsGib.cs'},
+  {id:'PhysSoundPlayer',label:'PhysicsSoundPlayer',phase:'b',layer:'3-MonoBehaviours',type:'MonoBehaviour',file:'3-Mono/Physics/PhysicsSoundPlayer.cs'},
+  // Phase-B: 4-Utils
+  {id:'UtilsB',label:'UtilsPhaseB',phase:'b',layer:'4-Utils',type:'static utils',file:'4-Utils/UtilsPhaseB.cs'},
+  {id:'PhaseBLOG',label:'PhaseBLOG',phase:'b',layer:'4-Utils',type:'logger',file:'4-Utils/PhaseBLOG.cs'},
+  // Phase-B: _-Systems/HighlightSystem/HighlightSystem.cs (2 classes in 1 file)
+  {id:'IHighlightable',label:'IHighlightable',phase:'b',layer:'_-Systems',type:'interface',file:'_-Systems/HighlightSystem/HighlightSystem.cs'},
+  {id:'ObjHLMgr',label:'ObjHighlighterMgr',phase:'b',layer:'_-Systems',type:'Singleton',file:'_-Systems/HighlightSystem/HighlightSystem.cs'},
+  // Phase-B: _-Systems/InventorySystem/InventoryData.cs (3 classes in 1 file)
+  {id:'IInventoryItem',label:'IInventoryItem',phase:'b',layer:'_-Systems',type:'interface',file:'_-Systems/InventorySystem/InventoryData.cs'},
+  {id:'InvSlot',label:'InventorySlot',phase:'b',layer:'_-Systems',type:'entity',file:'_-Systems/InventorySystem/InventoryData.cs'},
+  {id:'InvDataService',label:'InvDataService',phase:'b',layer:'_-Systems',type:'service',file:'_-Systems/InventorySystem/InventoryData.cs'},
+  // Phase-B: _-Systems/InventorySystem/InventorySystem.cs (3 classes in 1 file)
+  {id:'UIEventRelay',label:'UIEventRelay',phase:'b',layer:'_-Systems',type:'relay',file:'_-Systems/InventorySystem/InventorySystem.cs'},
+  {id:'InvOrch',label:'InvOrchestrator',phase:'b',layer:'_-Systems',type:'orchestrator',file:'_-Systems/InventorySystem/InventorySystem.cs'},
+  {id:'InventoryUI',label:'InventoryUI',phase:'b',layer:'_-Systems',type:'SubManager',file:'_-Systems/InventorySystem/InventorySystem.cs'},
+  // Phase-B: _-Systems/InventorySystem/Field_InventorySlot.cs (2 classes in 1 file)
+  {id:'F_InvSlot',label:'Field_InvSlot',phase:'b',layer:'_-Systems',type:'UI field',file:'_-Systems/InventorySystem/Field_InventorySlot.cs'},
+  {id:'F_SelItemInfo',label:'Field_SelItemInfo',phase:'b',layer:'_-Systems',type:'UI field',file:'_-Systems/InventorySystem/Field_InventorySlot.cs'},
+  // Phase-B: _-Systems/PlayerSystem/ (1 class per file)
+  {id:'PlayerCam',label:'PlayerCamera',phase:'b',layer:'_-Systems',type:'MonoBehaviour',file:'_-Systems/PlayerSystem/PlayerCamera.cs'},
+  {id:'PlayerFoot',label:'PlayerFootsteps',phase:'b',layer:'_-Systems',type:'MonoBehaviour',file:'_-Systems/PlayerSystem/PlayerFootsteps.cs'},
+  {id:'PlayerGrab',label:'PlayerGrab',phase:'b',layer:'_-Systems',type:'MonoBehaviour',file:'_-Systems/PlayerSystem/PlayerGrab.cs'},
+  {id:'PlayerMov',label:'PlayerMovement',phase:'b',layer:'_-Systems',type:'Singleton',file:'_-Systems/PlayerSystem/PlayerMovement.cs'},
+  {id:'PlayerSpawn',label:'PlayerSpawnPoint',phase:'b',layer:'_-Systems',type:'static list',file:'_-Systems/PlayerSystem/PlayerSpawnPoint.cs'},
+  {id:'RbDragger',label:'RbDraggerCtrl',phase:'b',layer:'_-Systems',type:'MonoBehaviour',file:'_-Systems/PlayerSystem/RigidbodyDraggerController.cs'},
+  // Phase-B: _-Systems/ToolSystem/ItemEquipBridge.cs (1 class)
+  {id:'ItemEquipBridge',label:'ItemEquipBridge',phase:'b',layer:'_-Systems',type:'bridge',file:'_-Systems/ToolSystem/ItemEquipBridge.cs'},
+  // Phase-B: _-Systems/ToolSystem/ToolBase.cs (1 class)
+  {id:'BaseHeldTool',label:'BaseHeldTool',phase:'b',layer:'_-Systems',type:'base tool',file:'_-Systems/ToolSystem/ToolBase.cs'},
+  // Phase-B: _-Systems/ToolSystem/Tools.cs (8 classes in 1 file)
+  {id:'ToolPickaxe',label:'ToolPickaxe',phase:'b',layer:'_-Systems',type:'Tool',file:'_-Systems/ToolSystem/Tools.cs'},
+  {id:'ToolHardHat',label:'ToolHardHat',phase:'b',layer:'_-Systems',type:'Tool',file:'_-Systems/ToolSystem/Tools.cs'},
+  {id:'ToolMagnet',label:'ToolMagnet',phase:'b',layer:'_-Systems',type:'Tool',file:'_-Systems/ToolSystem/Tools.cs'},
+  {id:'ToolHammer',label:'ToolHammer',phase:'b',layer:'_-Systems',type:'Tool',file:'_-Systems/ToolSystem/Tools.cs'},
+  {id:'ToolMiningHat',label:'ToolMiningHat',phase:'b',layer:'_-Systems',type:'Tool',file:'_-Systems/ToolSystem/Tools.cs'},
+  {id:'ToolWrench',label:'ToolSupportsWrench',phase:'b',layer:'_-Systems',type:'Tool',file:'_-Systems/ToolSystem/Tools.cs'},
+  {id:'ToolResScanner',label:'ToolResScanner',phase:'b',layer:'_-Systems',type:'Tool',file:'_-Systems/ToolSystem/Tools.cs'},
+  {id:'ToolBuilder',label:'ToolBuilder',phase:'b',layer:'_-Systems',type:'Tool',file:'_-Systems/ToolSystem/Tools.cs'},
   // Phase-C
   {id:'GE_C',label:'GameEvents(C)',phase:'c',layer:'0-Core',type:'partial'},
   {id:'OreLimitMgr',label:'OreLimitManager',phase:'c',layer:'1-Managers',type:'Singleton'},
@@ -3918,20 +3940,20 @@ const links = [
   {s:'PlayerMov',t:'Singleton',type:'inherit'},{s:'OreLimitMgr',t:'Singleton',type:'inherit'},
   {s:'OreMgr',t:'Singleton',type:'inherit'},{s:'OrePoolMgr',t:'Singleton',type:'inherit'},
   {s:'ParticleMgr',t:'Singleton',type:'inherit'},{s:'BuildingMgr',t:'Singleton',type:'inherit'},
-  {s:'ConveyorMgr',t:'Singleton',type:'inherit'},
+  {s:'ConveyorMgr',t:'Singleton',type:'inherit'},{s:'ObjHLMgr',t:'Singleton',type:'inherit'},
   {s:'BaseSellable',t:'BasePhysObj',type:'inherit'},{s:'PhysicsGib',t:'BaseSellable',type:'inherit'},
   {s:'BaseHeldTool',t:'BaseSellable',type:'inherit'},{s:'OrePiece',t:'BaseSellable',type:'inherit'},
   {s:'DmgOrePiece',t:'OrePiece',type:'inherit'},{s:'BuildingCrate',t:'BaseSellable',type:'inherit'},
   {s:'ToolBuilder',t:'BaseHeldTool',type:'inherit'},{s:'ToolHammer',t:'BaseHeldTool',type:'inherit'},
   {s:'ToolPickaxe',t:'BaseHeldTool',type:'inherit'},{s:'ToolMagnet',t:'BaseHeldTool',type:'inherit'},
   {s:'ToolMiningHat',t:'BaseHeldTool',type:'inherit'},{s:'ToolResScanner',t:'BaseHeldTool',type:'inherit'},
-  {s:'ToolWrench',t:'BaseHeldTool',type:'inherit'},
+  {s:'ToolWrench',t:'BaseHeldTool',type:'inherit'},{s:'ToolHardHat',t:'BaseHeldTool',type:'inherit'},
   {s:'ConvShaker',t:'ConveyorBelt',type:'inherit'},{s:'ConvShakerH',t:'ConveyorBelt',type:'inherit'},
   {s:'ModBuildSupp',t:'BaseModSupp',type:'inherit'},
   // INTERFACE
   {s:'InteractableComputer',t:'IInteractable',type:'interface'},{s:'InteractableComputer',t:'IHighlightable',type:'interface'},{s:'BaseHeldTool',t:'IInteractable',type:'interface'},
   {s:'BaseHeldTool',t:'IHighlightable',type:'interface'},
-  {s:'BaseHeldTool',t:'IIconItem',type:'interface'},{s:'BaseHeldTool',t:'ISaveLoadObj',type:'interface'},
+  {s:'BaseHeldTool',t:'IInventoryItem',type:'interface'},{s:'BaseHeldTool',t:'ISaveLoadObj',type:'interface'},
   {s:'BuildingObj',t:'IInteractable',type:'interface'},{s:'BuildingObj',t:'IHighlightable',type:'interface'},
   {s:'BuildingCrate',t:'IInteractable',type:'interface'},
   {s:'OreNode',t:'IDamageable',type:'interface'},{s:'DmgOrePiece',t:'IDamageable',type:'interface'},
@@ -3957,7 +3979,9 @@ const links = [
   {s:'InventoryUI',t:'GE_B',type:'event-sub',lbl:'OnOpen/CloseInventoryView'},
   {s:'InvOrch',t:'GE_B',type:'event-sub',lbl:'OnToolPickupRequested'},{s:'InvOrch',t:'GameEvents_All',type:'event-sub',lbl:'OnMoneyChanged'},
   {s:'PlayerMov',t:'GameEvents_All',type:'event-sub',lbl:'OnMenuStateChanged'},{s:'PlayerCam',t:'GameEvents_All',type:'event-sub',lbl:'OnMenuStateChanged'},
-  {s:'PlayerGrab',t:'GameEvents_All',type:'event-sub',lbl:'OnMenuStateChanged'},{s:'PlayerGrab',t:'GE_B',type:'event-sub',lbl:'OnToolEquipped'},
+  {s:'PlayerGrab',t:'GameEvents_All',type:'event-sub',lbl:'OnMenuStateChanged'},
+  {s:'ItemEquipBridge',t:'GE_B',type:'event-sub',lbl:'OnItemEquipped'},
+  {s:'ItemEquipBridge',t:'IInventoryItem',type:'get',lbl:'SetOwnerContext()'},
   {s:'StartingElevator',t:'GE_A1',type:'event-sub',lbl:'OnGamePaused/UnPaused'},
   {s:'CameraShaker',t:'GE_A1',type:'event-sub',lbl:'OnCamViewPunch'},
   {s:'PhysLimitWarn',t:'GE_C',type:'event-sub',lbl:'OnOreLimitChanged'},
@@ -3984,11 +4008,14 @@ const links = [
   {s:'ShopUI',t:'ShopUIOrch',type:'get',lbl:'Init()'},
   {s:'InventoryUI',t:'InvDataService',type:'creates',lbl:'new InventoryDataService()'},
   {s:'InventoryUI',t:'InvOrch',type:'get',lbl:'Init()'},
-  {s:'InvOrch',t:'InvDataService',type:'get',lbl:'GetSlots/ActiveTool'},
-  {s:'InvOrch',t:'F_InvSlot',type:'get',lbl:'SetData/SetEmpty'},
+  {s:'InvOrch',t:'InvDataService',type:'get',lbl:'GetAllSlots/ActiveItem'},
+  {s:'InvOrch',t:'IInventoryItem',type:'get',lbl:'GetIcon/Name/Qty/Drop'},
+  {s:'InvOrch',t:'F_InvSlot',type:'set',lbl:'SetData/SetEmpty'},
+  {s:'InvOrch',t:'F_SelItemInfo',type:'set',lbl:'SetData()'},
   {s:'InvOrch',t:'UIEventRelay',type:'creates',lbl:'AddComponent'},
-  {s:'InvOrch',t:'BaseHeldTool',type:'get',lbl:'Name/PrimaryFire/Drop'},
-  {s:'InvOrch',t:'IIconItem',type:'get',lbl:'GetIcon()'},
+  {s:'InvOrch',t:'IInventoryItem',type:'get',lbl:'HandleActiveInput/OnEquipped'},
+  {s:'InvSlot',t:'IInventoryItem',type:'get',lbl:'.item field'},
+  {s:'InvDataService',t:'InvSlot',type:'creates',lbl:'Build()'},
   {s:'InteractionWheelUI',t:'IInteractable',type:'get',lbl:'GetOptions()'},
   {s:'InteractionWheelUI',t:'F_InteractionOpt',type:'set',lbl:'SetData()'},
   {s:'ShopUIOrch',t:'F_ShopItem',type:'set',lbl:'SetData/SetButton'},
@@ -4000,9 +4027,9 @@ const links = [
   {s:'PlayerGrab',t:'PlayerMov',type:'get',lbl:'_movement ref'},
   {s:'RbDragger',t:'PlayerGrab',type:'get',lbl:'ForceRelease()'},
   {s:'PlayerMov',t:'PlayerSpawn',type:'get',lbl:'GetRandomSpawnPoint()'},
-  {s:'FresnelHL',t:'IHighlightable',type:'get',lbl:'GetHighlightProfile()'},
-  {s:'FresnelHL',t:'GameEvents_All',type:'event-sub',lbl:'OnMenuStateChanged'},
-  {s:'FresnelHL',t:'GE_B',type:'event-sub',lbl:'OnToolEquipped/ItemDropped'},
+  {s:'ObjHLMgr',t:'IHighlightable',type:'get',lbl:'GetHighlightProfile()'},
+  {s:'ObjHLMgr',t:'GameEvents_All',type:'event-sub',lbl:'OnMenuStateChanged'},
+  {s:'ObjHLMgr',t:'GE_B',type:'event-sub',lbl:'OnToolEquipped/ItemDropped'},
   {s:'ToolPickaxe',t:'PhysSoundPlayer',type:'get',lbl:'PlayImpactSound()'},
   {s:'ToolMagnet',t:'UtilsB',type:'uses-util',lbl:'IgnoreAllCollisions'},
   {s:'ToolMagnet',t:'BasePhysObj',type:'get',lbl:'STANDARD_DAMPING'},
@@ -4284,7 +4311,7 @@ function showInfo(d) {
   const panel = document.getElementById('info');
   panel.style.display = 'block';
   document.getElementById('i-name').textContent = d.label;
-  document.getElementById('i-meta').textContent = `${PHASE_LABELS[d.phase]} · ${LAYER_LABELS[d.layer]} · ${d.type}`;
+  document.getElementById('i-meta').innerHTML = `${PHASE_LABELS[d.phase]} · ${LAYER_LABELS[d.layer]} · ${d.type}${d.file ? '<br><span style="color:var(--accent);font-size:8px;">📄 '+d.file+'</span>' : ''}`;
   const depDiv = document.getElementById('i-deps');
   depDiv.innerHTML = '';
   // outgoing
