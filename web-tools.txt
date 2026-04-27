@@ -3288,8 +3288,8 @@ const links=[
   {s:'InteractionWheelUI',t:'GameEvents_All',type:'event-raise'},{s:'ShopUI',t:'GameEvents_All',type:'event-raise'},
   {s:'InventoryUI',t:'GameEvents_All',type:'event-raise'},{s:'InventoryUI',t:'GE_B',type:'event-raise'},
   {s:'InteractableComputer',t:'GE_A',type:'event-raise'},{s:'SimplePlayerIntr',t:'GE_A',type:'event-raise'},
-  {s:'ShopUIOrch',t:'GE_A',type:'event-raise'},{s:'BaseHeldTool',t:'GE_B',type:'event-raise'},
-  {s:'InvOrch',t:'GE_B',type:'event-raise'},{s:'StartingElevator',t:'GE_A1',type:'event-raise'},
+  {s:'ShopUIOrch',t:'GE_A',type:'event-raise'},{s:'InvOrch',t:'GE_B',type:'event-raise'},
+  {s:'StartingElevator',t:'GE_A1',type:'event-raise'},
   {s:'ElevatorTest',t:'GE_A1',type:'event-raise'},
   {s:'OreNode',t:'GE_C',type:'event-raise'},{s:'OrePiece',t:'GE_C',type:'event-raise'},
   {s:'OreLimitMgr',t:'GE_C',type:'event-raise'},{s:'SellerMachine',t:'GE_C',type:'event-raise'},
@@ -3307,11 +3307,11 @@ const links=[
   {s:'PlayerCam',t:'PlayerMov',type:'get'},{s:'PlayerFoot',t:'PlayerMov',type:'get'},
   {s:'PlayerGrab',t:'PlayerMov',type:'get'},{s:'RbDragger',t:'PlayerGrab',type:'get'},
   {s:'PlayerMov',t:'PlayerSpawn',type:'get'},{s:'ObjHLMgr',t:'IHighlightable',type:'get'},
-  {s:'ObjHLMgr',t:'GameEvents_All',type:'event-sub'},{s:'ObjHLMgr',t:'GE_B',type:'event-sub'},
+  {s:'ObjHLMgr',t:'GameEvents_All',type:'event-sub'},
   {s:'ToolPickaxe',t:'PhysSoundPlayer',type:'get'},{s:'ToolMagnet',t:'UtilsB',type:'uses-util'},
-  {s:'ToolMagnet',t:'BasePhysObj',type:'get'},{s:'BaseHeldTool',t:'PlayerMov',type:'get'},
-  {s:'BaseHeldTool',t:'GlobalEnumsB',type:'get'},{s:'BaseHeldTool',t:'SO_InteractionOpt',type:'get'},
-  {s:'SO_InteractionOpt',t:'GlobalEnumsB',type:'get'},{s:'InteractableComputer',t:'GlobalEnumsB',type:'get'},
+  {s:'ToolMagnet',t:'BasePhysObj',type:'get'},{s:'BaseHeldTool',t:'GlobalEnumsB',type:'get'},
+  {s:'BaseHeldTool',t:'SO_InteractionOpt',type:'get'},{s:'SO_InteractionOpt',t:'GlobalEnumsB',type:'get'},
+  {s:'InteractableComputer',t:'GlobalEnumsB',type:'get'},
   {s:'OreMgr',t:'OreDataService',type:'creates'},{s:'OreMgr',t:'OrePiece',type:'get'},
   {s:'OreLimitMgr',t:'OrePiece',type:'get'},{s:'OrePoolMgr',t:'OrePieceKey',type:'get'},
   {s:'OrePoolMgr',t:'BasePhysObj',type:'get'},{s:'OrePoolMgr',t:'UtilsAll',type:'uses-util'},
@@ -3332,7 +3332,7 @@ const links=[
   {s:'BuildingObj',t:'SO_BuildInvDef',type:'get'},{s:'BuildingObj',t:'BaseModSupp',type:'get'},
   {s:'BuildingObj',t:'GlobalEnumsB',type:'get'},{s:'BuildingCrate',t:'SO_BuildInvDef',type:'get'},
   {s:'BuildingCrate',t:'GlobalEnumsB',type:'get'},
-  {s:'PlayerGrab',t:'BaseHeldTool',type:'set'},{s:'DmgOrePiece',t:'UtilsB',type:'uses-util'},
+{s:'DmgOrePiece',t:'UtilsB',type:'uses-util'},
   {s:'PlayerGrab',t:'UtilsB',type:'uses-util'},{s:'BuildingObj',t:'UtilsB',type:'uses-util'},
   {s:'OrePiece',t:'UtilsAll',type:'uses-util'},
 ];
@@ -3345,7 +3345,9 @@ nodes.forEach(n=>{const k=n.phase+'|'+n.layer;if(!cells[k])cells[k]=[];cells[k].
 const rowMax={};
 LAYERS.forEach(l=>{let mx=0;PHASES.forEach(p=>{const k=p+'|'+l;mx=Math.max(mx,(cells[k]||[]).length);});rowMax[l]=mx;});
 const rowY={};let cumY=MARGIN.top;
-LAYERS.forEach(l=>{rowY[l]=cumY;cumY+=Math.max(160,Math.max(rowMax[l],1)*(NODE_H+NODE_PAD)+50);});
+LAYERS.forEach(l=>{rowY[l]=cumY;const cnt=Math.max(rowMax[l],1);
+  let msg=0;if(l==='_-Systems'){PHASES.forEach(p=>{const cn=cells[p+'|'+l]||[];let g=0,ps=null;cn.forEach(n=>{if(n.sys&&n.sys!==ps&&ps!==null)g++;ps=n.sys||ps;});msg=Math.max(msg,g);});}
+  cumY+=Math.max(160,cnt*(NODE_H+NODE_PAD)+msg*32+50);});
 const totalH=cumY+MARGIN.bottom;
 const colX={};PHASES.forEach((p,i)=>{colX[p]=MARGIN.left+i*COL_W;});
 const totalW=MARGIN.left+PHASES.length*COL_W+MARGIN.right;
@@ -4012,8 +4014,8 @@ const links = [
   {s:'InteractableComputer',t:'GE_A',type:'event-raise',lbl:'RaiseOpenShopView'},
   {s:'SimplePlayerIntr',t:'GE_A',type:'event-raise',lbl:'RaiseOpenInteractionView'},
   {s:'ShopUIOrch',t:'GE_A',type:'event-raise',lbl:'RaiseCloseShopView'},
-  {s:'BaseHeldTool',t:'GE_B',type:'event-raise',lbl:'RaiseToolPickupRequested'},
-  {s:'InvOrch',t:'GE_B',type:'event-raise',lbl:'RaiseToolEquipped/Switched'},
+  {s:'BaseHeldTool',t:'GE_B',type:'event-raise',lbl:'RaiseToolPickupRequested/ItemEquipped'},
+  {s:'InvOrch',t:'GE_B',type:'event-raise',lbl:'RaiseItemPickedUp/Dropped/ToolSwitched'},
   {s:'StartingElevator',t:'GE_A1',type:'event-raise',lbl:'RaiseElevatorLanded/CamViewPunch'},
   {s:'ElevatorTest',t:'GE_A1',type:'event-raise',lbl:'RaiseCamViewPunch/GamePaused/UnPaused'},
   {s:'OreNode',t:'GE_C',type:'event-raise',lbl:'RaiseOreMined'},{s:'OrePiece',t:'GE_C',type:'event-raise',lbl:'RaiseOreSold'},
@@ -4046,11 +4048,10 @@ const links = [
   {s:'PlayerMov',t:'PlayerSpawn',type:'get',lbl:'GetRandomSpawnPoint()'},
   {s:'ObjHLMgr',t:'IHighlightable',type:'get',lbl:'GetHighlightProfile()'},
   {s:'ObjHLMgr',t:'GameEvents_All',type:'event-sub',lbl:'OnMenuStateChanged'},
-  {s:'ObjHLMgr',t:'GE_B',type:'event-sub',lbl:'OnToolEquipped/ItemDropped'},
   {s:'ToolPickaxe',t:'PhysSoundPlayer',type:'get',lbl:'PlayImpactSound()'},
   {s:'ToolMagnet',t:'UtilsB',type:'uses-util',lbl:'IgnoreAllCollisions'},
   {s:'ToolMagnet',t:'BasePhysObj',type:'get',lbl:'STANDARD_DAMPING'},
-  {s:'BaseHeldTool',t:'PlayerMov',type:'get',lbl:'ViewModelContainer/Cam'},
+  
   {s:'BaseHeldTool',t:'GlobalEnumsB',type:'get',lbl:'InteractionType'},
   {s:'BaseHeldTool',t:'SO_InteractionOpt',type:'get',lbl:'interactionType'},
   {s:'SO_InteractionOpt',t:'GlobalEnumsB',type:'get',lbl:'InteractionType field'},
@@ -4087,7 +4088,7 @@ const links = [
   {s:'BuildingCrate',t:'SO_BuildInvDef',type:'get',lbl:'definition'},
   {s:'BuildingCrate',t:'GlobalEnumsB',type:'get',lbl:'InteractionType'},
   // SET / WRITES
-  {s:'PlayerGrab',t:'BaseHeldTool',type:'set',lbl:'SetOwner(movement)'},
+  
   {s:'DmgOrePiece',t:'UtilsB',type:'uses-util',lbl:'SimpleExplosion'},
   {s:'PlayerGrab',t:'UtilsB',type:'uses-util',lbl:'IgnoreAllCollisions'},
   {s:'BuildingObj',t:'UtilsB',type:'uses-util',lbl:'SetLayerRecursively'},
@@ -4122,7 +4123,18 @@ let cumY = MARGIN.top;
 LAYERS.forEach(layer => {
   rowY[layer] = cumY;
   const cnt = Math.max(rowMaxCounts[layer], 1);
-  cumY += Math.max(ROW_H, cnt * (NODE_H + NODE_PAD) + 50);
+  // count sys group transitions in the densest phase for this layer to add SYS_GAP space
+  let maxSysGaps = 0;
+  if (layer === '_-Systems') {
+    PHASES.forEach(phase => {
+      const key = phase + '|' + layer;
+      const cn = cells[key] || [];
+      let gaps = 0, prevSys = null;
+      cn.forEach(n => { if (n.sys && n.sys !== prevSys && prevSys !== null) gaps++; prevSys = n.sys || prevSys; });
+      maxSysGaps = Math.max(maxSysGaps, gaps);
+    });
+  }
+  cumY += Math.max(ROW_H, cnt * (NODE_H + NODE_PAD) + maxSysGaps * 32 + 50);
 });
 const totalH = cumY + MARGIN.bottom;
 
