@@ -3116,6 +3116,7 @@ const PHASE_LABELS={all:'Phase-All',a:'Phase-A',a1:'Phase-A1',b:'Phase-B',c:'Pha
 const PHASE_COLORS={all:'#b89eff',a:'#6cb4ff',a1:'#7af0ff',b:'#45eaad',c:'#ffd04a',d:'#ff8080'};
 const LAYERS=['0-Core','1-Managers','2-Data','3-MonoBehaviours','_-Systems','4-Utils','5-Tests'];
 const LAYER_LABELS={'0-Core':'Core','1-Managers':'Managers','2-Data':'Data','3-MonoBehaviours':'MonoBehaviours','_-Systems':'_-Systems','4-Utils':'Utils','5-Tests':'Tests'};
+const SYS_COLORS={HL:'#7af0ff',Inv:'#45eaad',Player:'#6cb4ff',Tool:'#ffd04a'};
 const COL_W=280,NODE_W=120,NODE_H=28,NODE_PAD=4,MARGIN={top:50,left:130,right:40,bottom:40};
 const EDGE_TYPES=['inherit','interface','get','set','event-sub','event-raise','singleton','creates','uses-util'];
 const EDGE_LABELS={inherit:'Inherits',interface:'Interface',get:'Get()',set:'Set()','event-sub':'Event +=','event-raise':'Raise()','singleton':'Singleton.Ins','creates':'Creates','uses-util':'Utils'};
@@ -3173,32 +3174,32 @@ const nodes=[
   {id:'PhysSoundPlayer',label:'PhysicsSoundPlayer',phase:'b',layer:'3-MonoBehaviours',type:'MonoBehaviour',file:'3-Mono/Physics/PhysicsSoundPlayer.cs'},
   {id:'UtilsB',label:'UtilsPhaseB',phase:'b',layer:'4-Utils',type:'static utils',file:'4-Utils/UtilsPhaseB.cs'},
   {id:'PhaseBLOG',label:'PhaseBLOG',phase:'b',layer:'4-Utils',type:'logger',file:'4-Utils/PhaseBLOG.cs'},
-  {id:'IHighlightable',label:'IHighlightable',phase:'b',layer:'_-Systems',type:'interface',file:'_-Sys/HighlightSystem/HighlightSystem.cs'},
-  {id:'ObjHLMgr',label:'ObjHighlighterMgr',phase:'b',layer:'_-Systems',type:'Singleton',file:'_-Sys/HighlightSystem/HighlightSystem.cs'},
-  {id:'IInventoryItem',label:'IInventoryItem',phase:'b',layer:'_-Systems',type:'interface',file:'_-Sys/InventorySystem/InventoryData.cs'},
-  {id:'InvSlot',label:'InventorySlot',phase:'b',layer:'_-Systems',type:'entity',file:'_-Sys/InventorySystem/InventoryData.cs'},
-  {id:'InvDataService',label:'InvDataService',phase:'b',layer:'_-Systems',type:'service',file:'_-Sys/InventorySystem/InventoryData.cs'},
-  {id:'UIEventRelay',label:'UIEventRelay',phase:'b',layer:'_-Systems',type:'relay',file:'_-Sys/InventorySystem/InventorySystem.cs'},
-  {id:'InvOrch',label:'InvOrchestrator',phase:'b',layer:'_-Systems',type:'orchestrator',file:'_-Sys/InventorySystem/InventorySystem.cs'},
-  {id:'InventoryUI',label:'InventoryUI',phase:'b',layer:'_-Systems',type:'SubManager',file:'_-Sys/InventorySystem/InventorySystem.cs'},
-  {id:'F_InvSlot',label:'Field_InvSlot',phase:'b',layer:'_-Systems',type:'UI field',file:'_-Sys/InventorySystem/Field_InventorySlot.cs'},
-  {id:'F_SelItemInfo',label:'Field_SelItemInfo',phase:'b',layer:'_-Systems',type:'UI field',file:'_-Sys/InventorySystem/Field_InventorySlot.cs'},
-  {id:'PlayerCam',label:'PlayerCamera',phase:'b',layer:'_-Systems',type:'MonoBehaviour',file:'_-Sys/PlayerSystem/PlayerCamera.cs'},
-  {id:'PlayerFoot',label:'PlayerFootsteps',phase:'b',layer:'_-Systems',type:'MonoBehaviour',file:'_-Sys/PlayerSystem/PlayerFootsteps.cs'},
-  {id:'PlayerGrab',label:'PlayerGrab',phase:'b',layer:'_-Systems',type:'MonoBehaviour',file:'_-Sys/PlayerSystem/PlayerGrab.cs'},
-  {id:'PlayerMov',label:'PlayerMovement',phase:'b',layer:'_-Systems',type:'Singleton',file:'_-Sys/PlayerSystem/PlayerMovement.cs'},
-  {id:'PlayerSpawn',label:'PlayerSpawnPoint',phase:'b',layer:'_-Systems',type:'static list',file:'_-Sys/PlayerSystem/PlayerSpawnPoint.cs'},
-  {id:'RbDragger',label:'RbDraggerCtrl',phase:'b',layer:'_-Systems',type:'MonoBehaviour',file:'_-Sys/PlayerSystem/RigidbodyDraggerController.cs'},
-  {id:'ItemEquipBridge',label:'ItemEquipBridge',phase:'b',layer:'_-Systems',type:'bridge',file:'_-Sys/ToolSystem/ItemEquipBridge.cs'},
-  {id:'BaseHeldTool',label:'BaseHeldTool',phase:'b',layer:'_-Systems',type:'base tool',file:'_-Sys/ToolSystem/ToolBase.cs'},
-  {id:'ToolPickaxe',label:'ToolPickaxe',phase:'b',layer:'_-Systems',type:'Tool',file:'_-Sys/ToolSystem/Tools.cs'},
-  {id:'ToolHardHat',label:'ToolHardHat',phase:'b',layer:'_-Systems',type:'Tool',file:'_-Sys/ToolSystem/Tools.cs'},
-  {id:'ToolMagnet',label:'ToolMagnet',phase:'b',layer:'_-Systems',type:'Tool',file:'_-Sys/ToolSystem/Tools.cs'},
-  {id:'ToolHammer',label:'ToolHammer',phase:'b',layer:'_-Systems',type:'Tool',file:'_-Sys/ToolSystem/Tools.cs'},
-  {id:'ToolMiningHat',label:'ToolMiningHat',phase:'b',layer:'_-Systems',type:'Tool',file:'_-Sys/ToolSystem/Tools.cs'},
-  {id:'ToolWrench',label:'ToolSupportsWrench',phase:'b',layer:'_-Systems',type:'Tool',file:'_-Sys/ToolSystem/Tools.cs'},
-  {id:'ToolResScanner',label:'ToolResScanner',phase:'b',layer:'_-Systems',type:'Tool',file:'_-Sys/ToolSystem/Tools.cs'},
-  {id:'ToolBuilder',label:'ToolBuilder',phase:'b',layer:'_-Systems',type:'Tool',file:'_-Sys/ToolSystem/Tools.cs'},
+  {id:'IHighlightable',label:'IHighlightable',phase:'b',layer:'_-Systems',sys:'HL',type:'interface',file:'_-Sys/HighlightSystem/HighlightSystem.cs'},
+  {id:'ObjHLMgr',label:'ObjHighlighterMgr',phase:'b',layer:'_-Systems',sys:'HL',type:'Singleton',file:'_-Sys/HighlightSystem/HighlightSystem.cs'},
+  {id:'IInventoryItem',label:'IInventoryItem',phase:'b',layer:'_-Systems',sys:'Inv',type:'interface',file:'_-Sys/InventorySystem/InventoryData.cs'},
+  {id:'InvSlot',label:'InventorySlot',phase:'b',layer:'_-Systems',sys:'Inv',type:'entity',file:'_-Sys/InventorySystem/InventoryData.cs'},
+  {id:'InvDataService',label:'InvDataService',phase:'b',layer:'_-Systems',sys:'Inv',type:'service',file:'_-Sys/InventorySystem/InventoryData.cs'},
+  {id:'UIEventRelay',label:'UIEventRelay',phase:'b',layer:'_-Systems',sys:'Inv',type:'relay',file:'_-Sys/InventorySystem/InventorySystem.cs'},
+  {id:'InvOrch',label:'InvOrchestrator',phase:'b',layer:'_-Systems',sys:'Inv',type:'orchestrator',file:'_-Sys/InventorySystem/InventorySystem.cs'},
+  {id:'InventoryUI',label:'InventoryUI',phase:'b',layer:'_-Systems',sys:'Inv',type:'SubManager',file:'_-Sys/InventorySystem/InventorySystem.cs'},
+  {id:'F_InvSlot',label:'Field_InvSlot',phase:'b',layer:'_-Systems',sys:'Inv',type:'UI field',file:'_-Sys/InventorySystem/Field_InventorySlot.cs'},
+  {id:'F_SelItemInfo',label:'Field_SelItemInfo',phase:'b',layer:'_-Systems',sys:'Inv',type:'UI field',file:'_-Sys/InventorySystem/Field_InventorySlot.cs'},
+  {id:'PlayerCam',label:'PlayerCamera',phase:'b',layer:'_-Systems',sys:'Player',type:'MonoBehaviour',file:'_-Sys/PlayerSystem/PlayerCamera.cs'},
+  {id:'PlayerFoot',label:'PlayerFootsteps',phase:'b',layer:'_-Systems',sys:'Player',type:'MonoBehaviour',file:'_-Sys/PlayerSystem/PlayerFootsteps.cs'},
+  {id:'PlayerGrab',label:'PlayerGrab',phase:'b',layer:'_-Systems',sys:'Player',type:'MonoBehaviour',file:'_-Sys/PlayerSystem/PlayerGrab.cs'},
+  {id:'PlayerMov',label:'PlayerMovement',phase:'b',layer:'_-Systems',sys:'Player',type:'Singleton',file:'_-Sys/PlayerSystem/PlayerMovement.cs'},
+  {id:'PlayerSpawn',label:'PlayerSpawnPoint',phase:'b',layer:'_-Systems',sys:'Player',type:'static list',file:'_-Sys/PlayerSystem/PlayerSpawnPoint.cs'},
+  {id:'RbDragger',label:'RbDraggerCtrl',phase:'b',layer:'_-Systems',sys:'Player',type:'MonoBehaviour',file:'_-Sys/PlayerSystem/RigidbodyDraggerController.cs'},
+  {id:'ItemEquipBridge',label:'ItemEquipBridge',phase:'b',layer:'_-Systems',sys:'Tool',type:'bridge',file:'_-Sys/ToolSystem/ItemEquipBridge.cs'},
+  {id:'BaseHeldTool',label:'BaseHeldTool',phase:'b',layer:'_-Systems',sys:'Tool',type:'base tool',file:'_-Sys/ToolSystem/ToolBase.cs'},
+  {id:'ToolPickaxe',label:'ToolPickaxe',phase:'b',layer:'_-Systems',sys:'Tool',type:'Tool',file:'_-Sys/ToolSystem/Tools.cs'},
+  {id:'ToolHardHat',label:'ToolHardHat',phase:'b',layer:'_-Systems',sys:'Tool',type:'Tool',file:'_-Sys/ToolSystem/Tools.cs'},
+  {id:'ToolMagnet',label:'ToolMagnet',phase:'b',layer:'_-Systems',sys:'Tool',type:'Tool',file:'_-Sys/ToolSystem/Tools.cs'},
+  {id:'ToolHammer',label:'ToolHammer',phase:'b',layer:'_-Systems',sys:'Tool',type:'Tool',file:'_-Sys/ToolSystem/Tools.cs'},
+  {id:'ToolMiningHat',label:'ToolMiningHat',phase:'b',layer:'_-Systems',sys:'Tool',type:'Tool',file:'_-Sys/ToolSystem/Tools.cs'},
+  {id:'ToolWrench',label:'ToolSupportsWrench',phase:'b',layer:'_-Systems',sys:'Tool',type:'Tool',file:'_-Sys/ToolSystem/Tools.cs'},
+  {id:'ToolResScanner',label:'ToolResScanner',phase:'b',layer:'_-Systems',sys:'Tool',type:'Tool',file:'_-Sys/ToolSystem/Tools.cs'},
+  {id:'ToolBuilder',label:'ToolBuilder',phase:'b',layer:'_-Systems',sys:'Tool',type:'Tool',file:'_-Sys/ToolSystem/Tools.cs'},
   {id:'GE_C',label:'GameEvents(C)',phase:'c',layer:'0-Core',type:'partial'},
   {id:'OreLimitMgr',label:'OreLimitManager',phase:'c',layer:'1-Managers',type:'Singleton'},
   {id:'OreMgr',label:'OreManager',phase:'c',layer:'1-Managers',type:'Singleton'},
@@ -3348,7 +3349,10 @@ LAYERS.forEach(l=>{rowY[l]=cumY;cumY+=Math.max(160,Math.max(rowMax[l],1)*(NODE_H
 const totalH=cumY+MARGIN.bottom;
 const colX={};PHASES.forEach((p,i)=>{colX[p]=MARGIN.left+i*COL_W;});
 const totalW=MARGIN.left+PHASES.length*COL_W+MARGIN.right;
-nodes.forEach(n=>{const k=n.phase+'|'+n.layer;const ci=cells[k];const idx=ci.indexOf(n);n.x=colX[n.phase]+20;n.y=rowY[n.layer]+30+idx*(NODE_H+NODE_PAD);n.cx=n.x+NODE_W/2;n.cy=n.y+NODE_H/2;});
+const SYS_GAP=32;
+nodes.forEach(n=>{const k=n.phase+'|'+n.layer;const ci=cells[k];const idx=ci.indexOf(n);n.x=colX[n.phase]+20;
+  let sg=0;if(n.sys){let ps=null;for(let i=0;i<=idx;i++){const c=ci[i];if(c.sys&&c.sys!==ps&&ps!==null)sg++;ps=c.sys||ps;}}
+  n.y=rowY[n.layer]+30+idx*(NODE_H+NODE_PAD)+sg*SYS_GAP;n.cx=n.x+NODE_W/2;n.cy=n.y+NODE_H/2;});
 const nodeMap={};nodes.forEach(n=>{nodeMap[n.id]=n;});
 
 // ═══════════════════════════════════════════════════════════════
@@ -3399,6 +3403,22 @@ function draw(){
     ctx.globalAlpha=1;ctx.setLineDash([]);
     ctx.fillStyle='#808090';ctx.fillText(LAYER_LABELS[l],MARGIN.left-25,y+16);
   });
+
+  // System envelope borders
+  const sysGrp={};
+  nodes.filter(n=>n.sys).forEach(n=>{const k=n.phase+'|'+n.sys;if(!sysGrp[k])sysGrp[k]={sys:n.sys,ns:[]};sysGrp[k].ns.push(n);});
+  Object.values(sysGrp).forEach(sg=>{
+    const pad=10;
+    const x1=Math.min(...sg.ns.map(n=>n.x))-pad, y1=Math.min(...sg.ns.map(n=>n.y))-pad;
+    const x2=Math.max(...sg.ns.map(n=>n.x+NODE_W))+pad, y2=Math.max(...sg.ns.map(n=>n.y+NODE_H))+pad;
+    const col=SYS_COLORS[sg.sys]||'#555';
+    ctx.globalAlpha=0.35;ctx.strokeStyle=col;ctx.lineWidth=1.2;ctx.setLineDash([4,3]);
+    roundRect(ctx,x1,y1,x2-x1,y2-y1,6);ctx.stroke();
+    ctx.setLineDash([]);ctx.globalAlpha=0.5;ctx.fillStyle=col;
+    ctx.font='bold 7px JetBrains Mono';ctx.textAlign='left';ctx.textBaseline='bottom';
+    ctx.fillText(sg.sys+'System',x1+4,y1-2);
+  });
+  ctx.globalAlpha=1;ctx.setLineDash([]);
 
   // Edges
   const connected=selectedId?new Set([selectedId]):null;
@@ -3784,6 +3804,7 @@ const PHASE_LABELS = {all:'Phase-All',a:'Phase-A',a1:'Phase-A1',b:'Phase-B',c:'P
 const PHASE_COLORS = {all:'#b89eff',a:'#6cb4ff',a1:'#7af0ff',b:'#45eaad',c:'#ffd04a',d:'#ff8080'};
 const LAYERS = ['0-Core','1-Managers','2-Data','3-MonoBehaviours','_-Systems','4-Utils','5-Tests'];
 const LAYER_LABELS = {'0-Core':'Core','1-Managers':'Managers','2-Data':'Data','3-MonoBehaviours':'MonoBehaviours','_-Systems':'_-Systems','4-Utils':'Utils','5-Tests':'Tests'};
+const SYS_COLORS = {HL:'#7af0ff',Inv:'#45eaad',Player:'#6cb4ff',Tool:'#ffd04a'};
 
 const COL_W = 280;  // width per phase column
 const ROW_H = 160;  // height per layer row (will expand)
@@ -3853,39 +3874,35 @@ const nodes = [
   {id:'UtilsB',label:'UtilsPhaseB',phase:'b',layer:'4-Utils',type:'static utils',file:'4-Utils/UtilsPhaseB.cs'},
   {id:'PhaseBLOG',label:'PhaseBLOG',phase:'b',layer:'4-Utils',type:'logger',file:'4-Utils/PhaseBLOG.cs'},
   // Phase-B: _-Systems/HighlightSystem/HighlightSystem.cs (2 classes in 1 file)
-  {id:'IHighlightable',label:'IHighlightable',phase:'b',layer:'_-Systems',type:'interface',file:'_-Systems/HighlightSystem/HighlightSystem.cs'},
-  {id:'ObjHLMgr',label:'ObjHighlighterMgr',phase:'b',layer:'_-Systems',type:'Singleton',file:'_-Systems/HighlightSystem/HighlightSystem.cs'},
+  {id:'IHighlightable',label:'IHighlightable',phase:'b',layer:'_-Systems',sys:'HL',type:'interface',file:'_-Systems/HighlightSystem/HighlightSystem.cs'},
+  {id:'ObjHLMgr',label:'ObjHighlighterMgr',phase:'b',layer:'_-Systems',sys:'HL',type:'Singleton',file:'_-Systems/HighlightSystem/HighlightSystem.cs'},
   // Phase-B: _-Systems/InventorySystem/InventoryData.cs (3 classes in 1 file)
-  {id:'IInventoryItem',label:'IInventoryItem',phase:'b',layer:'_-Systems',type:'interface',file:'_-Systems/InventorySystem/InventoryData.cs'},
-  {id:'InvSlot',label:'InventorySlot',phase:'b',layer:'_-Systems',type:'entity',file:'_-Systems/InventorySystem/InventoryData.cs'},
-  {id:'InvDataService',label:'InvDataService',phase:'b',layer:'_-Systems',type:'service',file:'_-Systems/InventorySystem/InventoryData.cs'},
-  // Phase-B: _-Systems/InventorySystem/InventorySystem.cs (3 classes in 1 file)
-  {id:'UIEventRelay',label:'UIEventRelay',phase:'b',layer:'_-Systems',type:'relay',file:'_-Systems/InventorySystem/InventorySystem.cs'},
-  {id:'InvOrch',label:'InvOrchestrator',phase:'b',layer:'_-Systems',type:'orchestrator',file:'_-Systems/InventorySystem/InventorySystem.cs'},
-  {id:'InventoryUI',label:'InventoryUI',phase:'b',layer:'_-Systems',type:'SubManager',file:'_-Systems/InventorySystem/InventorySystem.cs'},
-  // Phase-B: _-Systems/InventorySystem/Field_InventorySlot.cs (2 classes in 1 file)
-  {id:'F_InvSlot',label:'Field_InvSlot',phase:'b',layer:'_-Systems',type:'UI field',file:'_-Systems/InventorySystem/Field_InventorySlot.cs'},
-  {id:'F_SelItemInfo',label:'Field_SelItemInfo',phase:'b',layer:'_-Systems',type:'UI field',file:'_-Systems/InventorySystem/Field_InventorySlot.cs'},
+  {id:'IInventoryItem',label:'IInventoryItem',phase:'b',layer:'_-Systems',sys:'Inv',type:'interface',file:'_-Systems/InventorySystem/InventoryData.cs'},
+  {id:'InvSlot',label:'InventorySlot',phase:'b',layer:'_-Systems',sys:'Inv',type:'entity',file:'_-Systems/InventorySystem/InventoryData.cs'},
+  {id:'InvDataService',label:'InvDataService',phase:'b',layer:'_-Systems',sys:'Inv',type:'service',file:'_-Systems/InventorySystem/InventoryData.cs'},
+  {id:'UIEventRelay',label:'UIEventRelay',phase:'b',layer:'_-Systems',sys:'Inv',type:'relay',file:'_-Systems/InventorySystem/InventorySystem.cs'},
+  {id:'InvOrch',label:'InvOrchestrator',phase:'b',layer:'_-Systems',sys:'Inv',type:'orchestrator',file:'_-Systems/InventorySystem/InventorySystem.cs'},
+  {id:'InventoryUI',label:'InventoryUI',phase:'b',layer:'_-Systems',sys:'Inv',type:'SubManager',file:'_-Systems/InventorySystem/InventorySystem.cs'},
+  {id:'F_InvSlot',label:'Field_InvSlot',phase:'b',layer:'_-Systems',sys:'Inv',type:'UI field',file:'_-Systems/InventorySystem/Field_InventorySlot.cs'},
+  {id:'F_SelItemInfo',label:'Field_SelItemInfo',phase:'b',layer:'_-Systems',sys:'Inv',type:'UI field',file:'_-Systems/InventorySystem/Field_InventorySlot.cs'},
   // Phase-B: _-Systems/PlayerSystem/ (1 class per file)
-  {id:'PlayerCam',label:'PlayerCamera',phase:'b',layer:'_-Systems',type:'MonoBehaviour',file:'_-Systems/PlayerSystem/PlayerCamera.cs'},
-  {id:'PlayerFoot',label:'PlayerFootsteps',phase:'b',layer:'_-Systems',type:'MonoBehaviour',file:'_-Systems/PlayerSystem/PlayerFootsteps.cs'},
-  {id:'PlayerGrab',label:'PlayerGrab',phase:'b',layer:'_-Systems',type:'MonoBehaviour',file:'_-Systems/PlayerSystem/PlayerGrab.cs'},
-  {id:'PlayerMov',label:'PlayerMovement',phase:'b',layer:'_-Systems',type:'Singleton',file:'_-Systems/PlayerSystem/PlayerMovement.cs'},
-  {id:'PlayerSpawn',label:'PlayerSpawnPoint',phase:'b',layer:'_-Systems',type:'static list',file:'_-Systems/PlayerSystem/PlayerSpawnPoint.cs'},
-  {id:'RbDragger',label:'RbDraggerCtrl',phase:'b',layer:'_-Systems',type:'MonoBehaviour',file:'_-Systems/PlayerSystem/RigidbodyDraggerController.cs'},
+  {id:'PlayerCam',label:'PlayerCamera',phase:'b',layer:'_-Systems',sys:'Player',type:'MonoBehaviour',file:'_-Systems/PlayerSystem/PlayerCamera.cs'},
+  {id:'PlayerFoot',label:'PlayerFootsteps',phase:'b',layer:'_-Systems',sys:'Player',type:'MonoBehaviour',file:'_-Systems/PlayerSystem/PlayerFootsteps.cs'},
+  {id:'PlayerGrab',label:'PlayerGrab',phase:'b',layer:'_-Systems',sys:'Player',type:'MonoBehaviour',file:'_-Systems/PlayerSystem/PlayerGrab.cs'},
+  {id:'PlayerMov',label:'PlayerMovement',phase:'b',layer:'_-Systems',sys:'Player',type:'Singleton',file:'_-Systems/PlayerSystem/PlayerMovement.cs'},
+  {id:'PlayerSpawn',label:'PlayerSpawnPoint',phase:'b',layer:'_-Systems',sys:'Player',type:'static list',file:'_-Systems/PlayerSystem/PlayerSpawnPoint.cs'},
+  {id:'RbDragger',label:'RbDraggerCtrl',phase:'b',layer:'_-Systems',sys:'Player',type:'MonoBehaviour',file:'_-Systems/PlayerSystem/RigidbodyDraggerController.cs'},
   // Phase-B: _-Systems/ToolSystem/ItemEquipBridge.cs (1 class)
-  {id:'ItemEquipBridge',label:'ItemEquipBridge',phase:'b',layer:'_-Systems',type:'bridge',file:'_-Systems/ToolSystem/ItemEquipBridge.cs'},
-  // Phase-B: _-Systems/ToolSystem/ToolBase.cs (1 class)
-  {id:'BaseHeldTool',label:'BaseHeldTool',phase:'b',layer:'_-Systems',type:'base tool',file:'_-Systems/ToolSystem/ToolBase.cs'},
-  // Phase-B: _-Systems/ToolSystem/Tools.cs (8 classes in 1 file)
-  {id:'ToolPickaxe',label:'ToolPickaxe',phase:'b',layer:'_-Systems',type:'Tool',file:'_-Systems/ToolSystem/Tools.cs'},
-  {id:'ToolHardHat',label:'ToolHardHat',phase:'b',layer:'_-Systems',type:'Tool',file:'_-Systems/ToolSystem/Tools.cs'},
-  {id:'ToolMagnet',label:'ToolMagnet',phase:'b',layer:'_-Systems',type:'Tool',file:'_-Systems/ToolSystem/Tools.cs'},
-  {id:'ToolHammer',label:'ToolHammer',phase:'b',layer:'_-Systems',type:'Tool',file:'_-Systems/ToolSystem/Tools.cs'},
-  {id:'ToolMiningHat',label:'ToolMiningHat',phase:'b',layer:'_-Systems',type:'Tool',file:'_-Systems/ToolSystem/Tools.cs'},
-  {id:'ToolWrench',label:'ToolSupportsWrench',phase:'b',layer:'_-Systems',type:'Tool',file:'_-Systems/ToolSystem/Tools.cs'},
-  {id:'ToolResScanner',label:'ToolResScanner',phase:'b',layer:'_-Systems',type:'Tool',file:'_-Systems/ToolSystem/Tools.cs'},
-  {id:'ToolBuilder',label:'ToolBuilder',phase:'b',layer:'_-Systems',type:'Tool',file:'_-Systems/ToolSystem/Tools.cs'},
+  {id:'ItemEquipBridge',label:'ItemEquipBridge',phase:'b',layer:'_-Systems',sys:'Tool',type:'bridge',file:'_-Systems/ToolSystem/ItemEquipBridge.cs'},
+  {id:'BaseHeldTool',label:'BaseHeldTool',phase:'b',layer:'_-Systems',sys:'Tool',type:'base tool',file:'_-Systems/ToolSystem/ToolBase.cs'},
+  {id:'ToolPickaxe',label:'ToolPickaxe',phase:'b',layer:'_-Systems',sys:'Tool',type:'Tool',file:'_-Systems/ToolSystem/Tools.cs'},
+  {id:'ToolHardHat',label:'ToolHardHat',phase:'b',layer:'_-Systems',sys:'Tool',type:'Tool',file:'_-Systems/ToolSystem/Tools.cs'},
+  {id:'ToolMagnet',label:'ToolMagnet',phase:'b',layer:'_-Systems',sys:'Tool',type:'Tool',file:'_-Systems/ToolSystem/Tools.cs'},
+  {id:'ToolHammer',label:'ToolHammer',phase:'b',layer:'_-Systems',sys:'Tool',type:'Tool',file:'_-Systems/ToolSystem/Tools.cs'},
+  {id:'ToolMiningHat',label:'ToolMiningHat',phase:'b',layer:'_-Systems',sys:'Tool',type:'Tool',file:'_-Systems/ToolSystem/Tools.cs'},
+  {id:'ToolWrench',label:'ToolSupportsWrench',phase:'b',layer:'_-Systems',sys:'Tool',type:'Tool',file:'_-Systems/ToolSystem/Tools.cs'},
+  {id:'ToolResScanner',label:'ToolResScanner',phase:'b',layer:'_-Systems',sys:'Tool',type:'Tool',file:'_-Systems/ToolSystem/Tools.cs'},
+  {id:'ToolBuilder',label:'ToolBuilder',phase:'b',layer:'_-Systems',sys:'Tool',type:'Tool',file:'_-Systems/ToolSystem/Tools.cs'},
   // Phase-C
   {id:'GE_C',label:'GameEvents(C)',phase:'c',layer:'0-Core',type:'partial'},
   {id:'OreLimitMgr',label:'OreLimitManager',phase:'c',layer:'1-Managers',type:'Singleton'},
@@ -4114,13 +4131,24 @@ const colX = {};
 PHASES.forEach((phase, i) => { colX[phase] = MARGIN.left + i * COL_W; });
 const totalW = MARGIN.left + PHASES.length * COL_W + MARGIN.right;
 
-// Assign node positions
+// Assign node positions — with extra gap between sys groups in _-Systems cells
+const SYS_GAP = 32; // extra vertical space between system envelopes
 nodes.forEach(n => {
   const key = n.phase + '|' + n.layer;
   const cellNodes = cells[key];
   const idx = cellNodes.indexOf(n);
   n.x = colX[n.phase] + 20;
-  n.y = rowY[n.layer] + 30 + idx * (NODE_H + NODE_PAD);
+  // count how many sys group transitions happened before this node
+  let sysGaps = 0;
+  if (n.sys) {
+    let prevSys = null;
+    for (let i = 0; i <= idx; i++) {
+      const cn = cellNodes[i];
+      if (cn.sys && cn.sys !== prevSys && prevSys !== null) sysGaps++;
+      prevSys = cn.sys || prevSys;
+    }
+  }
+  n.y = rowY[n.layer] + 30 + idx * (NODE_H + NODE_PAD) + sysGaps * SYS_GAP;
   n.cx = n.x + NODE_W / 2;
   n.cy = n.y + NODE_H / 2;
 });
@@ -4159,6 +4187,36 @@ LAYERS.forEach(layer => {
   rowG.append('text').attr('class','layer-row-header')
     .attr('x', MARGIN.left - 25).attr('y', y + 16)
     .text(LAYER_LABELS[layer]);
+});
+
+// System envelope borders — group nodes by sys property, draw colored rounded rect around each group
+const sysEnvG = g.append('g').attr('class','sys-envelopes');
+const sysPad = 10;
+const sysGroups = {};
+nodes.filter(n => n.sys).forEach(n => {
+  const key = n.phase + '|' + n.sys;
+  if (!sysGroups[key]) sysGroups[key] = { sys: n.sys, nodes: [] };
+  sysGroups[key].nodes.push(n);
+});
+Object.values(sysGroups).forEach(sg => {
+  const ns = sg.nodes;
+  const minX = Math.min(...ns.map(n => n.x)) - sysPad;
+  const minY = Math.min(...ns.map(n => n.y)) - sysPad;
+  const maxX = Math.max(...ns.map(n => n.x + NODE_W)) + sysPad;
+  const maxY = Math.max(...ns.map(n => n.y + NODE_H)) + sysPad;
+  const color = SYS_COLORS[sg.sys] || '#555';
+  // envelope rect
+  sysEnvG.append('rect')
+    .attr('x', minX).attr('y', minY).attr('width', maxX - minX).attr('height', maxY - minY)
+    .attr('rx', 6).attr('ry', 6)
+    .attr('fill', 'none').attr('stroke', color).attr('stroke-width', 1.2)
+    .attr('stroke-dasharray', '4,3').attr('opacity', 0.4);
+  // system label (top-left of envelope)
+  sysEnvG.append('text')
+    .attr('x', minX + 4).attr('y', minY - 3)
+    .attr('font-size', '7px').attr('font-family', 'JetBrains Mono').attr('font-weight', '600')
+    .attr('fill', color).attr('opacity', 0.6)
+    .text(sg.sys + 'System');
 });
 
 // Arrow markers
