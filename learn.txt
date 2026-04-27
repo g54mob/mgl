@@ -1510,26 +1510,42 @@ Scripts/phase-All/                      → "shared scripts that grow across pha
 
 Scripts/phase-X/
 │
-├── 0-Core/                     → "everything depends on me, I have zero game logic"
+│  ┌─── _ prefix sorts ABOVE numbered folders in Unity's Project panel ───┐
+│  │    Main code lives here. Each system is self-contained.              │
+│  └──────────────────────────────────────────────────────────────────────┘
+│
+├── _-Systems/                  → "WHERE THE MAIN CODE LIVES — each feature is a self-contained folder"
+│   ├── InventorySystem/        → InventoryData.cs + Field_InventorySlot.cs + InventorySystem.cs + InventoryTest.md
+│   ├── ToolSystem/             → ToolBase.cs + Tools.cs + ItemEquipBridge.cs + ToolTest.md
+│   ├── PlayerSystem/           → PlayerMovement.cs + PlayerCamera.cs + PlayerGrab.cs + ... + PlayerTest.md
+│   ├── HighlightSystem/        → HighlightSystem.cs + HighlightTest.md
+│   ├── ShopSystem/             → (Phase A — ShopData + Fields + ShopOrchestrator + ShopTest.md)
+│   └── InteractionSystem/      → (Phase A — interaction wheel)
+│
+│  ┌─── Numbered folders for scripts that DON'T belong to any system ─────┐
+│  │    Shared infra used BY all systems. Stays layer-based.              │
+│  └──────────────────────────────────────────────────────────────────────┘
+│
+├── 0-Core/                     → GameEvents (partial per phase), Singleton<T>
+│                                  GameEvents uses ONLY interfaces (IInventoryItem, never BaseHeldTool)
 │
 ├── 2-Data/
-│   └── Enums/                  → "one GlobalEnumsX.cs per phase — shared across systems"
+│   ├── Enums/                  → GlobalEnumsX.cs — shared enums (InteractionType, AnimParamType, TagType)
+│   ├── Interface/              → ISaveLoadableObject, IInteractable (cross-system contracts)
+│   └── SO_*.cs                 → ScriptableObjects that don't belong to a specific system
 │
-├── 4-Utils/                    → "I'm static — no MonoBehaviour, no state, just helpers and LOG"
-│   ├── UtilsPhaseX.cs          → "I'm static extensions + helpers grouped by region"
-│   └── PhaseXLOG.cs            → "I format data collections to JSON for logging"
+├── 3-MonoBehaviours/
+│   └── Physics/                → BasePhysicsObject, BaseSellableItem, PhysicsSoundPlayer
+│                                  (used by ToolSystem via inheritance — too foundational for _-Systems)
 │
-├── _-Systems/                  → "complex multi-file systems (3+ tightly coupled files)"
-│   ├── InventorySystem/        → InventoryData.cs + Field_InventorySlot.cs + InventorySystem.cs + InventoryTest.md
-│   ├── ShopSystem/             → ShopData.cs + Field_ShopItem.cs + ShopSystem.cs + ShopTest.md
-│   └── InteractionSystem/      → (future systems follow same pattern)
+├── 4-Utils/                    → UtilsPhaseX.cs (static helpers), PhaseXLOG.cs (snapshot formatters)
 │
-├── Player/                     → PlayerMovement, PlayerCamera, PlayerGrab (1-2 files per domain)
-├── Tool/                       → BaseHeldTool, ToolPickaxe, ToolMagnet, ToolHammer, etc.
-├── Physics/                    → BasePhysicsObject, BaseSellableItem
-│
-└── 5-Tests/                    → "vertical slice .cs tests + Manual/*.md for non-system tests"
+└── 5-Tests/                    → standalone test scripts + Manual/*.md that don't belong to a system
 ```
+
+> **Why `_` prefix?** Unity sorts folders alphabetically in the Project panel. `_-Systems/` appears ABOVE
+> `0-Core/` — making it the first thing you see when you open the Scripts folder. The main code is front
+> and center, shared infra is below.
 
 ### Hybrid Structure Rules
 
@@ -1579,12 +1595,19 @@ The old structure (`1-Managers/`, `2-Data/`, `3-MonoBehaviours/`) grouped by **f
 ### Where Does It Go?
 
 ```
-Is it part of a multi-file feature?    → _-Systems/FeatureName/ (DataService + Fields + System + Test.md)
-Is it a shared foundation?             → 0-Core/ (GameEvents, Singleton)
-Is it a shared enum?                   → 2-Data/Enums/GlobalEnumsX.cs
-Is it a static helper or LOG formatter?→ 4-Utils/
-Is it a standalone test?               → 5-Tests/
-Is it physics infrastructure?          → 3-MonoBehaviours/Physics/
+Does it belong to a feature system?         → _-Systems/FeatureName/ (main code lives here)
+  - Has 3+ related files?                   → YES → _-Systems/
+  - Is it a DataService + Fields + UI?      → YES → _-Systems/
+  - Is it a bridge between systems?         → YES → _-Systems/ of the game-specific side
+
+Does it NOT belong to any specific system?  → numbered folders (shared infra):
+  - GameEvents, Singleton                   → 0-Core/
+  - Shared enums (InteractionType, TagType) → 2-Data/Enums/
+  - Cross-system interfaces (IInteractable) → 2-Data/Interface/
+  - SO_ not owned by a system               → 2-Data/
+  - Physics base classes (used via inherit)  → 3-MonoBehaviours/Physics/
+  - Static helpers, LOG formatters           → 4-Utils/
+  - Standalone tests not inside a system     → 5-Tests/
 ```
 
 ### Manager vs MonoBehaviour — The `Singleton<T>` Rule
@@ -15826,6 +15849,16 @@ public class PlayerGrab : MonoBehaviour
 	float grabOriginalDrag;
 	float grabOriginalAngularDrag;
 	bool isAnyMenuOpen;
+
+	/// <summary> ignore/restore collisions between all colliders on two GOs (inlined — no external util dependency) </summary>
+	void IgnoreAllCollisions(GameObject a, GameObject b, bool ignore)
+	{
+		Collider[] colsA = a.GetComponentsInChildren<Collider>();
+		Collider[] colsB = b.GetComponentsInChildren<Collider>();
+		foreach (var ca in colsA)
+			foreach (var cb in colsB)
+				Physics.IgnoreCollision(ca, cb, ignore);
+	}
 	#endregion
 
 	#region public API
@@ -15848,7 +15881,7 @@ public class PlayerGrab : MonoBehaviour
 				Rigidbody rb = heldObject.GetComponent<Rigidbody>();
 				rb.linearDamping = grabOriginalDrag;
 				rb.angularDamping = grabOriginalAngularDrag;
-				UtilsPhaseB.IgnoreAllCollisions(heldObject, gameObject, false);
+				IgnoreAllCollisions(heldObject, gameObject, false);
 				StartCoroutine(DisableInterpolationLater(rb));
 			}
 		}
@@ -15910,7 +15943,7 @@ public class PlayerGrab : MonoBehaviour
 		_dragger.GetComponent<Rigidbody>().isKinematic = true;
 
 		rb.isKinematic = false;
-		UtilsPhaseB.IgnoreAllCollisions(heldObject, gameObject, true);
+		IgnoreAllCollisions(heldObject, gameObject, true);
 		rb.interpolation = RigidbodyInterpolation.Interpolate;
 		grabJoint.breakForce = 120f;
 		grabJoint.breakTorque = 20f;
@@ -15945,7 +15978,7 @@ public class PlayerGrab : MonoBehaviour
 				Rigidbody rb = heldObject.GetComponent<Rigidbody>();
 				rb.linearDamping = grabOriginalDrag;
 				rb.angularDamping = grabOriginalAngularDrag;
-				UtilsPhaseB.IgnoreAllCollisions(heldObject, gameObject, false);
+				IgnoreAllCollisions(heldObject, gameObject, false);
 				StartCoroutine(DisableInterpolationLater(rb));
 			}
 		}
