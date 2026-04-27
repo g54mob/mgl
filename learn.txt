@@ -14742,13 +14742,18 @@ public class InventoryOrchestrator : MonoBehaviour
 		var item = dataService.GetActiveItem();
 		if (item == null) return;
 		// → stacked: drop 1, keep rest in slot
+		// Note: with real tools (main source), stacking only applies to ToolBuilder which instantiates
+		// a new BuildingCrate GO on drop. MockTool has only 1 GO so we can't show a physical drop
+		// for qty > 1. The count decrements visually in the slot.
 		if (item.GetQty() > 1)
 		{
 			item.AddQty(-1);
+			// → spawn a visual "dropped" indicator if the item supports it (real tools instantiate a crate)
+			Debug.Log($"[Inventory] Dropped 1 from stack, remaining: {item.GetQty()}");
 			RefreshAllSlots();
 			return;
 		}
-		// → last one: drop the actual item
+		// → last one: drop the actual GO into the world
 		item.DropItem();
 		dataService.Remove(item);
 		previousActiveItem = null;
@@ -15151,20 +15156,22 @@ public class MockTool : MonoBehaviour, IInventoryItem
     public void SetOwnerContext(Camera cam, Transform vmc, Transform mag) { ownerCam = cam; }
 
     /// <summary> Equip: fire RaiseItemEquipped (so ItemEquipBridge sends camera via SetOwnerContext),
-    /// then shrink cube + float in front of camera via LateUpdate. </summary>
+    /// then shrink cube + float in front of camera via LateUpdate.
+    /// Disables collider so equipped item doesn't physically interact with world objects. </summary>
     public void OnEquipped()
     {
         isEquipped = true;
-        // → CRITICAL: without this, ItemEquipBridge never sends camera → cube stays in place
         GameEvents.RaiseItemEquipped(this);
         if (rend != null) rend.enabled = true;
         transform.localScale = originalScale * _equippedScaleMultiplier;
         var rb = GetComponent<Rigidbody>();
         if (rb != null) rb.isKinematic = true;
+        var col = GetComponent<Collider>();
+        if (col != null) col.enabled = false; // no physics interaction while equipped
         Debug.Log($"[MockTool] Equipped: {_name}");
     }
 
-    /// <summary> Drop: restore scale, show renderer, apply physics velocity. </summary>
+    /// <summary> Drop: restore scale, re-enable collider + physics, apply velocity. </summary>
     public void DropItem()
     {
         isEquipped = false;
@@ -15172,6 +15179,8 @@ public class MockTool : MonoBehaviour, IInventoryItem
         if (rend != null) rend.enabled = true;
         transform.localScale = originalScale;
         transform.parent = null;
+        var col = GetComponent<Collider>();
+        if (col != null) col.enabled = true; // re-enable physics interaction
         var rb = GetComponent<Rigidbody>();
         if (rb != null)
         {
