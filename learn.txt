@@ -14469,8 +14469,8 @@ public class InventoryDataService
 	#region private API
 	List<InventorySlot> SLOT = new List<InventorySlot>();
 	int activeSlotIndex = 0;
-	public static int HOTBAR_SIZE = 10;
-	public static int TOTAL_SIZE = 40;
+	public static int HOTBAR_SIZE = 5;
+	public static int TOTAL_SIZE = 20;
 	#endregion
 
 	#region public API
@@ -14991,13 +14991,25 @@ using UnityEngine;
 /// Lightweight IInventoryItem for testing inventory WITHOUT any tool scripts.
 /// Place on a cube in the scene → click to fire RaiseToolPickupRequested → inventory picks it up.
 /// Zero dependency on BaseHeldTool, ToolSystem, or PlayerSystem.
+///
+/// HOW IT WORKS with the Orchestrator:
+///   Pickup: Orchestrator calls SetActive(false) → cube disappears from world
+///   Equip:  Orchestrator calls SetActive(true) + OnEquipped()
+///           → OnEquipped hides renderer (no ViewModel to show — just "in hand" logically)
+///   Switch: Orchestrator calls SetActive(false) on previous, SetActive(true) + OnEquipped on new
+///   Drop:   DropItem() → SetActive(true), show renderer, apply velocity → cube back in world
 /// </summary>
 public class MockTool : MonoBehaviour, IInventoryItem
 {
     [SerializeField] string _name = "MockPickaxe";
     [SerializeField] Sprite _icon;
     [SerializeField] int _maxStack = 1;
+    [SerializeField] Color _color = Color.white;
     int qty = 1;
+    Renderer rend;
+
+    void Awake() => rend = GetComponent<Renderer>();
+    void Start() { if (rend != null) rend.material.color = _color; }
 
     // ── IInventoryItem ──
     public string GetName() => _name;
@@ -15009,30 +15021,70 @@ public class MockTool : MonoBehaviour, IInventoryItem
     public bool GetShouldEquipWhenPickedUp() => true;
     public Sprite GetIcon() => _icon;
     public GameObject GetGameObject() => gameObject;
-    public void OnEquipped() { /* no-op for test */ }
     public string GetEquipButtonLabel() => "Equip";
-    public void HandleActiveInput() { /* no-op for test */ }
+    public void HandleActiveInput() { /* no-op — mock has no actions */ }
     public void SetOwnerContext(Camera cam, Transform vmc, Transform mag) { /* no-op */ }
 
+    /// <summary> Called when inventory equips this item. Orchestrator does SetActive(true) first,
+    /// so the GO is active — but we hide the renderer because MockTool has no ViewModel.
+    /// The cube should NOT be visible in the world when "equipped". </summary>
+    public void OnEquipped()
+    {
+        if (rend != null) rend.enabled = false;
+        var rb = GetComponent<Rigidbody>();
+        if (rb != null) rb.isKinematic = true;
+        Debug.Log($"[MockTool] Equipped: {_name}");
+    }
+
+    /// <summary> Called when inventory drops this item. Show renderer + apply physics. </summary>
     public void DropItem()
     {
         gameObject.SetActive(true);
+        if (rend != null) rend.enabled = true;
         transform.parent = null;
         var rb = GetComponent<Rigidbody>();
         if (rb != null)
         {
             rb.isKinematic = false;
-            rb.linearVelocity = transform.forward * 3f + Vector3.up * 2f;
+            rb.linearVelocity = Vector3.up * 3f + Vector3.forward * 2f;
         }
+        Debug.Log($"[MockTool] Dropped: {_name}");
+    }
+
+    /// <summary> Also hide renderer when GO deactivates (inventory stores it). </summary>
+    void OnDisable()
+    {
+        if (rend != null) rend.enabled = true; // restore for when it comes back to world
     }
 
     // ── Click to pickup (simple — no interaction wheel needed) ──
     void OnMouseDown()
     {
+        if (!gameObject.activeInHierarchy) return; // already picked up
         GameEvents.RaiseToolPickupRequested(this);
+        Debug.Log($"[MockTool] Pickup requested: {_name}");
     }
 }
 ```
+
+> **Why `OnEquipped` hides the renderer:** The Orchestrator calls `SetActive(true)` then `OnEquipped()`.
+> Real tools show their ViewModel here. MockTool has no ViewModel — so it hides the renderer instead.
+> The cube is logically "in hand" but invisible. Drop makes it visible again.
+
+### Step 10 — Tab Key for Extended Inventory
+
+> **⚠️ The extended panel opens via Tab key.** This requires `UIManager` to route Tab → `RaiseOpenInventoryView()`.
+> If you're testing WITHOUT the full UIManager, add this to any test script:
+
+```csharp
+void Update()
+{
+    if (Input.GetKeyDown(KeyCode.Tab))
+        GameEvents.RaiseOpenInventoryView();
+}
+```
+
+> Or check that your `UIManager` has Tab routing enabled (the comment block in UIManager.Update may be commented out).
 
 **Setup:**
 
