@@ -8,15 +8,20 @@
 ## The Prompt
 
 ```
-Regenerate ALL THREE visualization files in web-tools/:
+Regenerate dependency graph data in ALL FOUR visualization files in web-tools/:
 
 FILES TO UPDATE:
-1. minemgl-grid.html — hierarchical grid (X=Phase columns, Y=Layer rows, nodes as rects, bezier edges, D3.js)
-2. minemgl-heatmap.html — flat Phase×Layer coupling matrix (HTML table, cell drill-down, summary cards, coupling verdict)
-3. minemgl-heatmap-3d.html — 3D extruded bar heatmap (Three.js, orbit controls, hover glow, click inspect, shadows+fog+rim lighting, ACES tone mapping)
+1. minemgl-grid.html        — SVG hierarchical grid (D3.js, desktop)
+2. minemgl-grid-canvas.html — Canvas 2D hierarchical grid (mobile-friendly, same data)
+3. minemgl-heatmap.html     — flat Phase×Layer coupling matrix
+4. minemgl-heatmap-3d.html  — Three.js 3D extruded bar heatmap
 
-WHAT TO DO:
-1. Read every *.cs file from these sources (handTyped is the truth for phases All, A, A-1):
+⚠️ CRITICAL — DO NOT TRUST EXISTING DATA:
+Completely DISCARD all existing node/edge arrays in the JS. 
+Read every *.cs file from scratch. Build nodes and edges ONLY from what you verify in the actual code.
+Never copy old edges forward — they may be stale from refactors.
+
+SOURCE FOLDERS (read every *.cs including subfolders):
    - Phase-All:  learn/handTyped(latest)/Scripts/phase-@all/
    - Phase-A:    learn/handTyped(latest)/Scripts/phase-a/
    - Phase-A1:   learn/handTyped(latest)/Scripts/phase-a-1/
@@ -24,30 +29,52 @@ WHAT TO DO:
    - Phase-C:    learn/phase-c(New)/Scripts/
    - Phase-D:    learn/phase-d(New)/Scripts/
    - Future:     any NEW learn/phase-X folders or handTyped(latest)/Scripts/phase-X/ as specified
-2. For each script, extract:
-   - Phase (which folder it lives in)
-   - Layer (0-Core, 1-Managers, 2-Data, 3-MonoBehaviours, 4-Utils, 5-Tests)
-   - All dependency edges by scanning for: class inheritance (:), interface implementation, Singleton<T>.Ins reads, GameEvents.OnX += subscriptions, GameEvents.RaiseX() calls, Get...() method calls on other scripts, Set...() method calls, new DataService() creates, UtilsPhaseX.Method() calls
-3. Classify each edge as one of: inherit | interface | get | set | event-sub | event-raise | singleton | creates | uses-util
-4. Rebuild the hardcoded JS node/edge arrays in ALL THREE files with fresh data from the scan.
 
-RULES:
-- Keep the existing dark theme (--bg:#101014 blue-black, JetBrains Mono, all bright edge colors — see color palette below)
-- Keep all existing interactivity per file:
-  - grid: search, edge type toggles, click-to-inspect panel, zoom/pan
-  - heatmap: cross-phase-only toggle, cell click drill-down, summary cards, coupling verdict
-  - heatmap-3d: Three.js OrbitControls, hover glow+scale, click inspect panel, tooltip, reset camera, cross-phase-only toggle, stats bar, legend, shadows, fog, ACES filmic tone mapping
-- If a GameEvents partial was moved from phase-a to phase-All, update the node's phase accordingly
-- Add any new phases as new columns (grid), new rows/columns (heatmap), and new axis labels + bars (3D) — assign color from palette
-- The node data and edge data are hardcoded JS arrays in each file — replace them entirely with fresh data from the scan
-- Every edge must correspond to a real code reference you verified by reading the file
-- THREE.js is loaded via importmap from CDN (three@0.164.1), D3.js from CDN (d3.v7)
+FOR EACH *.cs FILE:
+1. Open and read the entire file content (not just the class declaration)
+2. One file may contain MULTIPLE classes (e.g. Tools.cs has 8 tool classes)
+3. Extract for each class:
+   - id: unique short identifier
+   - label: class name
+   - phase: which phase folder
+   - layer: folder-based (0-Core, 1-Managers, 2-Data, 3-MonoBehaviours, _-Systems, 4-Utils, 5-Tests)
+   - type: class kind (interface, entity, service, MonoBehaviour, Singleton, Tool, etc.)
+   - file: relative path from Scripts/ (e.g. '_-Systems/ToolSystem/Tools.cs')
+   - sys: (only for _-Systems nodes) which system folder (HL, Inv, Player, Tool, etc.)
+4. Scan the actual code body for dependency edges:
+   - class Foo : Bar                          → inherit
+   - class Foo : IBar                         → interface
+   - Singleton<X>.Ins.Method()                → singleton
+   - GameEvents.OnX += handler                → event-sub (target = which GameEvents partial)
+   - GameEvents.RaiseX()                      → event-raise (target = which GameEvents partial)
+   - new DataService()                        → creates
+   - OtherScript.Method() or .Property        → get
+   - OtherScript.SetX() or .field = value     → set
+   - UtilsPhaseX.Method()                     → uses-util
+5. Only count edges for code that EXECUTES (not comments, not // Phase H stubs)
+
+NODE LAYOUT RULES:
+- Layers: ['0-Core','1-Managers','2-Data','3-MonoBehaviours','_-Systems','4-Utils','5-Tests']
+- _-Systems is ONE row. Nodes within it have a 'sys' property for envelope grouping.
+- SYS_COLORS = {HL:'#7af0ff', Inv:'#45eaad', Player:'#6cb4ff', Tool:'#ffd04a'}
+- SYS_GAP = 32px vertical gap between system envelopes
+- Colored dashed envelope borders around each sys group with label above
+- Row height calculation must include sys gaps so Utils/Tests  or further heirarchy don't overlap
+
+GRID-SPECIFIC RULES (both SVG and Canvas):
+- Node click → info panel shows: label, phase, layer, type, file path (📄), depends on, used by
+- Edge toggles: None/All buttons + individual type toggles
+- Canvas version: mouse events for desktop, touch events for mobile (separate handlers, no pointer conflicts), pinch zoom + 2-finger pan
+
+REBUILD the hardcoded JS node[] and link[] arrays ENTIRELY from your scan.
+Do NOT carry over any edges from the previous version.
+Every edge must correspond to a real code reference you verified by reading the file.
 
 WHAT CHANGED SINCE LAST GENERATION:
 [DESCRIBE YOUR CHANGES HERE — e.g.:]
-- Added phase-e(New) with 15 scripts (machines: CastingFurnace, Sieve, ClusterBreaker, etc.)
-- Moved OnMenuStateChanged from GameEvents(A) to GameEvents(All)
-- Renamed ToolBuilder → ToolBuildingPlacer
+- Restructured phase-b into _-Systems/ folders (HighlightSystem, InventorySystem, PlayerSystem, ToolSystem)
+- Added ItemEquipBridge.cs bridging PlayerSystem→ToolSystem
+- IInventoryItem now has HandleActiveInput(), OnEquipped(), SetOwnerContext()
 - etc.
 ```
 
@@ -56,10 +83,11 @@ WHAT CHANGED SINCE LAST GENERATION:
 ## When to use this prompt
 
 - **New phase added** (phase-e, phase-f, etc.)
-- **Scripts moved between phases** (e.g. GameEvents events promoted to phase-All)
-- **Scripts renamed or deleted**
-- **New dependency patterns** (e.g. a phase-e script now reads from phase-b's InventoryDataService)
-- **Architecture refactor** (e.g. DataService split into two)
+- **Scripts moved between phases or folders** (e.g. Player scripts moved to _-Systems/PlayerSystem/)
+- **Scripts renamed, deleted, or merged** (e.g. 8 tool classes merged into Tools.cs)
+- **New dependency patterns** (e.g. ItemEquipBridge bridges two systems)
+- **Architecture refactor** (e.g. IInventoryItem replaces BaseHeldTool as inventory contract)
+- **Interface changes** (e.g. new methods on IInventoryItem)
 
 ## Color palette for new phases (remeber background color in mind and make sure all assigned colors are visible too)
 
@@ -77,6 +105,11 @@ WHAT CHANGED SINCE LAST GENERATION:
 | H     | `#67e8f9` (teal) — suggested |
 | I     | `#fca5a5` (salmon) — suggested |
 | J     | `#d4d4d8` (silver) — suggested |
+
+# ⚠️ CRITICAL — DO NOT TRUST EXISTING DATA:
+Completely DISCARD all existing node/edge arrays in the JS. 
+
+now deep analyse the phase-b(New) and update the ependency-grid.
 
 <!-- ==== FILE: web-tools/markdown-viewer.html ==== -->
 
@@ -3254,7 +3287,7 @@ const links=[
   {s:'ToolBuilder',t:'BaseHeldTool',type:'inherit'},{s:'ToolHammer',t:'BaseHeldTool',type:'inherit'},
   {s:'ToolPickaxe',t:'BaseHeldTool',type:'inherit'},{s:'ToolMagnet',t:'BaseHeldTool',type:'inherit'},
   {s:'ToolMiningHat',t:'BaseHeldTool',type:'inherit'},{s:'ToolResScanner',t:'BaseHeldTool',type:'inherit'},
-  {s:'ToolWrench',t:'BaseHeldTool',type:'inherit'},{s:'ToolHardHat',t:'BaseHeldTool',type:'inherit'},
+  {s:'ToolWrench',t:'BaseHeldTool',type:'inherit'},{s:'ToolHardHat',t:'ToolPickaxe',type:'inherit'},
   {s:'ConvShaker',t:'ConveyorBelt',type:'inherit'},{s:'ConvShakerH',t:'ConveyorBelt',type:'inherit'},
   {s:'ModBuildSupp',t:'BaseModSupp',type:'inherit'},
   {s:'InteractableComputer',t:'IInteractable',type:'interface'},{s:'InteractableComputer',t:'IHighlightable',type:'interface'},
@@ -3333,7 +3366,7 @@ const links=[
   {s:'BuildingObj',t:'GlobalEnumsB',type:'get'},{s:'BuildingCrate',t:'SO_BuildInvDef',type:'get'},
   {s:'BuildingCrate',t:'GlobalEnumsB',type:'get'},
 {s:'DmgOrePiece',t:'UtilsB',type:'uses-util'},
-  {s:'PlayerGrab',t:'UtilsB',type:'uses-util'},{s:'BuildingObj',t:'UtilsB',type:'uses-util'},
+  {s:'ToolResScanner',t:'IInventoryItem',type:'get'},{s:'ISaveLoadObj',t:'GlobalEnumsB',type:'get'},{s:'BuildingObj',t:'UtilsB',type:'uses-util'},
   {s:'OrePiece',t:'UtilsAll',type:'uses-util'},
 ];
 
@@ -3966,7 +3999,7 @@ const links = [
   {s:'ToolBuilder',t:'BaseHeldTool',type:'inherit'},{s:'ToolHammer',t:'BaseHeldTool',type:'inherit'},
   {s:'ToolPickaxe',t:'BaseHeldTool',type:'inherit'},{s:'ToolMagnet',t:'BaseHeldTool',type:'inherit'},
   {s:'ToolMiningHat',t:'BaseHeldTool',type:'inherit'},{s:'ToolResScanner',t:'BaseHeldTool',type:'inherit'},
-  {s:'ToolWrench',t:'BaseHeldTool',type:'inherit'},{s:'ToolHardHat',t:'BaseHeldTool',type:'inherit'},
+  {s:'ToolWrench',t:'BaseHeldTool',type:'inherit'},{s:'ToolHardHat',t:'ToolPickaxe',type:'inherit'},
   {s:'ConvShaker',t:'ConveyorBelt',type:'inherit'},{s:'ConvShakerH',t:'ConveyorBelt',type:'inherit'},
   {s:'ModBuildSupp',t:'BaseModSupp',type:'inherit'},
   // INTERFACE
@@ -4049,6 +4082,8 @@ const links = [
   {s:'ObjHLMgr',t:'IHighlightable',type:'get',lbl:'GetHighlightProfile()'},
   {s:'ObjHLMgr',t:'GameEvents_All',type:'event-sub',lbl:'OnMenuStateChanged'},
   {s:'ToolPickaxe',t:'PhysSoundPlayer',type:'get',lbl:'PlayImpactSound()'},
+  {s:'ToolResScanner',t:'IInventoryItem',type:'get',lbl:'GetName()'},
+  {s:'ISaveLoadObj',t:'GlobalEnumsB',type:'get',lbl:'SavableObjectID'},
   {s:'ToolMagnet',t:'UtilsB',type:'uses-util',lbl:'IgnoreAllCollisions'},
   {s:'ToolMagnet',t:'BasePhysObj',type:'get',lbl:'STANDARD_DAMPING'},
   
@@ -4090,7 +4125,7 @@ const links = [
   // SET / WRITES
   
   {s:'DmgOrePiece',t:'UtilsB',type:'uses-util',lbl:'SimpleExplosion'},
-  {s:'PlayerGrab',t:'UtilsB',type:'uses-util',lbl:'IgnoreAllCollisions'},
+  
   {s:'BuildingObj',t:'UtilsB',type:'uses-util',lbl:'SetLayerRecursively'},
   {s:'OrePiece',t:'UtilsAll',type:'uses-util',lbl:'SetTag()'},
 ];
@@ -5337,9 +5372,11 @@ const NM={
   StartingElevator:{p:'a1',l:'3-MonoBehaviours',n:'StartingElevator'},ElevatorTest:{p:'a1',l:'5-Tests',n:'ElevatorTest'},
   GE_B:{p:'b',l:'0-Core',n:'GameEvents(B)'},InventoryUI:{p:'b',l:'1-Managers',n:'InventoryUI'},
   InvDataService:{p:'b',l:'2-Data',n:'InventoryDataService'},GlobalEnumsB:{p:'b',l:'2-Data',n:'GlobalEnumsB'},
-  F_InvSlot:{p:'b',l:'2-Data',n:'Field_InvSlot'},IIconItem:{p:'b',l:'2-Data',n:'IIconItem'},
+  IInventoryItem:{p:'b',l:'2-Data',n:'IInventoryItem'},InvSlot:{p:'b',l:'2-Data',n:'InventorySlot'},
+  F_InvSlot:{p:'b',l:'2-Data',n:'Field_InvSlot'},F_SelItemInfo:{p:'b',l:'2-Data',n:'Field_SelItemInfo'},
   ISaveLoadObj:{p:'b',l:'2-Data',n:'ISaveLoadableObj'},SO_FootstepDef:{p:'b',l:'2-Data',n:'SO_FootstepDef'},
-  FresnelHL:{p:'b',l:'3-MonoBehaviours',n:'FresnelHighlighter'},IHighlightable:{p:'b',l:'2-Data',n:'IHighlightable'},InvOrch:{p:'b',l:'3-MonoBehaviours',n:'InventoryOrchestrator'},
+  IHighlightable:{p:'b',l:'2-Data',n:'IHighlightable'},ObjHLMgr:{p:'b',l:'1-Managers',n:'ObjHighlighterMgr'},
+  InvOrch:{p:'b',l:'3-MonoBehaviours',n:'InventoryOrchestrator'},ItemEquipBridge:{p:'b',l:'3-MonoBehaviours',n:'ItemEquipBridge'},
   BasePhysObj:{p:'b',l:'3-MonoBehaviours',n:'BasePhysicsObject'},BaseSellable:{p:'b',l:'3-MonoBehaviours',n:'BaseSellableItem'},
   PhysicsGib:{p:'b',l:'3-MonoBehaviours',n:'PhysicsGib'},PhysSoundPlayer:{p:'b',l:'3-MonoBehaviours',n:'PhysicsSoundPlayer'},
   PlayerCam:{p:'b',l:'3-MonoBehaviours',n:'PlayerCamera'},PlayerFoot:{p:'b',l:'3-MonoBehaviours',n:'PlayerFootsteps'},
@@ -5379,7 +5416,7 @@ const EDGES=[
   {s:'PlayerMov',t:'Singleton',type:'inherit'},{s:'OreLimitMgr',t:'Singleton',type:'inherit'},
   {s:'OreMgr',t:'Singleton',type:'inherit'},{s:'OrePoolMgr',t:'Singleton',type:'inherit'},
   {s:'ParticleMgr',t:'Singleton',type:'inherit'},{s:'BuildingMgr',t:'Singleton',type:'inherit'},
-  {s:'ConveyorMgr',t:'Singleton',type:'inherit'},
+  {s:'ConveyorMgr',t:'Singleton',type:'inherit'},{s:'ObjHLMgr',t:'Singleton',type:'inherit'},
   {s:'BaseSellable',t:'BasePhysObj',type:'inherit'},{s:'PhysicsGib',t:'BaseSellable',type:'inherit'},
   {s:'BaseHeldTool',t:'BaseSellable',type:'inherit'},{s:'OrePiece',t:'BaseSellable',type:'inherit'},
   {s:'DmgOrePiece',t:'OrePiece',type:'inherit'},{s:'BuildingCrate',t:'BaseSellable',type:'inherit'},
@@ -5391,7 +5428,7 @@ const EDGES=[
   {s:'ModBuildSupp',t:'BaseModSupp',type:'inherit'},
   {s:'InteractableComputer',t:'IInteractable',type:'interface'},{s:'InteractableComputer',t:'IHighlightable',type:'interface'},
   {s:'BaseHeldTool',t:'IInteractable',type:'interface'},{s:'BaseHeldTool',t:'IHighlightable',type:'interface'},
-  {s:'BaseHeldTool',t:'IIconItem',type:'interface'},{s:'BaseHeldTool',t:'ISaveLoadObj',type:'interface'},
+  {s:'BaseHeldTool',t:'IInventoryItem',type:'interface'},{s:'BaseHeldTool',t:'ISaveLoadObj',type:'interface'},
   {s:'BuildingObj',t:'IInteractable',type:'interface'},{s:'BuildingObj',t:'IHighlightable',type:'interface'},
   {s:'BuildingCrate',t:'IInteractable',type:'interface'},
   {s:'OreNode',t:'IDamageable',type:'interface'},{s:'DmgOrePiece',t:'IDamageable',type:'interface'},
@@ -5437,19 +5474,22 @@ const EDGES=[
   {s:'BuildingObj',t:'GE_D',type:'event-raise',lbl:'RaiseBuildingRemoved'},{s:'BuildingCrate',t:'GE_D',type:'event-raise',lbl:'RaiseBuildingTakeReq'},
   {s:'ShopUIOrch',t:'ShopDataService',type:'get',lbl:'GetWShopItems/Cart'},{s:'ShopUI',t:'ShopDataService',type:'creates',lbl:'new()'},
   {s:'ShopUI',t:'ShopUIOrch',type:'get',lbl:'Init()'},{s:'InventoryUI',t:'InvDataService',type:'creates',lbl:'new()'},
-  {s:'InventoryUI',t:'InvOrch',type:'get',lbl:'Init()'},{s:'InvOrch',t:'InvDataService',type:'get',lbl:'GetSlots/ActiveTool'},
-  {s:'InvOrch',t:'F_InvSlot',type:'get',lbl:'SetData/SetEmpty'},{s:'InvOrch',t:'UIEventRelay',type:'creates',lbl:'AddComponent'},
-  {s:'InvOrch',t:'BaseHeldTool',type:'get',lbl:'Name/PrimaryFire'},{s:'InvOrch',t:'IIconItem',type:'get',lbl:'GetIcon()'},
+  {s:'InventoryUI',t:'InvOrch',type:'get',lbl:'Init()'},{s:'InvOrch',t:'InvDataService',type:'get',lbl:'GetAllSlots/ActiveItem'},
+  {s:'InvOrch',t:'IInventoryItem',type:'get',lbl:'HandleActiveInput/OnEquipped'},
+  {s:'InvOrch',t:'F_InvSlot',type:'set',lbl:'SetData/SetEmpty'},{s:'InvOrch',t:'F_SelItemInfo',type:'set',lbl:'SetData()'},
+  {s:'InvOrch',t:'UIEventRelay',type:'creates',lbl:'AddComponent'},
   {s:'InteractionWheelUI',t:'IInteractable',type:'get',lbl:'GetOptions()'},{s:'InteractionWheelUI',t:'F_InteractionOpt',type:'set',lbl:'SetData()'},
   {s:'ShopUIOrch',t:'F_ShopItem',type:'set',lbl:'SetData'},{s:'ShopUIOrch',t:'F_ShopCartItem',type:'set',lbl:'SetData'},
   {s:'ShopUIOrch',t:'F_ShopCategory',type:'set',lbl:'SetNameText'},{s:'ShopUIOrch',t:'WShopItem',type:'get',lbl:'itemDef'},
   {s:'PlayerCam',t:'PlayerMov',type:'get',lbl:'Speed/IsGrounded'},{s:'PlayerFoot',t:'PlayerMov',type:'get',lbl:'MoveInput'},
   {s:'PlayerGrab',t:'PlayerMov',type:'get',lbl:'_movement'},{s:'RbDragger',t:'PlayerGrab',type:'get',lbl:'ForceRelease()'},
-  {s:'PlayerMov',t:'PlayerSpawn',type:'get',lbl:'GetRandomSpawnPoint()'},{s:'FresnelHL',t:'IHighlightable',type:'get',lbl:'GetHighlightProfile()'},
-  {s:'FresnelHL',t:'GameEvents_All',type:'event-sub',lbl:'OnMenuStateChanged'},
-  {s:'FresnelHL',t:'GE_B',type:'event-sub',lbl:'OnToolEquipped/ItemDropped'},
+  {s:'PlayerMov',t:'PlayerSpawn',type:'get',lbl:'GetRandomSpawnPoint()'},
+  {s:'ObjHLMgr',t:'IHighlightable',type:'get',lbl:'GetHighlightProfile()'},
+  {s:'ObjHLMgr',t:'GameEvents_All',type:'event-sub',lbl:'OnMenuStateChanged'},
+  {s:'ItemEquipBridge',t:'GE_B',type:'event-sub',lbl:'OnItemEquipped'},
+  {s:'ItemEquipBridge',t:'IInventoryItem',type:'get',lbl:'SetOwnerContext()'},
   {s:'ToolPickaxe',t:'PhysSoundPlayer',type:'get',lbl:'PlayImpactSound()'},{s:'ToolMagnet',t:'UtilsB',type:'uses-util',lbl:'IgnoreAllCollisions'},
-  {s:'ToolMagnet',t:'BasePhysObj',type:'get',lbl:'STANDARD_DAMPING'},{s:'BaseHeldTool',t:'PlayerMov',type:'get',lbl:'ViewModelContainer'},
+  {s:'ToolMagnet',t:'BasePhysObj',type:'get',lbl:'STANDARD_DAMPING'},
   {s:'BaseHeldTool',t:'GlobalEnumsB',type:'get',lbl:'InteractionType'},{s:'BaseHeldTool',t:'SO_InteractionOpt',type:'get',lbl:'interactionType'},
   {s:'InteractableComputer',t:'GlobalEnumsB',type:'get',lbl:'InteractionType field'},
   {s:'SO_InteractionOpt',t:'GlobalEnumsB',type:'get',lbl:'InteractionType field'},
@@ -5475,7 +5515,7 @@ const EDGES=[
   {s:'BuildingObj',t:'SO_BuildInvDef',type:'get',lbl:'definition'},{s:'BuildingObj',t:'BaseModSupp',type:'get',lbl:'RespawnSupports'},
   {s:'BuildingObj',t:'GlobalEnumsB',type:'get',lbl:'InteractionType'},{s:'BuildingCrate',t:'SO_BuildInvDef',type:'get',lbl:'definition'},
   {s:'BuildingCrate',t:'GlobalEnumsB',type:'get',lbl:'InteractionType'},
-  {s:'PlayerGrab',t:'BaseHeldTool',type:'set',lbl:'SetOwner()'},{s:'DmgOrePiece',t:'UtilsB',type:'uses-util',lbl:'SimpleExplosion'},
+  {s:'DmgOrePiece',t:'UtilsB',type:'uses-util',lbl:'SimpleExplosion'},
   {s:'PlayerGrab',t:'UtilsB',type:'uses-util',lbl:'IgnoreAllCollisions'},{s:'BuildingObj',t:'UtilsB',type:'uses-util',lbl:'SetLayerRecursively'},
   {s:'OrePiece',t:'UtilsAll',type:'uses-util',lbl:'SetTag()'},
 ];
@@ -5688,7 +5728,7 @@ function renderVerdict(matrix) {
   // Good patterns
   verdictHTML += `<div class="v-row"><span class="v-icon v-good">✓</span><div class="v-text">All cross-phase communication is routed through <b>GameEvents</b> (event bus pattern). No direct Mono→Mono calls across phases.</div></div>`;
   verdictHTML += `<div class="v-row"><span class="v-icon v-good">✓</span><div class="v-text"><b>Inheritance</b> is correctly downward: tools→BaseHeldTool→BaseSellable→BasePhysObj. No circular inheritance.</div></div>`;
-  verdictHTML += `<div class="v-row"><span class="v-icon v-good">✓</span><div class="v-text"><b>Interfaces</b> (IInteractable, IDamageable, IIconItem) are in Data layers — implemented by Mono layers. Correct dependency direction.</div></div>`;
+  verdictHTML += `<div class="v-row"><span class="v-icon v-good">✓</span><div class="v-text"><b>Interfaces</b> (IInteractable, IDamageable, IInventoryItem, IHighlightable) are in Data/_-Systems layers — implemented by Mono/_-Systems layers. Correct dependency direction.</div></div>`;
 
   // Cross-phase singleton reads (acceptable but notable)
   const singletonCross = [];
