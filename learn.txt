@@ -14420,7 +14420,12 @@ public interface IInventoryItem
 	bool GetShouldEquipWhenPickedUp();
 	Sprite GetIcon();
 	GameObject GetGameObject();
+	/// <summary> drop this item fully (last one from slot) — show GO, apply velocity </summary>
 	void DropItem();
+	/// <summary> drop one from a stack — instantiate or spawn a copy in the world.
+	/// Default: do nothing (non-stackable items never call this). Override for stackable items
+	/// like ToolBuilder which instantiate a BuildingCrate on drop. </summary>
+	void DropOneFromStack(Camera cam);
 	/// <summary> called when this item becomes the active equipped item — tool fires RaiseToolEquipped,
 	/// non-tool items can do nothing or fire their own event </summary>
 	void OnEquipped();
@@ -14647,6 +14652,8 @@ public class InventoryOrchestrator : MonoBehaviour
 	[SerializeField] Field_SelectedItemInfo _selectedItemInfo;
 	[Header("Drop")]
 	[SerializeField] Camera _cam;
+	[SerializeField] float _dropHeightOffset = 1f;
+	[SerializeField] float _dropDistance = 2f;
 	#endregion
 
 	#region private API
@@ -14705,10 +14712,12 @@ public class InventoryOrchestrator : MonoBehaviour
 	void HandleItemPickup(IInventoryItem item)
 	{
 		if (dataService.GetIndexFor(item) >= 0) return;
+		int activeBeforeAdd = dataService.GetActiveSlotIndex();
 		int idx = dataService.TryAdd(item, -1);
 		if (idx == -1) { Debug.Log("inventory full".colorTag("red")); return; }
 		item.GetGameObject().SetActive(false);
-		if (item.GetShouldEquipWhenPickedUp() && idx < dataService.GetHotbarSize())
+		// → only switch if: equip flag set + hotbar slot + NOT the already-active slot (avoids toggle-off on stack)
+		if (item.GetShouldEquipWhenPickedUp() && idx < dataService.GetHotbarSize() && idx != activeBeforeAdd)
 			SwitchToSlot(idx);
 		GameEvents.RaiseItemPickedUp(item);
 		RefreshAllSlots();
@@ -14748,8 +14757,7 @@ public class InventoryOrchestrator : MonoBehaviour
 		if (item.GetQty() > 1)
 		{
 			item.AddQty(-1);
-			// → spawn a visual "dropped" indicator if the item supports it (real tools instantiate a crate)
-			Debug.Log($"[Inventory] Dropped 1 from stack, remaining: {item.GetQty()}");
+			item.DropOneFromStack(_cam);
 			RefreshAllSlots();
 			return;
 		}
@@ -14821,23 +14829,36 @@ public class InventoryOrchestrator : MonoBehaviour
 			var slot = dataService.GetAllSlots()[dragFromIndex];
 			if (slot.item != null)
 			{
+				// → calculate drop position: ray from cursor + height offset (prevents below-ground drops)
+				Vector3 dropPos = Vector3.zero;
+				Vector3 dropDir = Vector3.down;
+				if (_cam != null)
+				{
+					Ray ray = _cam.ScreenPointToRay(e.position);
+					dropPos = ray.GetPoint(_dropDistance) + Vector3.up * _dropHeightOffset;
+					dropDir = ray.direction;
+				}
+
 				if (slot.item.GetQty() > 1)
 				{
-					// → stacked: drop 1, keep rest. Hide preview.
+					// → stacked: drop 1 clone at cursor position, keep rest
 					slot.item.AddQty(-1);
+					slot.item.DropOneFromStack(_cam);
 					slot.item.GetGameObject().SetActive(false);
 				}
 				else
 				{
-					// → last one: finalize drop at current preview position
+					// → last one: drop the actual GO at cursor ray position + height offset
 					var go = slot.item.GetGameObject();
 					go.SetActive(true);
+					go.transform.position = dropPos;
+					var col = go.GetComponent<Collider>();
+					if (col != null) col.enabled = true;
 					var rb = go.GetComponent<Rigidbody>();
 					if (rb != null)
 					{
 						rb.isKinematic = false;
-						if (_cam != null)
-							rb.linearVelocity = _cam.ScreenPointToRay(e.position).direction * 3f;
+						rb.linearVelocity = dropDir * 2f;
 					}
 					slot.item.DropItem();
 					dataService.Remove(slot.item);
@@ -14897,6 +14918,7 @@ public class InventoryOrchestrator : MonoBehaviour
 		if (selectedItem.GetQty() > 1)
 		{
 			selectedItem.AddQty(-1);
+			selectedItem.DropOneFromStack(_cam);
 			UpdateSelectedItemInfo(selectedItem);
 			RefreshAllSlots();
 			return;
@@ -15154,6 +15176,22 @@ public class MockTool : MonoBehaviour, IInventoryItem
     public string GetEquipButtonLabel() => "Equip";
     public void HandleActiveInput() { /* no-op — mock has no actions */ }
     public void SetOwnerContext(Camera cam, Transform vmc, Transform mag) { ownerCam = cam; }
+
+    /// <summary> Drop one from stack — instantiate a visual clone cube that drops with physics. </summary>
+    public void DropOneFromStack(Camera cam)
+    {
+        var clone = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        clone.transform.localScale = originalScale;
+        clone.GetComponent<Renderer>().material.color = _color;
+        clone.AddComponent<Rigidbody>();
+        if (cam != null)
+        {
+            clone.transform.position = cam.transform.position + cam.transform.forward * 1.5f;
+            clone.GetComponent<Rigidbody>().linearVelocity = cam.transform.forward * 5f + Vector3.up * 2f;
+        }
+        Destroy(clone, 5f); // auto-cleanup after 5 seconds
+        Debug.Log($"[MockTool] Dropped 1 clone of {_name}, remaining: {qty}");
+    }
 
     /// <summary> Equip: fire RaiseItemEquipped (so ItemEquipBridge sends camera via SetOwnerContext),
     /// then shrink cube + float in front of camera via LateUpdate.
@@ -16893,6 +16931,9 @@ public class BaseHeldTool : BaseSellableItem, IInteractable, ISaveLoadableObject
 	public bool GetShouldEquipWhenPickedUp() => _equipWhenPickedUp;
 	public Sprite GetIcon() => _inventoryIcon ?? _programmerIcon;
 	public GameObject GetGameObject() => gameObject;
+	/// <summary> drop one from stack — ToolBuilder overrides to instantiate a BuildingCrate.
+	/// Base implementation does nothing (most tools don't stack). </summary>
+	public virtual void DropOneFromStack(Camera cam) { }
 	/// <summary> receives camera + viewmodel container + magnet pos from PlayerGrab via IInventoryItem.
 	/// Tool never knows PlayerMovement exists — only stores the transforms it needs. </summary>
 	public void SetOwnerContext(Camera cam, Transform viewModelContainer, Transform magnetToolPos)
