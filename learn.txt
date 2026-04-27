@@ -14470,7 +14470,7 @@ public class InventoryDataService
 	List<InventorySlot> SLOT = new List<InventorySlot>();
 	int activeSlotIndex = 0;
 	public static int HOTBAR_SIZE = 5;
-	public static int TOTAL_SIZE = 20;
+	public static int TOTAL_SIZE = 15;
 	#endregion
 
 	#region public API
@@ -14615,6 +14615,8 @@ public class InventoryOrchestrator : MonoBehaviour
 	[SerializeField] TMP_Text _dragGhostAmountText;
 	[Header("Selected Item Info")]
 	[SerializeField] Field_SelectedItemInfo _selectedItemInfo;
+	[Header("Drop")]
+	[SerializeField] Camera _cam;
 	#endregion
 
 	#region private API
@@ -14708,6 +14710,14 @@ public class InventoryOrchestrator : MonoBehaviour
 	{
 		var item = dataService.GetActiveItem();
 		if (item == null) return;
+		// → stacked: drop 1, keep rest in slot
+		if (item.GetQty() > 1)
+		{
+			item.AddQty(-1);
+			RefreshAllSlots();
+			return;
+		}
+		// → last one: drop the actual item
 		item.DropItem();
 		dataService.Remove(item);
 		previousActiveItem = null;
@@ -14742,7 +14752,28 @@ public class InventoryOrchestrator : MonoBehaviour
 		if (e.pointerEnter == null && dragFromIndex >= 0)
 		{
 			var slot = dataService.GetAllSlots()[dragFromIndex];
-			if (slot.item != null) { slot.item.DropItem(); dataService.Remove(slot.item); }
+			if (slot.item != null)
+			{
+				// → stacked: drop 1, keep rest
+				if (slot.item.GetQty() > 1)
+				{
+					slot.item.AddQty(-1);
+				}
+				else
+				{
+					// → last one: drop from cursor position via screen-to-world ray
+					if (_cam != null)
+					{
+						Ray ray = _cam.ScreenPointToRay(e.position);
+						var go = slot.item.GetGameObject();
+						go.transform.position = ray.GetPoint(2f);
+						var rb = go.GetComponent<Rigidbody>();
+						if (rb != null) rb.linearVelocity = ray.direction * 5f;
+					}
+					slot.item.DropItem();
+					dataService.Remove(slot.item);
+				}
+			}
 		}
 		dragFromIndex = -1;
 		RefreshAllSlots();
@@ -14777,6 +14808,15 @@ public class InventoryOrchestrator : MonoBehaviour
 	void DropSelectedItem()
 	{
 		if (selectedItem == null) return;
+		// → stacked: drop 1, keep rest in slot, update info panel count
+		if (selectedItem.GetQty() > 1)
+		{
+			selectedItem.AddQty(-1);
+			UpdateSelectedItemInfo(selectedItem);
+			RefreshAllSlots();
+			return;
+		}
+		// → last one: drop the actual item
 		selectedItem.DropItem();
 		dataService.Remove(selectedItem);
 		GameEvents.RaiseItemDropped(selectedItem);
@@ -15007,8 +15047,11 @@ public class MockTool : MonoBehaviour, IInventoryItem
     [SerializeField] Color _color = Color.white;
     int qty = 1;
     Renderer rend;
+    Camera ownerCam;
+    Vector3 originalScale;
+    bool isEquipped;
 
-    void Awake() => rend = GetComponent<Renderer>();
+    void Awake() { rend = GetComponent<Renderer>(); originalScale = transform.localScale; }
     void Start() { if (rend != null) rend.material.color = _color; }
 
     // ── IInventoryItem ──
@@ -15023,53 +15066,76 @@ public class MockTool : MonoBehaviour, IInventoryItem
     public GameObject GetGameObject() => gameObject;
     public string GetEquipButtonLabel() => "Equip";
     public void HandleActiveInput() { /* no-op — mock has no actions */ }
-    public void SetOwnerContext(Camera cam, Transform vmc, Transform mag) { /* no-op */ }
+    public void SetOwnerContext(Camera cam, Transform vmc, Transform mag) { ownerCam = cam; }
 
-    /// <summary> Called when inventory equips this item. Orchestrator does SetActive(true) first,
-    /// so the GO is active — but we hide the renderer because MockTool has no ViewModel.
-    /// The cube should NOT be visible in the world when "equipped". </summary>
+    /// <summary> Equip: shrink cube + float in front of camera (like Proto_InventoryFull). </summary>
     public void OnEquipped()
     {
-        if (rend != null) rend.enabled = false;
+        isEquipped = true;
+        if (rend != null) rend.enabled = true;
+        transform.localScale = originalScale * 0.3f; // small "viewmodel"
         var rb = GetComponent<Rigidbody>();
         if (rb != null) rb.isKinematic = true;
         Debug.Log($"[MockTool] Equipped: {_name}");
     }
 
-    /// <summary> Called when inventory drops this item. Show renderer + apply physics. </summary>
+    /// <summary> Drop: restore scale, show renderer, apply physics velocity. </summary>
     public void DropItem()
     {
+        isEquipped = false;
         gameObject.SetActive(true);
         if (rend != null) rend.enabled = true;
+        transform.localScale = originalScale;
         transform.parent = null;
         var rb = GetComponent<Rigidbody>();
         if (rb != null)
         {
             rb.isKinematic = false;
-            rb.linearVelocity = Vector3.up * 3f + Vector3.forward * 2f;
+            if (ownerCam != null)
+                rb.linearVelocity = ownerCam.transform.forward * 5f + Vector3.up * 2f;
+            else
+                rb.linearVelocity = Vector3.up * 3f + Vector3.forward * 2f;
         }
+        ownerCam = null;
         Debug.Log($"[MockTool] Dropped: {_name}");
     }
 
-    /// <summary> Also hide renderer when GO deactivates (inventory stores it). </summary>
+    /// <summary> When GO deactivates (stored in inventory), restore scale for when it comes back. </summary>
     void OnDisable()
     {
-        if (rend != null) rend.enabled = true; // restore for when it comes back to world
+        isEquipped = false;
+        transform.localScale = originalScale;
+        if (rend != null) rend.enabled = true;
+    }
+
+    /// <summary> Float in front of camera while equipped (like Proto_InventoryFull). </summary>
+    void LateUpdate()
+    {
+        if (isEquipped && ownerCam != null)
+        {
+            transform.position = ownerCam.transform.position + ownerCam.transform.forward * 1.5f + Vector3.down * 0.3f;
+            transform.rotation = ownerCam.transform.rotation;
+        }
     }
 
     // ── Click to pickup (simple — no interaction wheel needed) ──
     void OnMouseDown()
     {
-        if (!gameObject.activeInHierarchy) return; // already picked up
+        if (!gameObject.activeInHierarchy) return;
         GameEvents.RaiseToolPickupRequested(this);
         Debug.Log($"[MockTool] Pickup requested: {_name}");
     }
 }
 ```
 
-> **Why `OnEquipped` hides the renderer:** The Orchestrator calls `SetActive(true)` then `OnEquipped()`.
-> Real tools show their ViewModel here. MockTool has no ViewModel — so it hides the renderer instead.
-> The cube is logically "in hand" but invisible. Drop makes it visible again.
+> **How MockTool shows "equipped":** The Orchestrator calls `SetActive(true)` then `OnEquipped()`.
+> MockTool shrinks the cube to 30% scale and floats it in front of the camera via `LateUpdate`.
+> `SetOwnerContext` provides the camera ref. Drop restores original scale + applies forward velocity.
+> This matches Proto_InventoryFull's behavior exactly.
+
+> **⚠️ MockTool needs ItemEquipBridge on Player GO** for `SetOwnerContext` to receive the camera.
+> Without it, `ownerCam` stays null → cube floats at origin instead of in front of camera.
+> Add `ItemEquipBridge` component to Player GO, wire `_cam`, `_viewModelContainer`, `_magnetToolPos`.
 
 ### Step 10 — Tab Key for Extended Inventory
 
