@@ -14793,23 +14793,29 @@ public class InventoryOrchestrator : MonoBehaviour
 	void HandleDrag(PointerEventData e)
 	{
 		_dragGhostIcon.transform.position = e.position;
-		if (dragFromIndex < 0) return;
+		if (dragFromIndex < 0 || _cam == null) return;
 		var slot = dataService.GetAllSlots()[dragFromIndex];
 		if (slot.item == null) return;
 		var go = slot.item.GetGameObject();
 		bool outsideUI = e.pointerCurrentRaycast.gameObject == null;
-		if (outsideUI && _cam != null)
+		if (outsideUI)
 		{
-			// → show 3D model at cursor ray position (preview before drop)
 			if (!dragPreviewActive)
 			{
+				// → first frame outside UI: show GO at full scale as drop preview
 				go.SetActive(true);
+				go.transform.parent = null;
+				go.transform.localScale = Vector3.one; // restore full world scale
 				var rb = go.GetComponent<Rigidbody>();
 				if (rb != null) rb.isKinematic = true;
+				var col = go.GetComponent<Collider>();
+				if (col != null) col.enabled = false; // no collision during preview
+				var rend = go.GetComponent<Renderer>();
+				if (rend != null) rend.enabled = true;
 				dragPreviewActive = true;
 			}
 			Ray ray = _cam.ScreenPointToRay(e.position);
-			go.transform.position = ray.GetPoint(2f);
+			go.transform.position = ray.GetPoint(_dropDistance) + Vector3.up * _dropHeightOffset;
 			go.transform.rotation = Quaternion.LookRotation(ray.direction);
 		}
 		else if (dragPreviewActive)
@@ -14819,7 +14825,7 @@ public class InventoryOrchestrator : MonoBehaviour
 			dragPreviewActive = false;
 		}
 	}
-	/// <summary> EndDrag: if outside UI → drop item at current position. If inside → cancel preview. </summary>
+	/// <summary> EndDrag: if outside UI → drop item at preview position. If inside → cancel. </summary>
 	void HandleEndDrag(UIEventRelay relay, PointerEventData e)
 	{
 		FIELD_SLOT[relay.Index].SetDragVisible(true);
@@ -14829,36 +14835,26 @@ public class InventoryOrchestrator : MonoBehaviour
 			var slot = dataService.GetAllSlots()[dragFromIndex];
 			if (slot.item != null)
 			{
-				// → calculate drop position: ray from cursor + height offset (prevents below-ground drops)
-				Vector3 dropPos = Vector3.zero;
-				Vector3 dropDir = Vector3.down;
-				if (_cam != null)
-				{
-					Ray ray = _cam.ScreenPointToRay(e.position);
-					dropPos = ray.GetPoint(_dropDistance) + Vector3.up * _dropHeightOffset;
-					dropDir = ray.direction;
-				}
-
 				if (slot.item.GetQty() > 1)
 				{
-					// → stacked: drop 1 clone at cursor position, keep rest
+					// → stacked: drop 1 clone, keep rest. Hide the original GO.
 					slot.item.AddQty(-1);
 					slot.item.DropOneFromStack(_cam);
 					slot.item.GetGameObject().SetActive(false);
 				}
 				else
 				{
-					// → last one: drop the actual GO at cursor ray position + height offset
+					// → last one: GO is already at preview position from HandleDrag.
+					// Just enable physics + collider and let it drop.
 					var go = slot.item.GetGameObject();
 					go.SetActive(true);
-					go.transform.position = dropPos;
 					var col = go.GetComponent<Collider>();
 					if (col != null) col.enabled = true;
 					var rb = go.GetComponent<Rigidbody>();
 					if (rb != null)
 					{
 						rb.isKinematic = false;
-						rb.linearVelocity = dropDir * 2f;
+						rb.linearVelocity = Vector3.down * 2f; // gentle drop from preview height
 					}
 					slot.item.DropItem();
 					dataService.Remove(slot.item);
@@ -15177,19 +15173,34 @@ public class MockTool : MonoBehaviour, IInventoryItem
     public void HandleActiveInput() { /* no-op — mock has no actions */ }
     public void SetOwnerContext(Camera cam, Transform vmc, Transform mag) { ownerCam = cam; }
 
-    /// <summary> Drop one from stack — instantiate a visual clone cube that drops with physics. </summary>
+    /// <summary> Drop one from stack — instantiate a clone of THIS object that drops with physics.
+    /// Uses Instantiate(gameObject) to get exact same mesh/material/scale, not a primitive cube. </summary>
     public void DropOneFromStack(Camera cam)
     {
-        var clone = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        // → temporarily activate so Instantiate copies the full GO
+        bool wasActive = gameObject.activeSelf;
+        gameObject.SetActive(true);
+        var clone = Instantiate(gameObject);
+        gameObject.SetActive(wasActive);
+        // → strip MockTool from clone so it can't be picked up again (it's just a visual prop)
+        var cloneMock = clone.GetComponent<MockTool>();
+        if (cloneMock != null) Destroy(cloneMock);
+        // → restore world state: full scale, collider on, physics on
         clone.transform.localScale = originalScale;
-        clone.GetComponent<Renderer>().material.color = _color;
-        clone.AddComponent<Rigidbody>();
-        if (cam != null)
+        clone.transform.parent = null;
+        var col = clone.GetComponent<Collider>();
+        if (col != null) col.enabled = true;
+        var rb = clone.GetComponent<Rigidbody>();
+        if (rb != null)
         {
-            clone.transform.position = cam.transform.position + cam.transform.forward * 1.5f;
-            clone.GetComponent<Rigidbody>().linearVelocity = cam.transform.forward * 5f + Vector3.up * 2f;
+            rb.isKinematic = false;
+            if (cam != null)
+            {
+                clone.transform.position = cam.transform.position + cam.transform.forward * 1.5f;
+                rb.linearVelocity = cam.transform.forward * 5f + Vector3.up * 2f;
+            }
         }
-        Destroy(clone, 5f); // auto-cleanup after 5 seconds
+        Destroy(clone, 10f); // auto-cleanup
         Debug.Log($"[MockTool] Dropped 1 clone of {_name}, remaining: {qty}");
     }
 
@@ -15209,7 +15220,7 @@ public class MockTool : MonoBehaviour, IInventoryItem
         Debug.Log($"[MockTool] Equipped: {_name}");
     }
 
-    /// <summary> Drop: restore scale, re-enable collider + physics, apply velocity. </summary>
+    /// <summary> Drop: position in front of camera, restore scale, re-enable collider + physics, apply forward velocity. </summary>
     public void DropItem()
     {
         isEquipped = false;
@@ -15218,15 +15229,14 @@ public class MockTool : MonoBehaviour, IInventoryItem
         transform.localScale = originalScale;
         transform.parent = null;
         var col = GetComponent<Collider>();
-        if (col != null) col.enabled = true; // re-enable physics interaction
+        if (col != null) col.enabled = true;
         var rb = GetComponent<Rigidbody>();
-        if (rb != null)
+        if (rb != null) rb.isKinematic = false;
+        // → position exactly in front of camera + apply forward velocity
+        if (ownerCam != null)
         {
-            rb.isKinematic = false;
-            if (ownerCam != null)
-                rb.linearVelocity = ownerCam.transform.forward * 5f + Vector3.up * 2f;
-            else
-                rb.linearVelocity = Vector3.up * 3f + Vector3.forward * 2f;
+            transform.position = ownerCam.transform.position + ownerCam.transform.forward * 1.5f;
+            if (rb != null) rb.linearVelocity = ownerCam.transform.forward * 5f + Vector3.up * 2f;
         }
         ownerCam = null;
         Debug.Log($"[MockTool] Dropped: {_name}");
