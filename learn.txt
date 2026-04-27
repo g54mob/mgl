@@ -14976,17 +14976,79 @@ Save as prefab in Project.
 1. Select `InventoryUI` GO
 2. `_orchestrator` → InventoryOrchestrator GO
 
-### Step 9 — Place Tool Instances in Scene
+### Step 9 — MockTool Script (test without BaseHeldTool)
 
-> **⚠️ CRITICAL — Scene Instance vs Prefab:** Tool GOs must exist as **instances in the scene Hierarchy**,
-> not just prefabs in the Project panel. The test fires pickup events on these scene GOs.
-> Drag from **Hierarchy panel**, NOT Project panel.
+> **This test is INDEPENDENT of ToolSystem.** Instead of using real tools (ToolPickaxe, etc.), create
+> a lightweight MockTool that implements IInventoryItem directly. This proves the inventory system
+> works without any tool scripts compiled.
 
-| Tool GO | Position | Components |
+Create a new script `MockTool.cs` anywhere (or paste into an existing test file). Then place 3-4 instances in the scene as cubes:
+
+```csharp
+using UnityEngine;
+
+/// <summary>
+/// Lightweight IInventoryItem for testing inventory WITHOUT any tool scripts.
+/// Place on a cube in the scene → click to fire RaiseToolPickupRequested → inventory picks it up.
+/// Zero dependency on BaseHeldTool, ToolSystem, or PlayerSystem.
+/// </summary>
+public class MockTool : MonoBehaviour, IInventoryItem
+{
+    [SerializeField] string _name = "MockPickaxe";
+    [SerializeField] Sprite _icon;
+    [SerializeField] int _maxStack = 1;
+    int qty = 1;
+
+    // ── IInventoryItem ──
+    public string GetName() => _name;
+    public string GetDescription() => $"A mock {_name} for testing";
+    public int GetQty() => qty;
+    public void SetQty(int v) => qty = v;
+    public void AddQty(int delta) => qty += delta;
+    public int GetMaxAmount() => _maxStack;
+    public bool GetShouldEquipWhenPickedUp() => true;
+    public Sprite GetIcon() => _icon;
+    public GameObject GetGameObject() => gameObject;
+    public void OnEquipped() { /* no-op for test */ }
+    public string GetEquipButtonLabel() => "Equip";
+    public void HandleActiveInput() { /* no-op for test */ }
+    public void SetOwnerContext(Camera cam, Transform vmc, Transform mag) { /* no-op */ }
+
+    public void DropItem()
+    {
+        gameObject.SetActive(true);
+        transform.parent = null;
+        var rb = GetComponent<Rigidbody>();
+        if (rb != null)
+        {
+            rb.isKinematic = false;
+            rb.linearVelocity = transform.forward * 3f + Vector3.up * 2f;
+        }
+    }
+
+    // ── Click to pickup (simple — no interaction wheel needed) ──
+    void OnMouseDown()
+    {
+        GameEvents.RaiseToolPickupRequested(this);
+    }
+}
+```
+
+**Setup:**
+
+1. Create 3 cubes in scene:
+
+| GO Name | Position | Components |
 |---------|----------|-----------|
-| `ToolPickaxe_01` | (-3, 0.2, 3) | ToolPickaxe, WorldModel child (Rigidbody + Collider, tag Grabbable, layer Interact) |
-| `ToolMagnet_01` | (-1, 0.2, 3) | ToolMagnet |
-| `ToolHammer_01` | (1, 0.2, 3) | ToolHammer |
+| `MockPickaxe` | (-2, 0.5, 3) | MockTool (`_name`="Pickaxe"), Rigidbody, BoxCollider |
+| `MockMagnet` | (0, 0.5, 3) | MockTool (`_name`="Magnet"), Rigidbody, BoxCollider |
+| `MockDynamite` | (2, 0.5, 3) | MockTool (`_name`="Dynamite", `_maxStack`=5), Rigidbody, BoxCollider |
+
+2. Create 2 more MockDynamite cubes nearby (to test stacking)
+3. Optionally assign `_icon` sprites (any sprite — or leave null, slot shows empty icon)
+
+> **Click a cube** → `OnMouseDown` fires `RaiseToolPickupRequested(this)` → inventory picks it up.
+> No interaction wheel, no PlayerGrab, no BaseHeldTool needed.
 
 ### Final Canvas Hierarchy
 
