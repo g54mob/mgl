@@ -1552,7 +1552,7 @@ Scripts/phase-X/
 - **`_-Systems/FeatureName/`** — if a feature has **3+ tightly coupled files** (DataService + Fields + Orchestrator + SubManager), bundle them together. Each system folder includes its own `Test.md`. The system is self-contained — you can read one folder and understand the whole feature.
 - **`0-Core/`, `2-Data/Enums/`, `4-Utils/`** — shared infrastructure that stays layer-based. GameEvents, enums, and utils are used across systems.
 - **`5-Tests/`** — for test scripts that don't belong to a specific `_-Systems/` folder.
-- **Each `_-Systems/` folder contains:** code files + Test.md. Multiple classes per file is fine — Unity finds MonoBehaviours by class name, not filename.
+- **Each `_-Systems/` folder contains:** code files + Test.md. Non-MonoBehaviour classes (interfaces, entities, DataService) can share a file. Inspector-added MonoBehaviours MUST have filename == classname (Unity 6000.3 rule) — put them in a `Mono/` or `Tools/` subfolder.
 
 ### System Independence Rules
 
@@ -1561,7 +1561,8 @@ Scripts/phase-X/
 - **IHighlightable.GetHighlightProfile() takes no parameters.** The highlight system doesn't know about inventory, tools, or any game concept. Each object decides its own profile internally. This makes HighlightSystem reusable in ANY Unity project.
 - **IInventoryItem.SetOwnerContext(Camera, Transform, Transform)** provides player context to equipped items without the item knowing PlayerMovement exists. Tool stores Camera + Transforms, not a concrete PlayerMovement ref.
 - **Bridge scripts** connect systems that need runtime context. `ItemEquipBridge` sits on the Player GO and subscribes to `OnItemEquipped` → calls `item.SetOwnerContext(cam, container, magnetPos)`. The bridge lives in the game-specific system (ToolSystem), NOT in the portable system (PlayerSystem).
-- **[AddComponentMenu("MineMGL/Category/ClassName")]** on every MonoBehaviour — enables Unity's Add Component menu to find classes in multi-class files. Category groups: `Tools/`, `Inventory/`, `Highlight/`, `Bridge/`.
+- **[AddComponentMenu("MineMGL/Category/ClassName")]** on every MonoBehaviour.
+- **Unity 6000.3 rule: filename MUST match classname** for any MonoBehaviour added via inspector. Unity's Add Component search only indexes classes whose name matches the `.cs` filename. MonoBehaviours added via code (`AddComponent<T>()`) don't need this. Inspector-added MonoBehaviours go in a `Mono/` or `Tools/` subfolder with one class per file.
 
 ### Portability Targets
 
@@ -2775,9 +2776,10 @@ For each phase, the agent must produce:
 - **PhaseMap/StructureMap are NOT exhaustive.** Always cross-reference every original source file (`Scripts/Assembly-CSharp/`) for the phase. If the source has functionality not listed in PhaseMap or StructureMap, **include it anyway** — create new files, add `#region extra` blocks, or document as a Gap Audit addition. The main source is the ultimate source of truth for 100% fidelity.
 - **MANDATORY: Post-delivery self-audit.** After producing all files for a phase, do a method-by-method comparison: read every original source file line-by-line, check every public method, every field, every interface implementation against what you produced. List any gaps. Fix them before delivering. This is non-negotiable — previous phases missed 5-15% on first delivery because the agent skipped small methods, SO_ logic wasn't moved, or singletons were in wrong folders.
 - **One sentence per script.** If it doesn't fit, split it.
-- **Hybrid folder structure.** Complex multi-file systems (3+ tightly coupled files) → `_-Systems/FeatureName/` with code files + Test.md. Multiple classes per file is fine — Unity finds MonoBehaviours by class name. Shared infra stays layer-based (`0-Core/`, `2-Data/Enums/`, `4-Utils/`). See GOAL.md folder structure.
+- **Hybrid folder structure.** Complex multi-file systems (3+ tightly coupled files) → `_-Systems/FeatureName/` with code files + Test.md. Non-MB classes can share a file; inspector-added MBs need own file (filename==classname). Shared infra stays layer-based (`0-Core/`, `2-Data/Enums/`, `4-Utils/`). See GOAL.md folder structure.
 - **System independence.** Systems communicate ONLY via interfaces + GameEvents. No direct class imports between systems. GameEvents use `Action<IInventoryItem>` (interface), never `Action<BaseHeldTool>` (concrete). IHighlightable.GetHighlightProfile() takes NO parameters — each object decides its own profile. Bridge scripts (e.g. `ItemEquipBridge`) connect systems and live in the game-specific system, not the portable one.
-- **[AddComponentMenu]** on every MonoBehaviour: `[AddComponentMenu("MineMGL/Category/ClassName")]`. Categories: `Tools/`, `Inventory/`, `Highlight/`, `Bridge/`. Required for multi-class files so Unity inspector can find each class.
+- **[AddComponentMenu]** on every MonoBehaviour: `[AddComponentMenu("MineMGL/Category/ClassName")]`.
+- **Unity 6000.3: filename == classname** for any MonoBehaviour added via inspector. Unity's Add Component search only indexes classes whose `.cs` filename matches. Non-MonoBehaviours (interfaces, entities, DataService) can share a file. Inspector-added MBs go in `Mono/` or `Tools/` subfolder with one class per file. Code-added MBs (e.g. UIEventRelay via `AddComponent<>`) don't need this.
 - **Portability.** Design systems to be reusable. HighlightSystem + InventorySystem + PlayerSystem should work in other Unity projects with minimal changes. ToolSystem is intentionally game-specific (it bridges everything). See GOAL.md Portability Targets table.
 - **GlobalEnumsX.cs** — all enums for a phase go in ONE file: `2-Data/Enums/GlobalEnumsX.cs` (e.g. `GlobalEnumsB.cs`). No separate file per enum. Use `InteractionType` enum instead of magic strings for interaction names.
 - **TagType enum — no raw string tags.** Never use `CompareTag("string")` or `tag = "string"`. Use `collider.HasTag(TagType.grabbable)` and `gameObject.SetTag(TagType.markedForDestruction)` — extensions in `phase-All/4-Utils/UtilsPhaseAll.cs` (auto-available, no class name needed). `TagType` lives in `phase-All/2-Data/Enums/GlobalEnumsAll.cs`.
@@ -14034,100 +14036,8 @@ public interface IHighlightable
 	HighlightProfile GetHighlightProfile();
 }
 
-// ═══════════════════════════════════════════════════════════════
-// ObjectHighlighterManager — raycasts + applies IHighlightable profiles
-// ═══════════════════════════════════════════════════════════════
-
-/// <summary>
-/// I outline whatever the player looks at using Highlight Plus. Every Update I raycast from
-/// the camera. If I hit something with IHighlightable, I ask it for a HighlightProfile via
-/// GetHighlightProfile(). If it returns a profile, I apply it. If null, I skip.
-///
-/// FULLY GENERIC — reusable in ANY Unity project. I only know IHighlightable (interface).
-/// I don't know about tools, buildings, inventory, or any game-specific type.
-/// New objects just implement IHighlightable — zero changes to this file ever.
-///
-/// Events I subscribe to: OnMenuStateChanged (block highlight when menu open).
-/// </summary>
-[AddComponentMenu("MineMGL/Highlight/ObjectHighlighterManager")]
-public class ObjectHighlighterManager : Singleton<ObjectHighlighterManager>
-{
-	#region Inspector Fields
-	[Header("Raycast")]
-	[SerializeField] Camera _cam;
-	[SerializeField] float _interactRange = 3f;
-	[SerializeField] LayerMask _interactLayerMask;
-	#endregion
-
-	#region private API
-	HighlightEffect currentHighlight;
-	GameObject currentTarget;
-	bool isMenuOpen;
-	#endregion
-
-	#region public API
-	/// <summary> Force-clear current highlight. Called by PauseMenu, tutorial, etc. </summary>
-	public void ClearCurrent()
-	{
-		if (currentHighlight != null)
-		{
-			currentHighlight.highlighted = false;
-			currentHighlight = null;
-			currentTarget = null;
-		}
-	}
-	/// <summary> Programmatically highlight a specific object. Stays until ClearCurrent. </summary>
-	public void HighlightObject(GameObject target, HighlightProfile profile)
-	{
-		ApplyHighlight(target, profile);
-	}
-	#endregion
-
-	#region private API — raycast + apply
-	/// <summary> Raycast from camera → find IHighlightable → ask for profile → apply. </summary>
-	void OutlineLookedAtThing()
-	{
-		if (!Physics.Raycast(_cam.transform.position, _cam.transform.forward,
-			out RaycastHit hit, _interactRange, _interactLayerMask))
-			return;
-		var highlightable = hit.collider.GetComponentInParent<IHighlightable>();
-		if (highlightable == null) return;
-		var profile = highlightable.GetHighlightProfile();
-		if (profile == null) return;
-		ApplyHighlight(((MonoBehaviour)highlightable).gameObject, profile);
-	}
-	/// <summary> Gets or adds HighlightEffect → loads profile → turns on. </summary>
-	void ApplyHighlight(GameObject target, HighlightProfile profile)
-	{
-		HighlightEffect effect = target.GetComponent<HighlightEffect>();
-		if (effect == null)
-		{
-			effect = target.AddComponent<HighlightEffect>();
-			effect.effectGroup = TargetOptions.Children;
-		}
-		effect.ProfileLoad(profile);
-		effect.highlighted = true;
-		currentHighlight = effect;
-		currentTarget = target;
-	}
-	#endregion
-
-	#region Unity Life Cycle
-	/// <summary> Subscribes to menu state (blocks highlight when open). </summary>
-	private void Start()
-	{
-		// purpose: block highlight when menu is open
-		GameEvents.OnMenuStateChanged += (open) => isMenuOpen = open;
-	}
-	/// <summary> Every frame: clear previous → raycast (unless menu open). </summary>
-	private void Update()
-	{
-		ClearCurrent();
-		if (isMenuOpen) return;
-		OutlineLookedAtThing();
-	}
-	#endregion
-}
+// ObjectHighlighterManager lives in its own file: ObjectHighlighterManager.cs
+// (Unity 6000.3 requires filename == classname for Add Component search)
 
 <!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/HighlightSystem/HighlightTest.md ==== -->
 # Highlight System — Manual Test
@@ -14286,6 +14196,77 @@ green/red for wrench).
 - [ ] ObjectHighlighterManager._interactLayerMask includes target layers
 - [ ] Zero console errors
 
+<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/HighlightSystem/ObjectHighlighterManager.cs ==== -->
+using UnityEngine;
+using HighlightPlus;
+
+/// <summary>
+/// I outline whatever the player looks at using Highlight Plus. Every Update I raycast from
+/// the camera. If I hit something with IHighlightable, I ask it for a HighlightProfile via
+/// GetHighlightProfile(). If it returns a profile, I apply it. If null, I skip.
+///
+/// FULLY GENERIC — reusable in ANY Unity project. I only know IHighlightable (interface).
+/// </summary>
+[AddComponentMenu("MineMGL/Highlight/ObjectHighlighterManager")]
+public class ObjectHighlighterManager : Singleton<ObjectHighlighterManager>
+{
+	[Header("Raycast")]
+	[SerializeField] Camera _cam;
+	[SerializeField] float _interactRange = 3f;
+	[SerializeField] LayerMask _interactLayerMask;
+
+	HighlightEffect currentHighlight;
+	GameObject currentTarget;
+	bool isMenuOpen;
+
+	public void ClearCurrent()
+	{
+		if (currentHighlight != null)
+		{
+			currentHighlight.highlighted = false;
+			currentHighlight = null;
+			currentTarget = null;
+		}
+	}
+	public void HighlightObject(GameObject target, HighlightProfile profile) => ApplyHighlight(target, profile);
+
+	void OutlineLookedAtThing()
+	{
+		if (!Physics.Raycast(_cam.transform.position, _cam.transform.forward,
+			out RaycastHit hit, _interactRange, _interactLayerMask))
+			return;
+		var highlightable = hit.collider.GetComponentInParent<IHighlightable>();
+		if (highlightable == null) return;
+		var profile = highlightable.GetHighlightProfile();
+		if (profile == null) return;
+		ApplyHighlight(((MonoBehaviour)highlightable).gameObject, profile);
+	}
+	void ApplyHighlight(GameObject target, HighlightProfile profile)
+	{
+		HighlightEffect effect = target.GetComponent<HighlightEffect>();
+		if (effect == null)
+		{
+			effect = target.AddComponent<HighlightEffect>();
+			effect.effectGroup = TargetOptions.Children;
+		}
+		effect.ProfileLoad(profile);
+		effect.highlighted = true;
+		currentHighlight = effect;
+		currentTarget = target;
+	}
+
+	private void Start()
+	{
+		GameEvents.OnMenuStateChanged += (open) => isMenuOpen = open;
+	}
+	private void Update()
+	{
+		ClearCurrent();
+		if (isMenuOpen) return;
+		OutlineLookedAtThing();
+	}
+}
+
 <!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/InventorySystem/Field_InventorySlot.cs ==== -->
 using UnityEngine;
 using UnityEngine.UI;
@@ -14309,6 +14290,7 @@ using TMPro;
 ///   │       └── countText (TMP_Text — shows "x3" for stacked, raycastTarget=false)
 ///   └── orangeBar (Image — hotbar indicator)
 /// </summary>
+[AddComponentMenu("MineMGL/Inventory/Field_InventorySlot")]
 public class Field_InventorySlot : MonoBehaviour
 {
 	#region inspector fields
@@ -14365,38 +14347,8 @@ public class Field_InventorySlot : MonoBehaviour
 	#endregion
 }
 
-// ═══════════════════════════════════════════════════════════════
-// Field_SelectedItemInfo — pure display for selected item panel
-// ═══════════════════════════════════════════════════════════════
-
-/// <summary>
-/// Pure display — shows selected item's icon, name, description, count, and equip/drop buttons.
-/// InventoryOrchestrator calls SetData() when a slot is clicked. Buttons are wired in Init().
-/// Public fields because Field_ convention.
-/// </summary>
-public class Field_SelectedItemInfo : MonoBehaviour
-{
-	#region inspector fields
-	public Image _selectedItemIcon;
-	public TMP_Text _selectedItemNameText, _selectedItemCountText, _selectedItemDescrText;
-	public TMP_Text _equipButtonText;
-	public Button _equipButton;
-	public Button _dropButton;
-	#endregion
-
-	#region public API
-	/// <summary> populate all display fields from item data </summary>
-	public void SetData(Sprite sprite, string name, string descr, string count, string equipText)
-	{
-		_selectedItemIcon.enabled = sprite != null;
-		_selectedItemIcon.sprite = sprite;
-		_selectedItemNameText.text = name;
-		_selectedItemDescrText.text = descr;
-		_selectedItemCountText.text = count;
-		_equipButtonText.text = equipText;
-	}
-	#endregion
-}
+// Field_SelectedItemInfo lives in its own file: Mono/Field_SelectedItemInfo.cs
+// (Unity 6000.3 requires filename == classname for Add Component search)
 
 <!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/InventorySystem/InventoryData.cs ==== -->
 using System.Collections.Generic;
@@ -14589,384 +14541,6 @@ public class InventoryDataService
 // SLOT
 {PhaseBLOG.LIST_SLOT__TO__JSON(SLOT)}
 // activeSlotIndex: {activeSlotIndex}";
-	}
-	#endregion
-}
-
-<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/InventorySystem/InventorySystem.cs ==== -->
-using System;
-using System.Collections.Generic;
-using UnityEngine;
-using UnityEngine.UI;
-using UnityEngine.EventSystems;
-using TMPro;
-
-using SPACE_UTIL;
-
-// ═══════════════════════════════════════════════════════════════
-// UIEventRelay — relays EventSystem events to Action callbacks
-// ═══════════════════════════════════════════════════════════════
-
-/// <summary>
-/// I relay Unity EventSystem events (drag, drop, pointer enter/exit/down) to Action callbacks.
-/// InventoryOrchestrator adds me to each Field_InventorySlot GO at runtime via AddComponent,
-/// then wires my Action fields to its handler methods. Reusable across any drag-drop UI system.
-/// </summary>
-[AddComponentMenu("MineMGL/Inventory/UIEventRelay")]
-public class UIEventRelay : MonoBehaviour,
-	IBeginDragHandler, IDragHandler, IEndDragHandler, IDropHandler,
-	IPointerEnterHandler, IPointerExitHandler, IPointerDownHandler
-{
-	public int Index;
-	public Action<UIEventRelay, PointerEventData> onBeginDrag;
-	public Action<PointerEventData> onDrag;
-	public Action<UIEventRelay, PointerEventData> onEndDrag;
-	public Action<UIEventRelay, PointerEventData> onDrop;
-	public Action<UIEventRelay> onPointerEnter;
-	public Action<UIEventRelay> onPointerExit;
-	public Action<UIEventRelay> onPointerDown;
-
-	public void OnBeginDrag(PointerEventData e) => onBeginDrag?.Invoke(this, e);
-	public void OnDrag(PointerEventData e) => onDrag?.Invoke(e);
-	public void OnEndDrag(PointerEventData e) => onEndDrag?.Invoke(this, e);
-	public void OnDrop(PointerEventData e) => onDrop?.Invoke(this, e);
-	public void OnPointerEnter(PointerEventData e) => onPointerEnter?.Invoke(this);
-	public void OnPointerExit(PointerEventData e) => onPointerExit?.Invoke(this);
-	public void OnPointerDown(PointerEventData e) => onPointerDown?.Invoke(this);
-}
-
-// ═══════════════════════════════════════════════════════════════
-// InventoryOrchestrator — wires slots, handles pickup/equip/drop/drag
-// ═══════════════════════════════════════════════════════════════
-
-/// <summary>
-/// I'm the brain of the inventory system. InventoryUI hands me a DataService on Init — I then
-/// Instantiate Field_InventorySlot prefabs, attach UIEventRelay for drag-drop, subscribe to
-/// OnToolPickupRequested. In Update I route hotbar keys, scroll, tool actions, and G=drop.
-/// I store IInventoryItem only — zero references to BaseHeldTool or any tool class.
-///
-/// Who uses me: InventoryUI (Init), GameEvents (OnToolPickupRequested).
-/// Events I fire: RaiseToolEquipped, RaiseToolSwitched, RaiseItemPickedUp, RaiseItemDropped.
-/// </summary>
-[AddComponentMenu("MineMGL/Inventory/InventoryOrchestrator")]
-public class InventoryOrchestrator : MonoBehaviour
-{
-	#region Inspector Fields
-	[SerializeField] Transform _hotbarContainer;
-	[SerializeField] Transform _extendedContainer;
-	[SerializeField] GameObject _pfInventorySlot;
-	[Header("Drag Ghost")]
-	[SerializeField] GameObject _dragGhostIcon;
-	[SerializeField] Image _dragGhostImage;
-	[SerializeField] TMP_Text _dragGhostAmountText;
-	[Header("Selected Item Info")]
-	[SerializeField] Field_SelectedItemInfo _selectedItemInfo;
-	#endregion
-
-	#region private API
-	InventoryDataService dataService;
-	List<Field_InventorySlot> FIELD_SLOT = new List<Field_InventorySlot>();
-	IInventoryItem previousActiveItem;
-	IInventoryItem selectedItem;
-	int dragFromIndex = -1;
-
-	/// <summary> Instantiates Field_InventorySlot prefabs, attaches UIEventRelay, wires all callbacks. </summary>
-	void BuildSlotFields()
-	{
-		_hotbarContainer.destroyLeaves();
-		_extendedContainer.destroyLeaves();
-		FIELD_SLOT.Clear();
-		for (int i = 0; i < dataService.GetTotalSize(); i++)
-		{
-			var slot = dataService.GetAllSlots()[i];
-			Transform parent = slot.isHotBar ? _hotbarContainer : _extendedContainer;
-			var field = Instantiate(_pfInventorySlot, parent).gc<Field_InventorySlot>();
-			field.SetEmpty();
-			field.SetIsHotbar(slot.isHotBar);
-			var relay = field.gameObject.AddComponent<UIEventRelay>();
-			relay.Index = i;
-			relay.onBeginDrag = HandleBeginDrag;
-			relay.onDrag = HandleDrag;
-			relay.onEndDrag = HandleEndDrag;
-			relay.onDrop = HandleDrop;
-			relay.onPointerEnter = (r) => FIELD_SLOT[r.Index].SetHovered(true);
-			relay.onPointerExit = (r) =>
-			{
-				int ai = dataService.GetActiveSlotIndex();
-				FIELD_SLOT[r.Index].SetHighlighted(r.Index == ai, r.Index == ai && dataService.GetActiveItem() != null);
-			};
-			relay.onPointerDown = (r) => HandleSlotClick(r.Index);
-			FIELD_SLOT.Add(field);
-		}
-	}
-	/// <summary> Loops all slots and updates each Field_ to match DataService state. </summary>
-	void RefreshAllSlots()
-	{
-		int ai = dataService.GetActiveSlotIndex();
-		for (int i = 0; i < FIELD_SLOT.Count; i++)
-		{
-			var slot = dataService.GetAllSlots()[i];
-			if (slot.item != null)
-			{
-				FIELD_SLOT[i].SetData(slot.item.GetIcon(), slot.item.GetName(), slot.item.GetQty());
-				FIELD_SLOT[i].SetHighlighted(i == ai, i == ai && previousActiveItem != null);
-			}
-			else
-			{
-				FIELD_SLOT[i].SetEmpty();
-			}
-		}
-	}
-	#endregion
-
-	#region private API — pickup / equip / drop
-	/// <summary> Guards against duplicate pickup, adds item to slot, auto-equips if flagged. </summary>
-	void HandleItemPickup(IInventoryItem item)
-	{
-		// → guard: skip if this exact item is already in inventory
-		if (dataService.GetIndexFor(item) >= 0) return;
-		int idx = dataService.TryAdd(item, -1);
-		if (idx == -1) { Debug.Log("inventory full".colorTag("red")); return; }
-		item.GetGameObject().SetActive(false);
-		if (item.GetShouldEquipWhenPickedUp() && idx < dataService.GetHotbarSize())
-			SwitchToSlot(idx);
-		// purpose: inform other systems that item was picked up
-		GameEvents.RaiseItemPickedUp(item);
-		RefreshAllSlots();
-	}
-	/// <summary> Deactivates previous, activates new, calls item.OnEquipped(),
-	/// toggles if same slot pressed twice (unequip → empty hands). </summary>
-	void SwitchToSlot(int index)
-	{
-		// → hide previous equipped item
-		if (previousActiveItem != null)
-			previousActiveItem.GetGameObject().SetActive(false);
-		var slot = dataService.GetAllSlots()[index];
-		// → toggle: same slot again = unequip (empty hands)
-		if (slot.item == previousActiveItem && slot.item != null)
-		{
-			previousActiveItem.GetGameObject().SetActive(false);
-			previousActiveItem = null;
-			dataService.SwitchTo(index);
-			RefreshAllSlots();
-			// purpose: notify systems about tool change (null = empty hands)
-			GameEvents.RaiseToolSwitched(index);
-			return;
-		}
-		dataService.SwitchTo(index);
-		previousActiveItem = dataService.GetActiveItem();
-		if (previousActiveItem != null)
-		{
-			previousActiveItem.GetGameObject().SetActive(true);
-			// → item handles its own equip logic (tool fires RaiseToolEquipped, crate does nothing)
-			previousActiveItem.OnEquipped();
-		}
-		// purpose: notify FresnelHighlighter and other systems about tool change
-		GameEvents.RaiseToolSwitched(index);
-		RefreshAllSlots();
-	}
-	/// <summary> Drops the active item — DropItem + Remove + fire OnItemDropped. </summary>
-	void HandleDropActiveItem()
-	{
-		var item = dataService.GetActiveItem();
-		if (item == null) return;
-		item.DropItem();
-		dataService.Remove(item);
-		previousActiveItem = null;
-		// purpose: inform other systems that item was dropped
-		GameEvents.RaiseItemDropped(item);
-		RefreshAllSlots();
-	}
-	/// <summary> Click slot → select + show info panel. </summary>
-	void HandleSlotClick(int index)
-	{
-		SwitchToSlot(index);
-		UpdateSelectedItemInfo(dataService.GetAllSlots()[index].item);
-	}
-	#endregion
-
-	#region private API — drag-drop
-	/// <summary> Hides source slot content, shows ghost with icon + count. </summary>
-	void HandleBeginDrag(UIEventRelay relay, PointerEventData e)
-	{
-		var slot = dataService.GetAllSlots()[relay.Index];
-		if (slot.item == null) return;
-		dragFromIndex = relay.Index;
-		FIELD_SLOT[relay.Index].SetDragVisible(false);
-		_dragGhostIcon.SetActive(true);
-		_dragGhostImage.sprite = slot.item.GetIcon();
-		// → CRITICAL: ghost Image raycastTarget must be false (set in inspector or code)
-		_dragGhostImage.raycastTarget = false;
-		_dragGhostAmountText.text = slot.item.GetQty() > 1 ? $"x{slot.item.GetQty()}" : "";
-		_dragGhostIcon.transform.SetAsLastSibling();
-	}
-	/// <summary> Moves ghost to cursor position every frame during drag. </summary>
-	void HandleDrag(PointerEventData e)
-	{
-		_dragGhostIcon.transform.position = e.position;
-	}
-	/// <summary> Restores source slot, hides ghost. Drop outside UI = drop item to world. </summary>
-	void HandleEndDrag(UIEventRelay relay, PointerEventData e)
-	{
-		FIELD_SLOT[relay.Index].SetDragVisible(true);
-		_dragGhostIcon.SetActive(false);
-		if (e.pointerEnter == null && dragFromIndex >= 0)
-		{
-			// → dropped outside UI — drop the item to world
-			var slot = dataService.GetAllSlots()[dragFromIndex];
-			if (slot.item != null) { slot.item.DropItem(); dataService.Remove(slot.item); }
-		}
-		dragFromIndex = -1;
-		RefreshAllSlots();
-	}
-	/// <summary> Drop on target slot — swap contents. </summary>
-	void HandleDrop(UIEventRelay relay, PointerEventData e)
-	{
-		if (dragFromIndex < 0 || dragFromIndex == relay.Index) return;
-		dataService.Swap(dragFromIndex, relay.Index);
-		RefreshAllSlots();
-	}
-	#endregion
-
-	#region private API — selected item info
-	/// <summary> Shows/hides info panel via Field_SelectedItemInfo.SetData(). </summary>
-	void UpdateSelectedItemInfo(IInventoryItem item)
-	{
-		selectedItem = item;
-		if (item == null) { _selectedItemInfo.gameObject.SetActive(false); return; }
-		_selectedItemInfo.gameObject.SetActive(true);
-		_selectedItemInfo.SetData(
-			sprite: item.GetIcon(),
-			name: item.GetName(),
-			descr: item.GetDescription(),
-			count: item.GetQty() > 1 ? item.GetQty().ToString() : "",
-			equipText: item.GetEquipButtonLabel()
-		);
-	}
-	void EquipSelectedItem()
-	{
-		if (selectedItem == null) return;
-		int idx = dataService.GetIndexFor(selectedItem);
-		if (idx >= 0) SwitchToSlot(idx);
-		GameEvents.RaiseCloseInventoryView();
-	}
-	void DropSelectedItem()
-	{
-		if (selectedItem == null) return;
-		selectedItem.DropItem();
-		dataService.Remove(selectedItem);
-		GameEvents.RaiseItemDropped(selectedItem);
-		UpdateSelectedItemInfo(null);
-		RefreshAllSlots();
-	}
-	#endregion
-
-	#region public API
-	/// <summary> Called by InventoryUI on first enable — builds slots, wires buttons, subscribes to events. </summary>
-	public void Init(InventoryDataService dataService)
-	{
-		this.dataService = dataService;
-		this.dataService.Build();
-		BuildSlotFields();
-		RefreshAllSlots();
-		// → subscribe to pickup events
-		GameEvents.OnToolPickupRequested += HandleItemPickup;
-		// → wire info panel buttons
-		_selectedItemInfo._equipButton.onClick.AddListener(() => EquipSelectedItem());
-		_selectedItemInfo._dropButton.onClick.AddListener(() => DropSelectedItem());
-		UpdateSelectedItemInfo(null);
-	}
-	/// <summary> expose dataService for test snapshot </summary>
-	public InventoryDataService GetDataServiceForTest() => dataService;
-	#endregion
-
-	#region Unity Life Cycle
-	/// <summary> Routes hotbar keys 1-0, scroll, tool actions LMB/RMB/R/Q, G=drop. </summary>
-	private void Update()
-	{
-		// → skip all input when any menu is open
-		if (Singleton<UIManager>.Ins.GetIsAnyMenuOpen()) return;
-		// → hotbar keys 1-0
-		if (INPUT.K.InstantDown(KeyCode.Alpha1)) SwitchToSlot(0);
-		else if (INPUT.K.InstantDown(KeyCode.Alpha2)) SwitchToSlot(1);
-		else if (INPUT.K.InstantDown(KeyCode.Alpha3)) SwitchToSlot(2);
-		else if (INPUT.K.InstantDown(KeyCode.Alpha4)) SwitchToSlot(3);
-		else if (INPUT.K.InstantDown(KeyCode.Alpha5)) SwitchToSlot(4);
-		else if (INPUT.K.InstantDown(KeyCode.Alpha6)) SwitchToSlot(5);
-		else if (INPUT.K.InstantDown(KeyCode.Alpha7)) SwitchToSlot(6);
-		else if (INPUT.K.InstantDown(KeyCode.Alpha8)) SwitchToSlot(7);
-		else if (INPUT.K.InstantDown(KeyCode.Alpha9)) SwitchToSlot(8);
-		else if (INPUT.K.InstantDown(KeyCode.Alpha0)) SwitchToSlot(9);
-		// → scroll wheel
-		float scroll = Input.GetAxis("Mouse ScrollWheel");
-		if (scroll != 0f) { dataService.Scroll(scroll > 0f ? 1 : -1); SwitchToSlot(dataService.GetActiveSlotIndex()); }
-		// → active item handles its own per-frame input (tool routes LMB/RMB/R/Q, non-tool does nothing)
-		dataService.GetActiveItem()?.HandleActiveInput();
-		if (INPUT.K.InstantDown(KeyCode.G)) HandleDropActiveItem();
-	}
-	/// <summary> Unsubscribes to prevent null ref on scene unload. </summary>
-	private void OnDestroy()
-	{
-		GameEvents.OnToolPickupRequested -= HandleItemPickup;
-	}
-	#endregion
-}
-
-// ═══════════════════════════════════════════════════════════════
-// InventoryUI — SubManager that opens/closes the extended panel
-// ═══════════════════════════════════════════════════════════════
-
-/// <summary>
-/// I'm the SubManager for the inventory panel. On first enable, I create InventoryDataService,
-/// hand it to Orchestrator via Init(), subscribe to Open/Close events, then self-disable.
-/// After that, Tab key opens me (OnEnable → RaiseMenuStateChanged true), ESC/Tab closes.
-///
-/// ⚠️ CRITICAL: HotbarPanel must be a SIBLING of this GO, NOT a child. When I self-disable,
-/// ALL children become invisible. HotBar must stay visible at all times.
-/// </summary>
-[AddComponentMenu("MineMGL/Inventory/InventoryUI")]
-public class InventoryUI : MonoBehaviour
-{
-	#region Inspector Fields
-	[SerializeField] InventoryOrchestrator _orchestrator;
-	#endregion
-
-	#region private API
-	InventoryDataService dataService = new InventoryDataService();
-	#endregion
-
-	#region Unity Life Cycle
-	/// <summary> First enable: creates DataService, inits Orchestrator, subscribes, self-disables.
-	/// Subsequent enables: fires MenuStateChanged(true) → cursor unlocks, input freezes. </summary>
-	bool isFirstEnable = true;
-	private void OnEnable()
-	{
-		if (isFirstEnable)
-		{
-			// → hand DataService to Orchestrator — builds 40 slot Field_ instances + wires drag-drop
-			_orchestrator.Init(dataService);
-			// purpose: InventoryUI self-activates when inventory view is opened
-			GameEvents.OnOpenInventoryView += () => gameObject.SetActive(true);
-			// purpose: InventoryUI self-deactivates when inventory view is closed
-			GameEvents.OnCloseInventoryView += () => gameObject.SetActive(false);
-			// → self-disable so panel starts hidden
-			gameObject.SetActive(false);
-			isFirstEnable = false;
-			return;
-		}
-		// purpose: cursor unlock + freeze WASD
-		GameEvents.RaiseMenuStateChanged(isAnyMenuOpen: true);
-	}
-	/// <summary> ESC or Tab while open → fires close event. </summary>
-	private void Update()
-	{
-		if (INPUT.K.InstantDown(KeyCode.Escape) || INPUT.K.InstantDown(KeyCode.Tab))
-			GameEvents.RaiseCloseInventoryView();
-	}
-	/// <summary> Re-locks cursor and re-enables player input. </summary>
-	private void OnDisable()
-	{
-		GameEvents.RaiseMenuStateChanged(isAnyMenuOpen: false);
 	}
 	#endregion
 }
@@ -15260,6 +14834,345 @@ Scene Root
 - [ ] Stacking: same type items stack (count shows "x3")
 - [ ] Info panel shows name/desc + equip/drop buttons
 - [ ] Zero console errors
+
+<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/InventorySystem/Mono/Field_SelectedItemInfo.cs ==== -->
+using UnityEngine;
+using UnityEngine.UI;
+using TMPro;
+
+/// <summary>
+/// Pure display — shows selected item's icon, name, description, count, and equip/drop buttons.
+/// InventoryOrchestrator calls SetData() when a slot is clicked. Buttons wired in Init().
+/// </summary>
+[AddComponentMenu("MineMGL/Inventory/Field_SelectedItemInfo")]
+public class Field_SelectedItemInfo : MonoBehaviour
+{
+	public Image _selectedItemIcon;
+	public TMP_Text _selectedItemNameText, _selectedItemCountText, _selectedItemDescrText;
+	public TMP_Text _equipButtonText;
+	public Button _equipButton;
+	public Button _dropButton;
+
+	public void SetData(Sprite sprite, string name, string descr, string count, string equipText)
+	{
+		_selectedItemIcon.enabled = sprite != null;
+		_selectedItemIcon.sprite = sprite;
+		_selectedItemNameText.text = name;
+		_selectedItemDescrText.text = descr;
+		_selectedItemCountText.text = count;
+		_equipButtonText.text = equipText;
+	}
+}
+
+<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/InventorySystem/Mono/InventoryOrchestrator.cs ==== -->
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UI;
+using UnityEngine.EventSystems;
+using TMPro;
+
+using SPACE_UTIL;
+
+/// <summary>
+/// I'm the brain of the inventory system. InventoryUI hands me a DataService on Init — I then
+/// Instantiate Field_InventorySlot prefabs, attach UIEventRelay for drag-drop, subscribe to
+/// OnToolPickupRequested. In Update I route hotbar keys, scroll, and G=drop.
+/// I store IInventoryItem only — zero references to BaseHeldTool or any tool class.
+/// </summary>
+[AddComponentMenu("MineMGL/Inventory/InventoryOrchestrator")]
+public class InventoryOrchestrator : MonoBehaviour
+{
+	#region Inspector Fields
+	[SerializeField] Transform _hotbarContainer;
+	[SerializeField] Transform _extendedContainer;
+	[SerializeField] GameObject _pfInventorySlot;
+	[Header("Drag Ghost")]
+	[SerializeField] GameObject _dragGhostIcon;
+	[SerializeField] Image _dragGhostImage;
+	[SerializeField] TMP_Text _dragGhostAmountText;
+	[Header("Selected Item Info")]
+	[SerializeField] Field_SelectedItemInfo _selectedItemInfo;
+	#endregion
+
+	#region private API
+	InventoryDataService dataService;
+	List<Field_InventorySlot> FIELD_SLOT = new List<Field_InventorySlot>();
+	IInventoryItem previousActiveItem;
+	IInventoryItem selectedItem;
+	int dragFromIndex = -1;
+
+	void BuildSlotFields()
+	{
+		_hotbarContainer.destroyLeaves();
+		_extendedContainer.destroyLeaves();
+		FIELD_SLOT.Clear();
+		for (int i = 0; i < dataService.GetTotalSize(); i++)
+		{
+			var slot = dataService.GetAllSlots()[i];
+			Transform parent = slot.isHotBar ? _hotbarContainer : _extendedContainer;
+			var field = Instantiate(_pfInventorySlot, parent).gc<Field_InventorySlot>();
+			field.SetEmpty();
+			field.SetIsHotbar(slot.isHotBar);
+			var relay = field.gameObject.AddComponent<UIEventRelay>();
+			relay.Index = i;
+			relay.onBeginDrag = HandleBeginDrag;
+			relay.onDrag = HandleDrag;
+			relay.onEndDrag = HandleEndDrag;
+			relay.onDrop = HandleDrop;
+			relay.onPointerEnter = (r) => FIELD_SLOT[r.Index].SetHovered(true);
+			relay.onPointerExit = (r) =>
+			{
+				int ai = dataService.GetActiveSlotIndex();
+				FIELD_SLOT[r.Index].SetHighlighted(r.Index == ai, r.Index == ai && dataService.GetActiveItem() != null);
+			};
+			relay.onPointerDown = (r) => HandleSlotClick(r.Index);
+			FIELD_SLOT.Add(field);
+		}
+	}
+	void RefreshAllSlots()
+	{
+		int ai = dataService.GetActiveSlotIndex();
+		for (int i = 0; i < FIELD_SLOT.Count; i++)
+		{
+			var slot = dataService.GetAllSlots()[i];
+			if (slot.item != null)
+			{
+				FIELD_SLOT[i].SetData(slot.item.GetIcon(), slot.item.GetName(), slot.item.GetQty());
+				FIELD_SLOT[i].SetHighlighted(i == ai, i == ai && previousActiveItem != null);
+			}
+			else FIELD_SLOT[i].SetEmpty();
+		}
+	}
+	#endregion
+
+	#region private API — pickup / equip / drop
+	void HandleItemPickup(IInventoryItem item)
+	{
+		if (dataService.GetIndexFor(item) >= 0) return;
+		int idx = dataService.TryAdd(item, -1);
+		if (idx == -1) { Debug.Log("inventory full".colorTag("red")); return; }
+		item.GetGameObject().SetActive(false);
+		if (item.GetShouldEquipWhenPickedUp() && idx < dataService.GetHotbarSize())
+			SwitchToSlot(idx);
+		GameEvents.RaiseItemPickedUp(item);
+		RefreshAllSlots();
+	}
+	void SwitchToSlot(int index)
+	{
+		if (previousActiveItem != null)
+			previousActiveItem.GetGameObject().SetActive(false);
+		var slot = dataService.GetAllSlots()[index];
+		if (slot.item == previousActiveItem && slot.item != null)
+		{
+			previousActiveItem.GetGameObject().SetActive(false);
+			previousActiveItem = null;
+			dataService.SwitchTo(index);
+			RefreshAllSlots();
+			GameEvents.RaiseToolSwitched(index);
+			return;
+		}
+		dataService.SwitchTo(index);
+		previousActiveItem = dataService.GetActiveItem();
+		if (previousActiveItem != null)
+		{
+			previousActiveItem.GetGameObject().SetActive(true);
+			previousActiveItem.OnEquipped();
+		}
+		GameEvents.RaiseToolSwitched(index);
+		RefreshAllSlots();
+	}
+	void HandleDropActiveItem()
+	{
+		var item = dataService.GetActiveItem();
+		if (item == null) return;
+		item.DropItem();
+		dataService.Remove(item);
+		previousActiveItem = null;
+		GameEvents.RaiseItemDropped(item);
+		RefreshAllSlots();
+	}
+	void HandleSlotClick(int index)
+	{
+		SwitchToSlot(index);
+		UpdateSelectedItemInfo(dataService.GetAllSlots()[index].item);
+	}
+	#endregion
+
+	#region private API — drag-drop
+	void HandleBeginDrag(UIEventRelay relay, PointerEventData e)
+	{
+		var slot = dataService.GetAllSlots()[relay.Index];
+		if (slot.item == null) return;
+		dragFromIndex = relay.Index;
+		FIELD_SLOT[relay.Index].SetDragVisible(false);
+		_dragGhostIcon.SetActive(true);
+		_dragGhostImage.sprite = slot.item.GetIcon();
+		_dragGhostImage.raycastTarget = false;
+		_dragGhostAmountText.text = slot.item.GetQty() > 1 ? $"x{slot.item.GetQty()}" : "";
+		_dragGhostIcon.transform.SetAsLastSibling();
+	}
+	void HandleDrag(PointerEventData e) => _dragGhostIcon.transform.position = e.position;
+	void HandleEndDrag(UIEventRelay relay, PointerEventData e)
+	{
+		FIELD_SLOT[relay.Index].SetDragVisible(true);
+		_dragGhostIcon.SetActive(false);
+		if (e.pointerEnter == null && dragFromIndex >= 0)
+		{
+			var slot = dataService.GetAllSlots()[dragFromIndex];
+			if (slot.item != null) { slot.item.DropItem(); dataService.Remove(slot.item); }
+		}
+		dragFromIndex = -1;
+		RefreshAllSlots();
+	}
+	void HandleDrop(UIEventRelay relay, PointerEventData e)
+	{
+		if (dragFromIndex < 0 || dragFromIndex == relay.Index) return;
+		dataService.Swap(dragFromIndex, relay.Index);
+		RefreshAllSlots();
+	}
+	#endregion
+
+	#region private API — selected item info
+	void UpdateSelectedItemInfo(IInventoryItem item)
+	{
+		selectedItem = item;
+		if (item == null) { _selectedItemInfo.gameObject.SetActive(false); return; }
+		_selectedItemInfo.gameObject.SetActive(true);
+		_selectedItemInfo.SetData(
+			sprite: item.GetIcon(), name: item.GetName(), descr: item.GetDescription(),
+			count: item.GetQty() > 1 ? item.GetQty().ToString() : "",
+			equipText: item.GetEquipButtonLabel()
+		);
+	}
+	void EquipSelectedItem()
+	{
+		if (selectedItem == null) return;
+		int idx = dataService.GetIndexFor(selectedItem);
+		if (idx >= 0) SwitchToSlot(idx);
+		GameEvents.RaiseCloseInventoryView();
+	}
+	void DropSelectedItem()
+	{
+		if (selectedItem == null) return;
+		selectedItem.DropItem();
+		dataService.Remove(selectedItem);
+		GameEvents.RaiseItemDropped(selectedItem);
+		UpdateSelectedItemInfo(null);
+		RefreshAllSlots();
+	}
+	#endregion
+
+	#region public API
+	public void Init(InventoryDataService dataService)
+	{
+		this.dataService = dataService;
+		this.dataService.Build();
+		BuildSlotFields();
+		RefreshAllSlots();
+		GameEvents.OnToolPickupRequested += HandleItemPickup;
+		_selectedItemInfo._equipButton.onClick.AddListener(() => EquipSelectedItem());
+		_selectedItemInfo._dropButton.onClick.AddListener(() => DropSelectedItem());
+		UpdateSelectedItemInfo(null);
+	}
+	public InventoryDataService GetDataServiceForTest() => dataService;
+	#endregion
+
+	#region Unity Life Cycle
+	private void Update()
+	{
+		if (Singleton<UIManager>.Ins.GetIsAnyMenuOpen()) return;
+		if (INPUT.K.InstantDown(KeyCode.Alpha1)) SwitchToSlot(0);
+		else if (INPUT.K.InstantDown(KeyCode.Alpha2)) SwitchToSlot(1);
+		else if (INPUT.K.InstantDown(KeyCode.Alpha3)) SwitchToSlot(2);
+		else if (INPUT.K.InstantDown(KeyCode.Alpha4)) SwitchToSlot(3);
+		else if (INPUT.K.InstantDown(KeyCode.Alpha5)) SwitchToSlot(4);
+		else if (INPUT.K.InstantDown(KeyCode.Alpha6)) SwitchToSlot(5);
+		else if (INPUT.K.InstantDown(KeyCode.Alpha7)) SwitchToSlot(6);
+		else if (INPUT.K.InstantDown(KeyCode.Alpha8)) SwitchToSlot(7);
+		else if (INPUT.K.InstantDown(KeyCode.Alpha9)) SwitchToSlot(8);
+		else if (INPUT.K.InstantDown(KeyCode.Alpha0)) SwitchToSlot(9);
+		float scroll = Input.GetAxis("Mouse ScrollWheel");
+		if (scroll != 0f) { dataService.Scroll(scroll > 0f ? 1 : -1); SwitchToSlot(dataService.GetActiveSlotIndex()); }
+		dataService.GetActiveItem()?.HandleActiveInput();
+		if (INPUT.K.InstantDown(KeyCode.G)) HandleDropActiveItem();
+	}
+	private void OnDestroy() => GameEvents.OnToolPickupRequested -= HandleItemPickup;
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/InventorySystem/Mono/InventoryUI.cs ==== -->
+using UnityEngine;
+
+using SPACE_UTIL;
+
+/// <summary>
+/// SubManager for the inventory panel. First enable: creates DataService, inits Orchestrator,
+/// subscribes to Open/Close events, self-disables. Tab opens, ESC/Tab closes.
+/// ⚠️ CRITICAL: HotbarPanel must be a SIBLING, NOT a child.
+/// </summary>
+[AddComponentMenu("MineMGL/Inventory/InventoryUI")]
+public class InventoryUI : MonoBehaviour
+{
+	[SerializeField] InventoryOrchestrator _orchestrator;
+
+	InventoryDataService dataService = new InventoryDataService();
+
+	bool isFirstEnable = true;
+	private void OnEnable()
+	{
+		if (isFirstEnable)
+		{
+			_orchestrator.Init(dataService);
+			GameEvents.OnOpenInventoryView += () => gameObject.SetActive(true);
+			GameEvents.OnCloseInventoryView += () => gameObject.SetActive(false);
+			gameObject.SetActive(false);
+			isFirstEnable = false;
+			return;
+		}
+		GameEvents.RaiseMenuStateChanged(isAnyMenuOpen: true);
+	}
+	private void Update()
+	{
+		if (INPUT.K.InstantDown(KeyCode.Escape) || INPUT.K.InstantDown(KeyCode.Tab))
+			GameEvents.RaiseCloseInventoryView();
+	}
+	private void OnDisable()
+	{
+		GameEvents.RaiseMenuStateChanged(isAnyMenuOpen: false);
+	}
+}
+
+<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/InventorySystem/UIEventRelay.cs ==== -->
+using System;
+using UnityEngine;
+using UnityEngine.EventSystems;
+
+/// <summary>
+/// Relays Unity EventSystem events to Action callbacks. Added via code (AddComponent) by
+/// InventoryOrchestrator — NOT added via inspector, so filename != classname is fine here.
+/// But we name it UIEventRelay.cs anyway for consistency.
+/// </summary>
+public class UIEventRelay : MonoBehaviour,
+	IBeginDragHandler, IDragHandler, IEndDragHandler, IDropHandler,
+	IPointerEnterHandler, IPointerExitHandler, IPointerDownHandler
+{
+	public int Index;
+	public Action<UIEventRelay, PointerEventData> onBeginDrag;
+	public Action<PointerEventData> onDrag;
+	public Action<UIEventRelay, PointerEventData> onEndDrag;
+	public Action<UIEventRelay, PointerEventData> onDrop;
+	public Action<UIEventRelay> onPointerEnter;
+	public Action<UIEventRelay> onPointerExit;
+	public Action<UIEventRelay> onPointerDown;
+
+	public void OnBeginDrag(PointerEventData e) => onBeginDrag?.Invoke(this, e);
+	public void OnDrag(PointerEventData e) => onDrag?.Invoke(e);
+	public void OnEndDrag(PointerEventData e) => onEndDrag?.Invoke(this, e);
+	public void OnDrop(PointerEventData e) => onDrop?.Invoke(this, e);
+	public void OnPointerEnter(PointerEventData e) => onPointerEnter?.Invoke(this);
+	public void OnPointerExit(PointerEventData e) => onPointerExit?.Invoke(this);
+	public void OnPointerDown(PointerEventData e) => onPointerDown?.Invoke(this);
+}
 
 <!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/PlayerSystem/GrabRopeTest.md ==== -->
 # Grab Rope — Manual Test Flow
@@ -17064,79 +16977,70 @@ to target → sets damping high → ignores collision with player → target fli
 - [ ] owner.PlayerCam accessible (PlayerGrab sets via OnToolEquipped)
 - [ ] Zero console errors
 
-<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/ToolSystem/Tools.cs ==== -->
+<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/ToolSystem/Tools/ToolBuilder.cs ==== -->
+using UnityEngine;
+
+/// <summary> Phase B skeleton — Reload rotates, Q cycles. Phase D completes PrimaryFire + Update. </summary>
+[AddComponentMenu("MineMGL/Tools/ToolBuilder")]
+public class ToolBuilder : BaseHeldTool
+{
+	[SerializeField] float _useRange = 3f;
+	int currentPrefabIndex;
+	Quaternion currentRotation = Quaternion.identity;
+
+	public override string GetEquipButtonLabel() => "Build";
+	public override void PrimaryFire() { /* Phase D: full placement */ }
+	public override void Reload()
+	{
+		currentRotation *= Quaternion.Euler(0f, 90f, 0f);
+	}
+	public override void QButtonPressed() { currentPrefabIndex++; }
+	public override void DropItem() { base.DropItem(); /* Phase D: spawn BuildingCrate */ }
+	protected override void OnDisable() { base.OnDisable(); /* Phase D: cleanup ghost */ }
+}
+
+<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/ToolSystem/Tools/ToolHammer.cs ==== -->
+using UnityEngine;
+
+/// <summary>
+/// LMB raycasts → Phase D: BuildingObject.TryTakeOrPack / BuildingCrate.TryAddToInventory.
+/// RMB raycasts → Phase D: BuildingObject.Pack.
+/// </summary>
+[AddComponentMenu("MineMGL/Tools/ToolHammer")]
+public class ToolHammer : BaseHeldTool
+{
+	[SerializeField] float _useRange = 3f;
+
+	public override void PrimaryFire()
+	{
+		if (ownerCam == null) return;
+		if (!Physics.Raycast(ownerCam.transform.position, ownerCam.transform.forward, out RaycastHit hit, _useRange)) return;
+		// Phase D: BuildingObject / BuildingCrate interaction
+	}
+	public override void SecondaryFire()
+	{
+		if (ownerCam == null) return;
+		if (!Physics.Raycast(ownerCam.transform.position, ownerCam.transform.forward, out var hit, _useRange)) return;
+		// Phase D: BuildingObject.Pack()
+	}
+}
+
+<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/ToolSystem/Tools/ToolHardHat.cs ==== -->
+/// <summary> Empty subclass of ToolPickaxe — different prefab, same logic. </summary>
+[AddComponentMenu("MineMGL/Tools/ToolHardHat")]
+public class ToolHardHat : ToolPickaxe { }
+
+<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/ToolSystem/Tools/ToolMagnet.cs ==== -->
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using TMPro;
 
 using SPACE_UTIL;
 
-// ═══════════════════════════════════════════════════════════════
-// ToolPickaxe — swing + delayed raycast + IDamageable
-// ═══════════════════════════════════════════════════════════════
-
-/// <summary>
-/// I'm the pickaxe tool. Hold left-click → swing animation → 0.2s delay → raycast from camera.
-/// Hits IDamageable → TakeDamage. Hits OrePiece → TryConvertToCrushed. Hits Rigidbody → AddForce.
-/// </summary>
-[AddComponentMenu("MineMGL/Tools/ToolPickaxe")]
-public class ToolPickaxe : BaseHeldTool
-{
-	[SerializeField] float _useRange = 2f;
-	[SerializeField] float _damage = 10f;
-	[SerializeField] float _attackCooldown = 1f;
-	[SerializeField] LayerMask _hitLayers;
-	[SerializeField] bool _canBreakOreIntoCrushed;
-
-	float lastAttackTime = -1f;
-
-	void SwingPickaxe()
-	{
-		if (ownerCam == null) return;
-		if (_viewModelAnimator != null) _viewModelAnimator.Play(AnimParamType.attack1.ToString(), -1, 0f);
-		StartCoroutine(PerformAttack(0.2f));
-		lastAttackTime = Time.time;
-	}
-	IEnumerator PerformAttack(float delaySeconds)
-	{
-		yield return new WaitForSeconds(delaySeconds);
-		if (!gameObject.activeInHierarchy || ownerCam == null) yield break;
-		if (!Physics.Raycast(ownerCam.transform.position, ownerCam.transform.forward, out RaycastHit hit, _useRange, _hitLayers))
-			yield break;
-		// Phase C: crushed ore conversion + IDamageable.TakeDamage
-		Rigidbody hitRb = hit.collider.GetComponent<Rigidbody>();
-		if (hitRb != null)
-		{
-			hitRb.AddForceAtPosition(ownerCam.transform.forward * 5f, hit.point, ForceMode.Impulse);
-			PhysicsSoundPlayer soundPlayer = hitRb.GetComponent<PhysicsSoundPlayer>();
-			if (soundPlayer != null) soundPlayer.PlayImpactSound();
-		}
-	}
-
-	public override void PrimaryFire() { }
-	public override void PrimaryFireHeld()
-	{
-		if (Time.time - lastAttackTime >= _attackCooldown) SwingPickaxe();
-	}
-}
-
-// ═══════════════════════════════════════════════════════════════
-// ToolHardHat — empty subclass of ToolPickaxe (different prefab, same logic)
-// ═══════════════════════════════════════════════════════════════
-
-[AddComponentMenu("MineMGL/Tools/ToolHardHat")]
-public class ToolHardHat : ToolPickaxe { }
-
-// ═══════════════════════════════════════════════════════════════
-// ToolMagnet — pull nearby physics objects via SpringJoints
-// ═══════════════════════════════════════════════════════════════
-
 /// <summary>
 /// Hold RMB → OverlapSphere → SpringJoint per nearby Rigidbody → they fly toward me.
 /// LMB launches all forward. R drops gently. Q cycles selection mode.
-/// DetachBody called by OrePiece when entering machines.
 /// </summary>
 [AddComponentMenu("MineMGL/Tools/ToolMagnet")]
 public class ToolMagnet : BaseHeldTool
@@ -17244,7 +17148,7 @@ public class ToolMagnet : BaseHeldTool
 		joints.RemoveAt(idx); anchors.RemoveAt(idx); heldBodies.RemoveAt(idx);
 		rb.linearDamping = BasePhysicsObject.STANDARD_LINEAR_DAMPING;
 		rb.angularDamping = BasePhysicsObject.STANDARD_ANGULAR_DAMPING;
-		if (owner != null) UtilsPhaseB.IgnoreAllCollisions(rb.gameObject, owner.gameObject, false);
+		if (ownerCam != null) UtilsPhaseB.IgnoreAllCollisions(rb.gameObject, ownerCam.transform.root.gameObject, false);
 		droppedBodies.Add(new DroppedBodyInfo { Rb = rb, Timer = 3f });
 	}
 
@@ -17269,40 +17173,10 @@ public class ToolMagnet : BaseHeldTool
 	}
 }
 
-// ═══════════════════════════════════════════════════════════════
-// ToolHammer — pick up / pack buildings (Phase D stubs)
-// ═══════════════════════════════════════════════════════════════
+<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/ToolSystem/Tools/ToolMiningHat.cs ==== -->
+using UnityEngine;
 
-/// <summary>
-/// LMB raycasts → Phase D: BuildingObject.TryTakeOrPack / BuildingCrate.TryAddToInventory.
-/// RMB raycasts → Phase D: BuildingObject.Pack.
-/// </summary>
-[AddComponentMenu("MineMGL/Tools/ToolHammer")]
-public class ToolHammer : BaseHeldTool
-{
-	[SerializeField] float _useRange = 3f;
-
-	public override void PrimaryFire()
-	{
-		if (ownerCam == null) return;
-		if (!Physics.Raycast(ownerCam.transform.position, ownerCam.transform.forward, out RaycastHit hit, _useRange)) return;
-		// Phase D: BuildingObject / BuildingCrate interaction
-	}
-	public override void SecondaryFire()
-	{
-		if (ownerCam == null) return;
-		if (!Physics.Raycast(ownerCam.transform.position, ownerCam.transform.forward, out RaycastHit hit, _useRange)) return;
-		// Phase D: BuildingObject.Pack()
-	}
-}
-
-// ═══════════════════════════════════════════════════════════════
-// ToolMiningHat — toggleable light
-// ═══════════════════════════════════════════════════════════════
-
-/// <summary>
-/// LMB toggles light on/off. Interaction wheel "Toggle" does the same.
-/// </summary>
+/// <summary> LMB toggles light on/off. Interaction wheel "Toggle" does the same. </summary>
 [AddComponentMenu("MineMGL/Tools/ToolMiningHat")]
 public class ToolMiningHat : BaseHeldTool
 {
@@ -17327,39 +17201,59 @@ public class ToolMiningHat : BaseHeldTool
 	protected override void OnDisable() { base.OnDisable(); ToggleLight(isOn); }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// ToolSupportsWrench — toggle building scaffolding (Phase D stubs)
-// ═══════════════════════════════════════════════════════════════
+<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/ToolSystem/Tools/ToolPickaxe.cs ==== -->
+using System.Collections;
+using UnityEngine;
 
 /// <summary>
-/// LMB disables supports, RMB enables. Phase D adds BuildingObject.EnableBuildingSupports call.
+/// Hold left-click → swing animation → 0.2s delay → raycast from camera.
+/// Hits IDamageable → TakeDamage. Hits Rigidbody → AddForce.
 /// </summary>
-[AddComponentMenu("MineMGL/Tools/ToolSupportsWrench")]
-public class ToolSupportsWrench : BaseHeldTool
+[AddComponentMenu("MineMGL/Tools/ToolPickaxe")]
+public class ToolPickaxe : BaseHeldTool
 {
-	[SerializeField] float _useRange = 3f;
+	[SerializeField] float _useRange = 2f;
+	[SerializeField] float _damage = 10f;
+	[SerializeField] float _attackCooldown = 1f;
+	[SerializeField] LayerMask _hitLayers;
+	[SerializeField] bool _canBreakOreIntoCrushed;
 
-	public override void PrimaryFire()
+	float lastAttackTime = -1f;
+
+	void SwingPickaxe()
 	{
 		if (ownerCam == null) return;
-		if (!Physics.Raycast(ownerCam.transform.position, ownerCam.transform.forward, out var hit, _useRange)) return;
-		// Phase D: hit.collider.GetComponentInParent<BuildingObject>()?.EnableBuildingSupports(false);
+		if (_viewModelAnimator != null) _viewModelAnimator.Play(AnimParamType.attack1.ToString(), -1, 0f);
+		StartCoroutine(PerformAttack(0.2f));
+		lastAttackTime = Time.time;
 	}
-	public override void SecondaryFire()
+	IEnumerator PerformAttack(float delaySeconds)
 	{
-		if (ownerCam == null) return;
-		if (!Physics.Raycast(ownerCam.transform.position, ownerCam.transform.forward, out var hit, _useRange)) return;
-		// Phase D: hit.collider.GetComponentInParent<BuildingObject>()?.EnableBuildingSupports(true);
+		yield return new WaitForSeconds(delaySeconds);
+		if (!gameObject.activeInHierarchy || ownerCam == null) yield break;
+		if (!Physics.Raycast(ownerCam.transform.position, ownerCam.transform.forward, out RaycastHit hit, _useRange, _hitLayers))
+			yield break;
+		Rigidbody hitRb = hit.collider.GetComponent<Rigidbody>();
+		if (hitRb != null)
+		{
+			hitRb.AddForceAtPosition(ownerCam.transform.forward * 5f, hit.point, ForceMode.Impulse);
+			PhysicsSoundPlayer soundPlayer = hitRb.GetComponent<PhysicsSoundPlayer>();
+			if (soundPlayer != null) soundPlayer.PlayImpactSound();
+		}
+	}
+
+	public override void PrimaryFire() { }
+	public override void PrimaryFireHeld()
+	{
+		if (Time.time - lastAttackTime >= _attackCooldown) SwingPickaxe();
 	}
 }
 
-// ═══════════════════════════════════════════════════════════════
-// ToolResourceScanner — passive scan display
-// ═══════════════════════════════════════════════════════════════
+<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/ToolSystem/Tools/ToolResourceScanner.cs ==== -->
+using UnityEngine;
+using TMPro;
 
-/// <summary>
-/// While equipped, raycasts and shows the name of whatever the player looks at on a TMP_Text.
-/// </summary>
+/// <summary> While equipped, raycasts and shows the name of whatever the player looks at. </summary>
 [AddComponentMenu("MineMGL/Tools/ToolResourceScanner")]
 public class ToolResourceScanner : BaseHeldTool
 {
@@ -17376,37 +17270,30 @@ public class ToolResourceScanner : BaseHeldTool
 		{
 			var item = hit.collider.GetComponentInParent<IInventoryItem>();
 			if (item != null) text = item.GetName();
-			// Phase C: OreNode, OrePiece identification
-			// Phase D: BuildingObject identification
 		}
 		_thingNameText.text = text;
 	}
 }
 
-// ═══════════════════════════════════════════════════════════════
-// ToolBuilder — ghost preview + place buildings (Phase D completes)
-// ═══════════════════════════════════════════════════════════════
+<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/ToolSystem/Tools/ToolSupportsWrench.cs ==== -->
+using UnityEngine;
 
-/// <summary>
-/// Phase B: skeleton with Reload (rotate) and QButton (cycle). Phase D completes PrimaryFire + Update.
-/// </summary>
-[AddComponentMenu("MineMGL/Tools/ToolBuilder")]
-public class ToolBuilder : BaseHeldTool
+/// <summary> LMB disables supports, RMB enables. Phase D adds BuildingObject.EnableBuildingSupports. </summary>
+[AddComponentMenu("MineMGL/Tools/ToolSupportsWrench")]
+public class ToolSupportsWrench : BaseHeldTool
 {
 	[SerializeField] float _useRange = 3f;
-	int currentPrefabIndex;
-	Quaternion currentRotation = Quaternion.identity;
 
-	public override string GetEquipButtonLabel() => "Build";
-	public override void PrimaryFire() { /* Phase D: full placement */ }
-	public override void Reload()
+	public override void PrimaryFire()
 	{
-		currentRotation *= Quaternion.Euler(0f, 90f, 0f);
-		// Phase D: Singleton<BuildingManager>.Ins.SetCurrentObjectIsSnapped(false);
+		if (ownerCam == null) return;
+		if (!Physics.Raycast(ownerCam.transform.position, ownerCam.transform.forward, out var hit, _useRange)) return;
 	}
-	public override void QButtonPressed() { currentPrefabIndex++; /* Phase D: cycle models + cleanup ghost */ }
-	public override void DropItem() { base.DropItem(); /* Phase D: spawn BuildingCrate instead */ }
-	protected override void OnDisable() { base.OnDisable(); /* Phase D: cleanup ghost */ }
+	public override void SecondaryFire()
+	{
+		if (ownerCam == null) return;
+		if (!Physics.Raycast(ownerCam.transform.position, ownerCam.transform.forward, out var hit, _useRange)) return;
+	}
 }
 
 <!-- ==== FILE: learn/phase-c(New)/FLOW.md ==== -->
