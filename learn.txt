@@ -25506,4 +25506,3 @@ The PlayerController is a textbook God Object but splitting it would be a refact
 - **Kept Tool→Physics concrete dependency** — tools ARE physics objects (inheritance: BaseHeldTool → BaseSellableItem → BasePhysicsObject). Abstracting this would mean interface-wrapping every physics call — over-engineering.
 - **Proto_InventoryFull proved the concept** before rewriting the real system. The prototype's stacking, equip toggle, scroll-skip-empty, and drag-drop patterns were copied directly into the real InventorySystem.
 - **FLOW.md + GUIDE.md rewritten from scratch** — old versions had stale references to scattered file structure, BaseHeldTool coupling, and missing IInventoryItem architecture.
-
