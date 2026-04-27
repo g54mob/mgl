@@ -14396,6 +14396,8 @@ public class Field_SelectedItemInfo : MonoBehaviour
 using System.Collections.Generic;
 using UnityEngine;
 
+using SPACE_UTIL;
+
 // ═══════════════════════════════════════════════════════════════
 // IInventoryItem — interface for anything that sits in a slot
 // ═══════════════════════════════════════════════════════════════
@@ -14713,11 +14715,20 @@ public class InventoryOrchestrator : MonoBehaviour
 	{
 		if (dataService.GetIndexFor(item) >= 0) return;
 		int activeBeforeAdd = dataService.GetActiveSlotIndex();
+		var equippedBefore = previousActiveItem;
 		int idx = dataService.TryAdd(item, -1);
 		if (idx == -1) { Debug.Log("inventory full".colorTag("red")); return; }
 		item.GetGameObject().SetActive(false);
-		// → only switch if: equip flag set + hotbar slot + NOT the already-active slot (avoids toggle-off on stack)
-		if (item.GetShouldEquipWhenPickedUp() && idx < dataService.GetHotbarSize() && idx != activeBeforeAdd)
+		// → if stacked into active slot, re-show the equipped item (it might have been disrupted)
+		if (idx == activeBeforeAdd && equippedBefore != null)
+		{
+			equippedBefore.GetGameObject().SetActive(true);
+			equippedBefore.OnEquipped();
+			RefreshAllSlots();
+			return;
+		}
+		// → only switch if: equip flag set + hotbar slot
+		if (item.GetShouldEquipWhenPickedUp() && idx < dataService.GetHotbarSize())
 			SwitchToSlot(idx);
 		GameEvents.RaiseItemPickedUp(item);
 		RefreshAllSlots();
@@ -15173,35 +15184,22 @@ public class MockTool : MonoBehaviour, IInventoryItem
     public void HandleActiveInput() { /* no-op — mock has no actions */ }
     public void SetOwnerContext(Camera cam, Transform vmc, Transform mag) { ownerCam = cam; }
 
-    /// <summary> Drop one from stack — instantiate a clone of THIS object that drops with physics.
-    /// Uses Instantiate(gameObject) to get exact same mesh/material/scale, not a primitive cube. </summary>
+    /// <summary> Drop one from stack — create a simple visual prop (cube with same color) 
+    /// that drops with physics. No MockTool component — just a mesh + rigidbody. </summary>
     public void DropOneFromStack(Camera cam)
     {
-        // → temporarily activate so Instantiate copies the full GO
-        bool wasActive = gameObject.activeSelf;
-        gameObject.SetActive(true);
-        var clone = Instantiate(gameObject);
-        gameObject.SetActive(wasActive);
-        // → strip MockTool from clone so it can't be picked up again (it's just a visual prop)
-        var cloneMock = clone.GetComponent<MockTool>();
-        if (cloneMock != null) Destroy(cloneMock);
-        // → restore world state: full scale, collider on, physics on
-        clone.transform.localScale = originalScale;
-        clone.transform.parent = null;
-        var col = clone.GetComponent<Collider>();
-        if (col != null) col.enabled = true;
-        var rb = clone.GetComponent<Rigidbody>();
-        if (rb != null)
+        // → create a fresh cube prop (not Instantiate — avoids MockTool component issues)
+        var prop = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        prop.name = $"{_name}_dropped";
+        prop.transform.localScale = originalScale;
+        prop.GetComponent<Renderer>().material.color = _color;
+        var rb = prop.AddComponent<Rigidbody>();
+        if (cam != null)
         {
-            rb.isKinematic = false;
-            if (cam != null)
-            {
-                clone.transform.position = cam.transform.position + cam.transform.forward * 1.5f;
-                rb.linearVelocity = cam.transform.forward * 5f + Vector3.up * 2f;
-            }
+            prop.transform.position = cam.transform.position + cam.transform.forward * 1.5f;
+            rb.linearVelocity = cam.transform.forward * 5f + Vector3.up * 2f;
         }
-        Destroy(clone, 10f); // auto-cleanup
-        Debug.Log($"[MockTool] Dropped 1 clone of {_name}, remaining: {qty}");
+        Debug.Log($"[MockTool] Dropped 1 of {_name}, remaining: {qty}");
     }
 
     /// <summary> Equip: fire RaiseItemEquipped (so ItemEquipBridge sends camera via SetOwnerContext),
