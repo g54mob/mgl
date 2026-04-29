@@ -2005,9 +2005,25 @@ SimplePlayerController: 0 public, 3 private handlers
 ## Class Responsibilities
 
 ### `SO_` — Pure Data (2-Data/)
-Only fields. **Zero methods.** One file per SO.
-If the original source has helper methods on an SO (e.g. `GetOrePrefab()`, `GetPrimaryResourceType()`), move them to the **consumer** that reads the SO (the MonoBehaviour, DataService, or Orchestrator). The SO exposes its fields as `public` — the consumer reads them and does the logic.
-This keeps SO_ as pure config blueprints that the inspector can edit without any code coupling.
+Only fields. **Zero methods.** One file per SO. `OnValidate` is acceptable (editor-only, not business logic).
+If the original source has helper methods on an SO (e.g. `GetOrePrefab()`, `GetPrimaryResourceType()`):
+- **If used by 1 consumer** → move to that consumer (inline).
+- **If used by 2+ consumers** → create a **co-located static extension class** in the **same `.cs` file**, named `SO_XxxExt`. The SO class stays pure data. The extension class provides `this SO_Xxx def` methods. Callers use extension syntax: `_def.GetOrePrefab(true)` — looks identical to an instance method.
+This keeps SO_ as pure config blueprints while avoiding logic duplication across consumers.
+
+```csharp
+// Example: SO_AutoMinerResourceDefinition.cs
+public class SO_AutoMinerResourceDefinition : ScriptableObject
+{
+    public float SpawnProbability = 80f;  // ← pure data, zero methods
+    public List<WeightedOreChance> PossibleOrePrefabs = new List<WeightedOreChance>();
+}
+public static class SO_AutoMinerResourceDefinitionExt
+{
+    public static OrePiece GetOrePrefab(this SO_AutoMinerResourceDefinition def, bool canProduceGems) { ... }
+}
+// caller: _resourceDefinition.GetOrePrefab(true)  — extension syntax, SO stays pure
+```
 
 ### `Field_` — Display Only (2-Data/)
 Inspector refs + display setters: `SetData(...)`, `SetButtonInteractable(...)`, `SetPrice(...)`, `SetQty(...)`.
@@ -24302,7 +24318,7 @@ public class ResourceDescription
 }
 
 <!-- ==== FILE: learn/phase-c(New)/Scripts/_-Systems/OreSystem/SO_AutoMinerResourceDefinition.cs ==== -->
-// deps: GlobalEnumsC, WeightedOreChance, UtilsPhaseC — pure data SO
+// deps: GlobalEnumsC, WeightedOreChance — pure data SO + co-located extension helpers
 
 using System.Collections.Generic;
 using System.Linq;
@@ -24314,14 +24330,13 @@ using UnityEngine;
 /// AutoMiner reads these values on enable. The weighted list determines which ResourceType
 /// + PieceType drops and at what probability.
 ///
-/// SO_ = pure data. GetOrePrefab and GetPrimaryResourceType are consumer methods moved here
-/// as exceptions because they operate purely on this SO's data and are called by AutoMiner
-/// and BuildingPlacementNode. GetFormattedAvailableResourcesText formats the drop table
-/// for UI display.
+/// SO_ = pure data. All helper methods (GetOrePrefab, GetPrimaryResourceType,
+/// GetFormattedAvailableResourcesText) live in the co-located static extension class
+/// SO_AutoMinerResourceDefinitionExt below — same file, same system folder, but the SO
+/// class itself has zero methods (OnValidate is editor-only).
 ///
-/// Note: per "SO_ = pure data" rule these should live on the consumer, but since 3 consumers
-/// call them and the logic is purely over this SO's own fields, keeping them here as pragmatic
-/// exceptions (like SO_QuestDefinition.GenerateQuest in Phase F).
+/// Callers use extension syntax: _resourceDefinition.GetOrePrefab(true) — looks identical
+/// to an instance method but the SO stays pure data.
 /// </summary>
 [CreateAssetMenu(fileName = "New AutoMinerResourceDefinition", menuName = "MineMGL/SO/AutoMinerResourceDefinition")]
 [ExecuteAlways]
@@ -24333,45 +24348,65 @@ public class SO_AutoMinerResourceDefinition : ScriptableObject
     [Range(0f, 20f)]
     public float SpawnRate = 2f;
 
-    [SerializeField] List<WeightedOreChance> _possibleOrePrefabs = new List<WeightedOreChance>();
+    public List<WeightedOreChance> PossibleOrePrefabs = new List<WeightedOreChance>();
 
+    #region editor
+    private void OnValidate()
+    {
+        // → sort by weight descending so highest probability is first
+        PossibleOrePrefabs.Sort((a, b) => b.Weight.CompareTo(a.Weight));
+    }
+    #endregion
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SO_AutoMinerResourceDefinitionExt — extension helpers
+// ═══════════════════════════════════════════════════════════════
+
+/// <summary>
+/// Extension methods for SO_AutoMinerResourceDefinition. Co-located in the same file so
+/// the data and its operations stay together. SO_ class stays pure data (zero methods).
+/// Callers: AutoMiner.TrySpawnOre, BuildingPlacementNode (Phase D), ToolResourceScanner (Phase B).
+/// </summary>
+public static class SO_AutoMinerResourceDefinitionExt
+{
     /// <summary> Returns the ResourceType of the highest-weighted ore prefab in the list.
     /// Used by BuildingPlacementNode to display what resource this auto-miner spot produces. </summary>
-    public ResourceType GetPrimaryResourceType()
+    public static ResourceType GetPrimaryResourceType(this SO_AutoMinerResourceDefinition def)
     {
         // → return invalid if no drops configured
-        if (_possibleOrePrefabs == null || _possibleOrePrefabs.Count == 0)
+        if (def.PossibleOrePrefabs == null || def.PossibleOrePrefabs.Count == 0)
             return ResourceType.invalid;
         // → highest weight is first after OnValidate sort
-        return _possibleOrePrefabs[0].OrePrefab.ResourceType;
+        return def.PossibleOrePrefabs[0].OrePrefab.ResourceType;
     }
 
     /// <summary> Picks a weighted random ore prefab from the list. If canProduceGems is false,
     /// filters out gem-type entries before rolling. Used by AutoMiner.TrySpawnOre(). </summary>
-    public OrePiece GetOrePrefab(bool canProduceGems)
+    public static OrePiece GetOrePrefab(this SO_AutoMinerResourceDefinition def, bool canProduceGems)
     {
         // → early out if nothing configured
-        if (_possibleOrePrefabs == null || _possibleOrePrefabs.Count == 0) return null;
+        if (def.PossibleOrePrefabs == null || def.PossibleOrePrefabs.Count == 0) return null;
         // → filter gems if not allowed
         var list = canProduceGems
-            ? _possibleOrePrefabs
-            : _possibleOrePrefabs.Where(o => o.OrePrefab.PieceType != PieceType.gem).ToList();
+            ? def.PossibleOrePrefabs
+            : def.PossibleOrePrefabs.Where(o => o.OrePrefab.PieceType != PieceType.gem).ToList();
         // → weighted random selection
         return UtilsPhaseC.WeightedRandom(list, o => o.Weight)?.OrePrefab;
     }
 
     /// <summary> Formats a multi-line string showing each possible drop with its percentage,
     /// colored by resource type. Used by auto-miner info display and resource scanner. </summary>
-    public string GetFormattedAvailableResourcesText(bool canProduceGems, OreDataService dataService)
+    public static string GetFormattedAvailableResourcesText(this SO_AutoMinerResourceDefinition def, bool canProduceGems, OreDataService dataService)
     {
         // → fallback if no drops configured
-        if (_possibleOrePrefabs == null || _possibleOrePrefabs.Count == 0) return "No resources configured.";
+        if (def.PossibleOrePrefabs == null || def.PossibleOrePrefabs.Count == 0) return "No resources configured.";
         // → sum all weights for percentage calculation
         float totalWeight = 0f;
-        foreach (var entry in _possibleOrePrefabs) totalWeight += entry.Weight;
+        foreach (var entry in def.PossibleOrePrefabs) totalWeight += entry.Weight;
         // → build each line: colored resource name + percentage
         var lines = new List<string>();
-        foreach (var entry in _possibleOrePrefabs)
+        foreach (var entry in def.PossibleOrePrefabs)
         {
             float pct = entry.Weight / totalWeight * 100f;
             string name = dataService.GetColoredFormattedResourcePieceString(
@@ -24384,14 +24419,6 @@ public class SO_AutoMinerResourceDefinition : ScriptableObject
         }
         return string.Join("\n", lines);
     }
-
-    #region editor
-    private void OnValidate()
-    {
-        // → sort by weight descending so highest probability is first
-        _possibleOrePrefabs.Sort((a, b) => b.Weight.CompareTo(a.Weight));
-    }
-    #endregion
 }
 
 <!-- ==== FILE: learn/phase-c(New)/Scripts/_-Systems/OreSystem/WeightedOreChance.cs ==== -->
