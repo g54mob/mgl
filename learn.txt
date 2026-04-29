@@ -1561,6 +1561,7 @@ Scripts/phase-X/
 - **IHighlightable.GetHighlightProfile() takes no parameters.** The highlight system doesn't know about inventory, tools, or any game concept. Each object decides its own profile internally. This makes HighlightSystem reusable in ANY Unity project.
 - **IInventoryItem.SetOwnerContext(Camera, Transform, Transform)** provides player context to equipped items without the item knowing PlayerMovement exists. Tool stores Camera + Transforms, not a concrete PlayerMovement ref.
 - **Bridge scripts** connect systems that need runtime context. `ItemEquipBridge` sits on the Player GO and subscribes to `OnItemEquipped` → calls `item.SetOwnerContext(cam, container, magnetPos)`. The bridge lives in the game-specific system (ToolSystem), NOT in the portable system (PlayerSystem).
+- **Portable systems own their interfaces.** `IShopMoney` lives in ShopUISystem, `IInteractable` in InteractionSystem, `IInventoryItem` in InventorySystem, `IHighlightable` in HighlightSystem. When you copy a system folder to another project, EVERYTHING it needs is inside. Other systems import the interface from the portable system.
 - **[AddComponentMenu("MineMGL/Category/ClassName")]** on every MonoBehaviour.
 - **Unity 6000.3 rule: filename MUST match classname** for any MonoBehaviour added via inspector. Unity's Add Component search only indexes classes whose name matches the `.cs` filename. MonoBehaviours added via code (`AddComponent<T>()`) don't need this.
 
@@ -2818,7 +2819,7 @@ For each phase, the agent must produce:
 - **System independence.** Systems communicate ONLY via interfaces + GameEvents. No direct class imports between systems. GameEvents use `Action<IInventoryItem>` (interface), never `Action<BaseHeldTool>` (concrete). IHighlightable.GetHighlightProfile() takes NO parameters — each object decides its own profile. Bridge scripts (e.g. `ItemEquipBridge`) connect systems and live in the game-specific system, not the portable one.
 - **[AddComponentMenu]** on every MonoBehaviour: `[AddComponentMenu("MineMGL/Category/ClassName")]`.
 - **Unity 6000.3: filename == classname** for any MonoBehaviour added via inspector. Non-MBs can share a file. Inspector-added MBs go in named subfolders: `...BaseSub/` (subclasses), `Bridge/` (cross-system bridges), `Field_/` (display MBs), `SO_/` (ScriptableObjects). Root keeps base class + interfaces + DataService + Test.md. Code-added MBs (e.g. UIEventRelay) don't need this.
-- **Portability.** Design systems to be reusable. HighlightSystem + InventorySystem + PlayerSystem should work in other Unity projects with minimal changes. ToolSystem is intentionally game-specific (it bridges everything). See GOAL.md Portability Targets table.
+- **Portability.** Each portable system is a **complete package** — copy the folder to another project and it works. The system owns its interface (`IInventoryItem` in InventorySystem, `IShopMoney` in ShopUISystem, `IInteractable` in InteractionSystem, `IHighlightable` in HighlightSystem). Bridge scripts live on the **non-portable side** (`ItemEquipBridge` in ToolSystem, `MoneyBridge` in EconomySystem). ToolSystem + EconomySystem are intentionally game-specific.
 - **GlobalEnumsX.cs** — all enums for a phase go in ONE file: `2-Data/Enums/GlobalEnumsX.cs` (e.g. `GlobalEnumsB.cs`). No separate file per enum. Use `InteractionType` enum instead of magic strings for interaction names.
 - **TagType enum — no raw string tags.** Never use `CompareTag("string")` or `tag = "string"`. Use `collider.HasTag(TagType.grabbable)` and `gameObject.SetTag(TagType.markedForDestruction)` — extensions in `phase-All/4-Utils/UtilsPhaseAll.cs` (auto-available, no class name needed). `TagType` lives in `phase-All/2-Data/Enums/GlobalEnumsAll.cs`.
 - **Enum values use camelCase.** All enum values across all phases: `TagType.grabbable`, `PieceType.ore`, `OreLimitState.slightlyLimited`, `MagnetToolSelectionMode.everything`. NOT PascalCase. See GOAL.md Naming table.
@@ -3359,43 +3360,46 @@ InteractionWheelUI     → "I show radial buttons for multi-option interactions"
 MoneyOrchestrator      → "I show money on HUD"
 ```
 
-### Files (22 scripts)
+### Files — `_-Systems/` Architecture
 
 ```
 0-Core/
-├── Singleton.cs
-└── GameEvents.cs
+└── GameEvents.cs                (partial — phase-a events)
 
-1-Managers/
-├── EconomyManager.cs
-├── UIManager.cs
-└── SubManager/
-    ├── ShopUI.cs
-    └── BgUI.cs
-
-2-Data/
-├── SO_Interaction.cs
-├── SO_ShopCategory.cs
-├── SO_ShopItemDef.cs
-├── Field_ShopCategory.cs
-├── Field_ShopItem.cs
-├── Field_ShopCartItem.cs
-├── Interface/
-│   └── IInteractable.cs
-├── DataWrapper/
-│   └── WShopItem.cs
-└── DataService/
-    └── ShopDataService.cs       (includes CartItem as nested class)
+_-Systems/
+├── ShopUISystem/                ← PORTABLE — copy folder to any project
+│   ├── IShopMoney.cs            (interface — your money manager implements this)
+│   ├── ShopUI.cs                (SubManager — open/close, receives IShopMoney via event)
+│   ├── ShopUIOrchestrator.cs    (brain — categories, items, cart, purchase, uses IShopMoney)
+│   ├── ShopDataService.cs       (pure C# — cart + categories, uses IShopMoney)
+│   ├── ShopDataWrapper.cs       (WShopItem session wrapper)
+│   ├── Field_ShopCategory.cs    (display — one category tab)
+│   ├── Field_ShopItem.cs        (display — one item row)
+│   ├── Field_ShopCartItem.cs    (display — one cart row)
+│   ├── SO_ShopCategory.cs       (pure data — groups items)
+│   ├── SO_ShopItemDef.cs        (pure data — defines one item)
+│   ├── ShopSpawnPoint.cs        (marks spawn location)
+│   └── ShopTest.md              (vertical slice test guide)
+│
+├── InteractionSystem/           ← PORTABLE — copy folder to any project
+│   ├── IInteractable.cs         (interface — your objects implement this)
+│   ├── SO_InteractionOption.cs  (pure data — one interaction option)
+│   ├── SimplePlayerInteraction.cs (raycast + E key)
+│   ├── InteractionWheelUI.cs    (radial UI)
+│   ├── Field_InteractionOption.cs (display — one option button)
+│   ├── Interactables/           (game-specific implementations)
+│   │   └── InteractableComputer.cs
+│   └── InteractionTest.md       (vertical slice test guide)
+│
+├── EconomySystem/               ← GAME-SPECIFIC (implements IShopMoney)
+│   ├── EconomyManager.cs        (Singleton, implements IShopMoney)
+│   ├── moneyUI.cs               (displays balance)
+│   ├── Bridge/
+│   │   └── MoneyBridge.cs       (wires EconomyManager → ShopSystem via IShopMoney)
+│   └── EconomyTest.md           (vertical slice test guide)
 
 3-MonoBehaviours/
-├── Orchestrator/
-│   ├── ShopUIOrchestrator.cs
-│   └── MoneyOrchestrator.cs
-├── ShopTerminal.cs
-├── ShopSpawnPoint.cs
-├── SimplePlayerController.cs
-├── InteractionSystem.cs
-└── InteractionWheelUI.cs
+└── SimplePlayerController.cs    (WASD + mouse look — not a system, standalone)
 
 4-Utils/
 ├── UtilsPhaseA.cs               (formatMoney extension, TrySpawnAtShopPoint)
@@ -3403,22 +3407,17 @@ MoneyOrchestrator      → "I show money on HUD"
 
 5-Tests/
 ├── ShopUITest.cs                (UI-level vertical slice)
-├── InteractionTest.cs           (interaction vertical slice)
-├── PlayerControllerTest.cs      (player vertical slice)
-├── DEBUG_Check.cs               (data-level test — plain C# instances)
-└── Manual/
-    ├── ShopUITest.md            (manual: cart flow, category tabs, Field_ prefab setup)
-    └── InteractionWheelTest.md  (manual: radial buttons, single vs multi-option)
+└── DEBUG_Check.cs               (data-level test — plain C# instances)
 ```
 
 ### Vertical Slice Tests
 
-| Test | Tests what independently | NOT required |
-|------|------------------------|-------------|
-| DEBUG_Check | ShopDataService (plain C# instance, zero dependency) | Everything else |
-| ShopUITest | Full shop UI flow (Space/T/Y/L keys) | PlayerController, InteractionSystem, UIManager |
-| InteractionTest | Raycast + IInteractable + wheel UI | ShopUI, EconomyManager, PlayerController |
-| PlayerControllerTest | WASD + mouse look + cursor lock via events | ShopUI, InteractionSystem, EconomyManager |
+| Test | File | Tests what independently | NOT required |
+|------|------|------------------------|-------------|
+| ShopTest.md | ShopUISystem/ | Full shop: categories, cart, purchase, IShopMoney | EconomyManager (use mock IShopMoney) |
+| InteractionTest.md | InteractionSystem/ | Raycast + wheel + IInteractable | ShopUI, EconomyManager |
+| EconomyTest.md | EconomySystem/ | Balance, AddMoney, CanAfford, MoneyUI | ShopUI, InteractionSystem |
+| DEBUG_Check | 5-Tests/ | ShopDataService (plain C# instance) | Everything else |
 
 ### Original Source Reference
 
@@ -14217,6 +14216,201 @@ public class ElevatorTest : MonoBehaviour
 	#endregion
 }
 
+<!-- ==== FILE: learn/phase-a/GUIDE_CHANGELOG.md ==== -->
+# Phase A — Changelog from handTyped(latest)
+
+> What changed when copying handTyped(latest)/phase-a into learn/phase-a/ and applying
+> the new _-Systems/ architecture rules from GOAL.md.
+
+---
+
+## Summary
+
+handTyped(latest)/phase-a was already restructured into `_-Systems/` folders.
+The changes below decouple ShopUISystem from EconomyManager via `IShopMoney` interface + `MoneyBridge`.
+
+---
+
+## Changes Made
+
+### 1. IShopMoney Interface — NEW FILE
+
+**File:** `_-Systems/ShopUISystem/IShopMoney.cs`
+
+```csharp
+public interface IShopMoney
+{
+    float GetMoney();
+    void AddMoney(float deltaMoney);
+    bool CanAfford(float price);
+}
+```
+
+**Why:** ShopSystem needs money operations but shouldn't know EconomyManager exists. `IShopMoney` is the contract. Lives inside ShopUISystem because ShopSystem is the portable side.
+
+---
+
+### 2. EconomyManager implements IShopMoney
+
+**File:** `_-Systems/EconomySystem/EconomyManager.cs`
+
+**Before:**
+```csharp
+public class EconomyManager : Singleton<EconomyManager>
+```
+
+**After:**
+```csharp
+public class EconomyManager : Singleton<EconomyManager>, IShopMoney
+```
+
+No other changes — `GetMoney()`, `AddMoney()`, `CanAfford()` already existed. Just added `: IShopMoney`.
+
+---
+
+### 3. MoneyBridge — NEW FILE
+
+**File:** `_-Systems/EconomySystem/Bridge/MoneyBridge.cs`
+
+```csharp
+[AddComponentMenu("MineMGL/Bridge/MoneyBridge")]
+public class MoneyBridge : MonoBehaviour
+{
+    [SerializeField] MonoBehaviour _moneyProvider; // drag EconomyManager here
+    void Start()
+    {
+        if (_moneyProvider is IShopMoney money)
+            GameEvents.RaiseMoneyProviderReady(money);
+    }
+}
+```
+
+**Why:** Wires EconomyManager (concrete) to ShopSystem (portable) without ShopSystem importing EconomyManager. Lives in EconomySystem because that's the game-specific side.
+
+**Setup:** Place on any always-active GO. Wire `_moneyProvider` → EconomyManager GO in inspector.
+
+---
+
+### 4. GameEvents — OnMoneyProviderReady
+
+**File:** `0-Core/GameEvents.cs`
+
+**Added:**
+```csharp
+public static event Action<IShopMoney> OnMoneyProviderReady;
+public static void RaiseMoneyProviderReady(IShopMoney money) { ... }
+```
+
+**Why:** MoneyBridge fires this on Start. ShopUI subscribes to receive IShopMoney before initializing.
+
+---
+
+### 5. ShopUIOrchestrator — EconomyManager → IShopMoney
+
+**File:** `_-Systems/ShopUISystem/ShopUIOrchestrator.cs`
+
+**Before:**
+```csharp
+EconomyManager economyManager => Singleton<EconomyManager>.Ins;
+// ...
+economyManager.AddMoney(deltaMoney: -cost);
+GameEvents.RaiseMoneyChanged(economyManager.GetMoney());
+// ...
+public void InitBuildOrchestrateAndSubscribe(ShopDataService shopDataService, List<SO_ShopCategory> CATEGORY)
+```
+
+**After:**
+```csharp
+IShopMoney money;
+// ...
+money.AddMoney(deltaMoney: -cost);
+GameEvents.RaiseMoneyChanged(money.GetMoney());
+// ...
+public void InitBuildOrchestrateAndSubscribe(ShopDataService shopDataService, List<SO_ShopCategory> CATEGORY, IShopMoney money)
+```
+
+---
+
+### 6. ShopDataService — EconomyManager → IShopMoney
+
+**File:** `_-Systems/ShopUISystem/ShopDataService.cs`
+
+**Before:**
+```csharp
+public void BuildCategories(List<SO_ShopCategory> CATEGORY)
+// ...
+return GetCartTotalPrice() <= Singleton<EconomyManager>.Ins.GetMoney();
+```
+
+**After:**
+```csharp
+IShopMoney money;
+public void BuildCategories(List<SO_ShopCategory> CATEGORY, IShopMoney money)
+// ...
+return money != null && GetCartTotalPrice() <= money.GetMoney();
+```
+
+---
+
+### 7. ShopUI — Receives IShopMoney via Event
+
+**File:** `_-Systems/ShopUISystem/ShopUI.cs`
+
+**Before:**
+```csharp
+shopDataService.BuildCategories(this._CATEGORY);
+this._orchestrator.InitBuildOrchestrateAndSubscribe(shopDataService, this._CATEGORY);
+```
+
+**After:**
+```csharp
+IShopMoney money;
+GameEvents.OnMoneyProviderReady += (m) => money = m;
+shopDataService.BuildCategories(this._CATEGORY, money);
+this._orchestrator.InitBuildOrchestrateAndSubscribe(shopDataService, this._CATEGORY, money);
+```
+
+---
+
+### 8. Test Guides — NEW FILES
+
+| File | Purpose |
+|------|---------|
+| `_-Systems/ShopUISystem/ShopTest.md` | Vertical slice test for shop system |
+| `_-Systems/InteractionSystem/InteractionTest.md` | Vertical slice test for interaction system |
+| `_-Systems/EconomySystem/EconomyTest.md` | Vertical slice test for economy system |
+
+---
+
+## Files NOT Changed
+
+These files were copied as-is from handTyped(latest) — no modifications:
+
+- `0-Core/GameEvents.cs` (only added OnMoneyProviderReady)
+- `3-MonoBehaviours/SimplePlayerController.cs`
+- `4-Utils/PhaseALOG.cs`
+- `4-Utils/UtilsPhaseA.cs`
+- `5-Tests/ShopUITest.cs`
+- `_-Systems/EconomySystem/moneyUI.cs`
+- `_-Systems/InteractionSystem/*` (all files unchanged)
+- `_-Systems/ShopUISystem/Field_*.cs` (all unchanged)
+- `_-Systems/ShopUISystem/SO_*.cs` (all unchanged)
+- `_-Systems/ShopUISystem/ShopDataWrapper.cs`
+- `_-Systems/ShopUISystem/ShopSpawnPoint.cs`
+
+---
+
+## Decoupling Result
+
+| System | Before | After |
+|--------|--------|-------|
+| ShopUISystem → EconomyManager | ❌ Direct `Singleton<EconomyManager>.Ins` | ✅ `IShopMoney` interface only |
+| ShopDataService → EconomyManager | ❌ Direct `Singleton<EconomyManager>.Ins.GetMoney()` | ✅ `money.GetMoney()` via IShopMoney |
+| InteractionSystem | ✅ Already decoupled | ✅ No changes needed |
+| EconomySystem | ✅ Standalone | ✅ Added `IShopMoney` impl + MoneyBridge |
+
+**Zero `EconomyManager` references in ShopUISystem.** Only `EconomySystem/Bridge/MoneyBridge.cs` knows both sides.
+
 <!-- ==== FILE: learn/phase-a/Scripts/0-Core/GameEvents.cs ==== -->
 ﻿using System;
 using System.Linq;
@@ -14291,8 +14485,8 @@ public static partial class GameEvents
 	// << when anyCategory is unlocked
 
 	// when money provider is ready (MoneyBridge fires this on Start) >>
-	public static event Action<IMoney> OnMoneyProviderReady;
-	public static void RaiseMoneyProviderReady(IMoney money)
+	public static event Action<IShopMoney> OnMoneyProviderReady;
+	public static void RaiseMoneyProviderReady(IShopMoney money)
 	{
 		LogSubscribersCount(nameof(OnMoneyProviderReady), OnMoneyProviderReady);
 		GameEvents.OnMoneyProviderReady?
@@ -14503,6 +14697,35 @@ public class ShopUITest : MonoBehaviour
 	#endregion
 }
 
+<!-- ==== FILE: learn/phase-a/Scripts/_-Systems/EconomySystem/Bridge/MoneyBridge.cs ==== -->
+using UnityEngine;
+
+/// <summary>
+/// Bridges EconomyManager (IShopMoney) to ShopSystem without ShopSystem knowing EconomyManager exists.
+/// Place on any always-active GO. Wire _moneyProvider → EconomyManager GO in inspector.
+/// ShopUIOrchestrator receives IShopMoney via Init() from ShopUI, which gets it from this bridge via event.
+///
+/// Flow: MoneyBridge.Start() → fires RaiseMoneyProviderReady(IShopMoney)
+///       → ShopUI subscribes → stores IShopMoney → passes to Orchestrator.Init(dataService, money)
+///
+/// Why not wire directly? ShopUI is inside ShopSystem (portable). If ShopUI referenced
+/// Singleton<EconomyManager>, ShopSystem wouldn't be portable. The bridge is the one
+/// game-specific script that knows both sides.
+/// </summary>
+[AddComponentMenu("MineMGL/Bridge/MoneyBridge")]
+public class MoneyBridge : MonoBehaviour
+{
+	[SerializeField] MonoBehaviour _moneyProvider; // drag EconomyManager GO here
+
+	void Start()
+	{
+		if (_moneyProvider is IShopMoney money)
+			GameEvents.RaiseMoneyProviderReady(money);
+		else
+			Debug.LogError("[MoneyBridge] _moneyProvider does not implement IShopMoney!");
+	}
+}
+
 <!-- ==== FILE: learn/phase-a/Scripts/_-Systems/EconomySystem/EconomyManager.cs ==== -->
 using System;
 using System.Linq;
@@ -14520,7 +14743,7 @@ using SPACE_UTIL;
 /// owns money
 /// </summary>
 [DefaultExecutionOrder(-100)] // after INITMAnager, if any of monoBehaviour[in curr game]
-public class EconomyManager : Singleton<EconomyManager>, IMoney
+public class EconomyManager : Singleton<EconomyManager>, IShopMoney
 {
 	[SerializeField] float _defaultMoney = 400f;
 	float currMoney;
@@ -14664,18 +14887,6 @@ void Update()
 - [ ] CanAfford returns correct bool
 - [ ] EconomyManager implements IMoney
 - [ ] Zero references to Shop or Inventory
-
-<!-- ==== FILE: learn/phase-a/Scripts/_-Systems/EconomySystem/IMoney.cs ==== -->
-/// <summary>
-/// Interface for any money/currency provider. ShopSystem depends on this — not on EconomyManager directly.
-/// EconomyManager implements this. Future projects implement their own.
-/// </summary>
-public interface IMoney
-{
-	float GetMoney();
-	void AddMoney(float deltaMoney);
-	bool CanAfford(float price);
-}
 
 <!-- ==== FILE: learn/phase-a/Scripts/_-Systems/EconomySystem/moneyUI.cs ==== -->
 ﻿using System.Collections;
@@ -15042,35 +15253,6 @@ public class SimplePlayerInteraction : MonoBehaviour
 	#endregion
 }
 
-<!-- ==== FILE: learn/phase-a/Scripts/_-Systems/ShopUISystem/Bridge/MoneyBridge.cs ==== -->
-using UnityEngine;
-
-/// <summary>
-/// Bridges EconomyManager (IMoney) to ShopSystem without ShopSystem knowing EconomyManager exists.
-/// Place on any always-active GO. Wire _moneyProvider → EconomyManager GO in inspector.
-/// ShopUIOrchestrator receives IMoney via Init() from ShopUI, which gets it from this bridge via event.
-///
-/// Flow: MoneyBridge.Start() → fires RaiseMoneyProviderReady(IMoney)
-///       → ShopUI subscribes → stores IMoney → passes to Orchestrator.Init(dataService, money)
-///
-/// Why not wire directly? ShopUI is inside ShopSystem (portable). If ShopUI referenced
-/// Singleton<EconomyManager>, ShopSystem wouldn't be portable. The bridge is the one
-/// game-specific script that knows both sides.
-/// </summary>
-[AddComponentMenu("MineMGL/Bridge/MoneyBridge")]
-public class MoneyBridge : MonoBehaviour
-{
-	[SerializeField] MonoBehaviour _moneyProvider; // drag EconomyManager GO here
-
-	void Start()
-	{
-		if (_moneyProvider is IMoney money)
-			GameEvents.RaiseMoneyProviderReady(money);
-		else
-			Debug.LogError("[MoneyBridge] _moneyProvider does not implement IMoney!");
-	}
-}
-
 <!-- ==== FILE: learn/phase-a/Scripts/_-Systems/ShopUISystem/Field_ShopCartItem.cs ==== -->
 ﻿using UnityEngine;
 using UnityEngine.InputSystem;
@@ -15153,6 +15335,18 @@ public class Field_ShopItem : MonoBehaviour
 	}
 }
 
+<!-- ==== FILE: learn/phase-a/Scripts/_-Systems/ShopUISystem/IShopMoney.cs ==== -->
+/// <summary>
+/// Interface for any money/currency provider. ShopSystem depends on this — not on EconomyManager directly.
+/// EconomyManager implements this. Future projects implement their own.
+/// </summary>
+public interface IShopMoney
+{
+	float GetMoney();
+	void AddMoney(float deltaMoney);
+	bool CanAfford(float price);
+}
+
 <!-- ==== FILE: learn/phase-a/Scripts/_-Systems/ShopUISystem/SO_ShopCategory.cs ==== -->
 ﻿using System.Collections.Generic;
 
@@ -15211,7 +15405,7 @@ using SPACE_UTIL;
 public class ShopDataService
 {
 	#region private API
-	IMoney money;
+	IShopMoney money;
 	List<SO_ShopCategory> CATEGORY = new List<SO_ShopCategory>();
 	Dictionary<SO_ShopCategory, List<WShopItem>> DOC__category_wShopItem;
 
@@ -15242,7 +15436,7 @@ public class ShopDataService
 		#. snapshot of all collections
 	*/
 
-	public void BuildCategories(List<SO_ShopCategory> CATEGORY, IMoney money)
+	public void BuildCategories(List<SO_ShopCategory> CATEGORY, IShopMoney money)
 	{
 		this.money = money;
 		this.CATEGORY = CATEGORY;
@@ -15555,7 +15749,7 @@ public class ShopUI : MonoBehaviour
 
 	#region private API
 	ShopDataService shopDataService = new ShopDataService();
-	IMoney money;
+	IShopMoney money;
 	public ShopDataService GetDataServiceForTest() => shopDataService;
 	#endregion
 
@@ -15589,8 +15783,8 @@ public class ShopUI : MonoBehaviour
 		if(isFirstEnable)
 		{
 			Debug.Log("shopUI first time enabled".colorTag("lime"));
-			// → receive IMoney from MoneyBridge (fires on Start)
-			GameEvents.OnMoneyProviderReady += (m) => money = m;
+			// → receive IShopMoney from MoneyBridge (fires on Start)
+			GameEvents.OnMoneyProviderReady += (m) => money = m; // IShopMoney
 			// → init dataService just once
 			shopDataService.BuildCategories(this._CATEGORY, money);
 			// → Self Subscribed to View and disabled after setup
@@ -15667,7 +15861,7 @@ public class ShopUIOrchestrator : MonoBehaviour
 	#endregion
 
 	#region private API
-	IMoney money;
+	IShopMoney money;
 	ShopDataService shopDataService;
 	List<SO_ShopCategory> CATEGORY;
 	SO_ShopCategory selectedCategory;
@@ -15842,7 +16036,7 @@ public class ShopUIOrchestrator : MonoBehaviour
 	#endregion
 
 	#region public API
-	public void InitBuildOrchestrateAndSubscribe(ShopDataService shopDataService, List<SO_ShopCategory> CATEGORY, IMoney money)
+	public void InitBuildOrchestrateAndSubscribe(ShopDataService shopDataService, List<SO_ShopCategory> CATEGORY, IShopMoney money)
 	{
 		this.shopDataService = shopDataService;
 		this.CATEGORY = CATEGORY;
