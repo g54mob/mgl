@@ -1579,154 +1579,138 @@ Root of system folder keeps: base class, interfaces, DataService, non-MB shared 
 
 ### Portability Levels
 
-**L0 — Fully Independent:** zero imports from any `_-Systems/` folder. Not even interfaces.
-**L1 — Interface-Only Deps:** imports ONLY interfaces from other portable systems. Still portable — copy folder + the interface files.
-**L2 — Concrete Class Deps:** imports concrete classes or `Singleton<ConcreteClass>.Ins` from another system. NOT portable.
+**Portability = how many other `_-Systems/` folders must you copy to use this system.**
 
-**Allowed for L0+L1:** `GameEvents`, `Singleton<UIManager>.Ins` (ONLY UIManager), `SPACE_UTIL`, `INPUT.K`, `GlobalEnumsX`.
-**NOT allowed for L0+L1:** `Singleton<OreManager>.Ins`, `OrePiece` class, etc. — any concrete from another `_-Systems/`.
+**FREE (doesn't count as a dependency):** `GameEvents`, `Singleton<T>` base, `Singleton<UIManager>.Ins`, `GlobalEnumsX`, `SPACE_UTIL`, `INPUT.K`, `UtilsPhaseX`, shared infra in numbered folders (`1-Managers/`, `3-MonoBehaviours/Physics/`, `4-Utils/`). Using any of these = still L0.
 
-| System | Phase | Level | Owns Interface | Imports | Bridge |
-|--------|-------|-------|----------------|---------|--------|
-| ShopUISystem | A | L0 | `IShopMoney` | Nothing | `MoneyBridge` in EconomySystem |
-| InteractionSystem | A | L0 | `IInteractable` | Nothing | — |
-| InventorySystem | B | L0 | `IInventoryItem` | Nothing | `ItemEquipBridge` in ToolSystem |
-| HighlightSystem | B | L0 | `IHighlightable` | Nothing | — |
-| PlayerSystem | B | L0 | — | Nothing | — |
-| MiningSystem | C | L0 | `IDamageable` | Nothing | — |
-| OreSystem | C | L0 | — | Nothing (GlobalEnumsC only) | — |
-| SortingSystem | E | L0 | — | Nothing | — |
-| QuestSystem | F | L0 | — | Nothing (event-driven) | — |
-| ResearchSystem | F | L0 | — | Nothing (event-driven) | — |
-| SaveSystem | G | L0 | `ISaveLoadable*` | Nothing | — |
-| SoundSystem | H | L0 | — | Nothing | — |
-| SettingsSystem | H | L0 | — | Nothing | — |
-| ContractSystem | I | L0 | — | Nothing (event-driven) | — |
-| EconomySystem | A | L1 | — | `IShopMoney` (interface) | Owns `MoneyBridge` |
-| ToolSystem | B | L1 | — | `IInventoryItem`, `IHighlightable`, `IInteractable` (interfaces) | Owns `ItemEquipBridge` |
-| BuildingSystem | D | L1 | — | `IInventoryItem`, `IInteractable`, `IHighlightable` (interfaces) | — |
-| ConveyorSystem | D | L1 | — | `IInteractable` (interface) | — |
-| AutoMinerSystem | C | L2 | — | `Singleton<OrePiecePoolManager>.Ins`, `OrePiece` class | — |
-| SellerSystem | C | L2 | — | `OrePiece` class, `Singleton<EconomyManager>.Ins` | — |
-| ProcessingSystem | E | L2 | — | `OrePiece` class, `Singleton<OrePiecePoolManager>.Ins` | — |
-| PackagingSystem | E | L2 | — | `OrePiece` class | — |
-| PauseSystem | H | L2 | — | `Singleton<SavingLoadingManager>.Ins` | — |
-| MainMenuSystem | I | L2 | — | `Singleton<SavingLoadingManager>.Ins` | — |
-| WorldObjectSystem | I | L2 | — | Multiple concrete classes | — |
-| DebugSystem | J | L2 | — | Multiple concrete classes | — |
-| MenuSystem | J | L2 | — | Multiple concrete classes | — |
+**L0 — Truly Portable:** zero imports from any other `_-Systems/`. Copy this folder → it compiles and works in any Unity project. Interfaces this system OWNS live inside. Bridges that CONNECT TO this system live outside (in the non-portable consumer).
 
-**Score: 18 portable (L0+L1) / 9 game-specific (L2).**
+**L1+ — Counted Dependencies:** each import from another `_-Systems/` = +1 level. L1 = 1 dep, L2 = 2 deps, L3 = 3 deps. Two kinds of dep:
+- **Interface dep** (lightweight) — just copy the interface `.cs` file (7-20 lines). System is still practically portable.
+- **Concrete dep** (heavy) — must copy the entire source system + all its deps. NOT portable.
+
+**Portable = L0, or L1+ where ALL deps are interface-only.** If ANY dep is concrete → game-specific.
+
+| System | Phase | Level | Dep Type | What It Imports | Portable? |
+|--------|-------|-------|----------|-----------------|-----------|
+| ShopUISystem | A | L0 | — | nothing | ✅ |
+| InteractionSystem | A | L0 | — | nothing | ✅ |
+| InventorySystem | B | L0 | — | nothing | ✅ |
+| HighlightSystem | B | L0 | — | nothing | ✅ |
+| PlayerSystem | B | L0 | — | nothing | ✅ |
+| DamageSystem | B | L0 | — | nothing (owns IDamageable) | ✅ |
+| MiningSystem | C | L0 | — | nothing | ✅ |
+| SortingSystem | E | L0 | — | nothing | ✅ |
+| QuestSystem | F | L0 | — | nothing | ✅ |
+| ResearchSystem | F | L0 | — | nothing | ✅ |
+| SaveSystem | G | L0 | — | nothing | ✅ |
+| SoundSystem | H | L0 | — | nothing | ✅ |
+| SettingsSystem | H | L0 | — | nothing | ✅ |
+| ContractSystem | I | L0 | — | nothing | ✅ |
+| OreSystem | C | L0 | — | nothing (IDamageable is FREE from phase-b) | ✅ |
+| EconomySystem | A | L1 | interface | `IShopMoney` (ShopUISystem) | ✅ |
+| ConveyorSystem | D | L1 | interface | `IInteractable` (InteractionSystem) | ✅ |
+| ToolSystem | B | L3 | interface | `IInventoryItem` + `IHighlightable` + `IInteractable` | ✅ |
+| BuildingSystem | D | L3 | interface | `IInventoryItem` + `IInteractable` + `IHighlightable` | ✅ |
+| SellerSystem | C | L1 | **concrete** | `OrePiece` (OreSystem) | ❌ |
+| AutoMinerSystem | C | L2 | **concrete** | OreSystem + `IInteractable` (InteractionSystem) | ❌ |
+| ProcessingSystem | E | L2 | **concrete** | `OrePiece` + `OrePiecePoolManager` (OreSystem) | ❌ |
+| PackagingSystem | E | L1 | **concrete** | `OrePiece` (OreSystem) | ❌ |
+| PauseSystem | H | L1 | **concrete** | `SavingLoadingManager` (SaveSystem) | ❌ |
+| MainMenuSystem | I | L1 | **concrete** | `SavingLoadingManager` (SaveSystem) | ❌ |
+| WorldObjectSystem | I | L3+ | **concrete** | multiple systems | ❌ |
+| DebugSystem | J | L3+ | **concrete** | multiple systems | ❌ |
+| MenuSystem | J | L3+ | **concrete** | multiple systems | ❌ |
+
+**Score: 19 portable (L0 + L1+ interface-only) / 9 game-specific (any concrete dep).**
+
+**Priority: maximize L0 → if interface dep unavoidable, keep it interface-only → concrete deps are last resort.**
 
 ### System Dependency Diagram
 
 ```
 ═══════════════════════════════════════════════════════════════════════
-  L0 — FULLY INDEPENDENT (zero system imports — copy folder, it works)
+  FREE — shared infra, does NOT count as dependency (still L0)
 ═══════════════════════════════════════════════════════════════════════
-
-  ┌─────────────────┐  ┌──────────────────┐  ┌─────────────────┐
-  │ ShopUISystem    │  │ InteractionSystem│  │ InventorySystem │
-  │ owns: IShopMoney│  │ owns: IInteract. │  │ owns: IInvItem  │
-  └─────────────────┘  └──────────────────┘  └─────────────────┘
-
-  ┌─────────────────┐  ┌──────────────────┐  ┌─────────────────┐
-  │ HighlightSystem │  │ MiningSystem    │  │ PlayerSystem    │
-  │ owns: IHighlight│  │ owns: IDamage.  │  │                 │
-  └─────────────────┘  └─────────────────┘  └─────────────────┘
-
-  ┌─────────────────┐  ┌──────────────────┐  ┌─────────────────┐
-  │ OreSystem       │  │ SortingSystem   │  │ SaveSystem      │
-  │                 │  │                 │  │ owns: ISaveable* │
-  └─────────────────┘  └──────────────────┘  └─────────────────┘
-
-  ┌─────────────────┐  ┌──────────────────┐  ┌─────────────────┐
-  │ QuestSystem     │  │ ResearchSystem  │  │ ContractSystem  │
-  │ event-driven    │  │ event-driven    │  │ event-driven    │
-  └─────────────────┘  └──────────────────┘  └─────────────────┘
-
-  ┌─────────────────┐  ┌──────────────────┐
-  │ SoundSystem     │  │ SettingsSystem  │
-  └─────────────────┘  └──────────────────┘
+  GameEvents, Singleton<T>, Singleton<UIManager>.Ins, GlobalEnumsX,
+  SPACE_UTIL, INPUT.K, UtilsPhaseX, 1-Managers/, 3-MonoBehaviours/Physics/
 
 ═══════════════════════════════════════════════════════════════════════
-  L1 — INTERFACE-ONLY DEPS (imports interfaces, NOT concrete classes)
-  Still portable: copy folder + interface files from L0 systems
-═══════════════════════════════════════════════════════════════════════
-
-  ┌───────────────────────────────────────────────────────────────┐
-  │ ToolSystem                                                     │
-  │ imports: IInventoryItem + IHighlightable + IInteractable       │
-  │ owns: Bridge/ItemEquipBridge                                   │
-  └────────┬──────────────────┬──────────────────┬─────────────────┘
-           │ interface         │ interface         │ interface
-           ▼                  ▼                   ▼
-     IInventoryItem     IHighlightable      IInteractable
-     (InventorySys)     (HighlightSys)      (InteractSys)
-
-  ┌───────────────────────────────────────────────────────────────┐
-  │ EconomySystem                                                  │
-  │ imports: IShopMoney (interface only)                            │
-  │ owns: Bridge/MoneyBridge                                       │
-  └────────┬───────────────────────────────────────────────────────┘
-           │ interface
-           ▼
-       IShopMoney
-       (ShopUISys)
-
-  ┌───────────────────────────────────────────────────────────────┐
-  │ BuildingSystem                                                 │
-  │ imports: IInventoryItem + IInteractable + IHighlightable       │
-  └───────────────────────────────────────────────────────────────┘
-
-  ┌───────────────────────────────────────────────────────────────┐
-  │ ConveyorSystem                                                 │
-  │ imports: IInteractable (ConveyorBlockerT2, RoutingConveyor)    │
-  └───────────────────────────────────────────────────────────────┘
-
-═══════════════════════════════════════════════════════════════════════
-  L2 — CONCRETE CLASS DEPS (Singleton<X>.Ins or direct class import)
-  NOT portable — tied to mineMGL
+  L0 — TRULY PORTABLE (zero deps on other _-Systems/)
+  Copy folder → works in any Unity project.
 ═══════════════════════════════════════════════════════════════════════
 
   ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
-  │ AutoMinerSystem  │  │ SellerSystem     │  │ ProcessingSystem │
-  │ concrete:        │  │ concrete:        │  │ concrete:        │
-  │ OrePiecePoolMgr  │  │ OrePiece         │  │ OrePiece         │
-  │ OrePiece         │  │ EconomyManager   │  │ OrePiecePoolMgr  │
+  │ ShopUISystem     │  │ InteractionSystem│  │ InventorySystem  │
+  │ owns: IShopMoney │  │ owns: IInteract. │  │ owns: IInvItem   │
   └──────────────────┘  └──────────────────┘  └──────────────────┘
-
   ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
-  │ PackagingSystem  │  │ PauseSystem      │  │ MainMenuSystem   │
-  │ concrete:        │  │ concrete:        │  │ concrete:        │
-  │ OrePiece         │  │ SavingLoadingMgr │  │ SavingLoadingMgr │
+  │ HighlightSystem  │  │ MiningSystem     │  │ PlayerSystem     │
+  │ owns: IHighlight │  │ owns: IDamage.   │  │                  │
   └──────────────────┘  └──────────────────┘  └──────────────────┘
-
   ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
-  │ WorldObjectSys   │  │ DebugSystem      │  │ MenuSystem       │
-  │ multiple concrete│  │ multiple concrete│  │ multiple concrete│
+  │ SortingSystem    │  │ SaveSystem       │  │ SoundSystem      │
+  │                  │  │ owns: ISaveable* │  │                  │
   └──────────────────┘  └──────────────────┘  └──────────────────┘
+  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
+  │ QuestSystem      │  │ ResearchSystem   │  │ ContractSystem   │
+  └──────────────────┘  └──────────────────┘  └──────────────────┘
+  ┌──────────────────┐
+  │ SettingsSystem   │
+  └──────────────────┘
+
+  Total L0: 14 systems
 
 ═══════════════════════════════════════════════════════════════════════
-  INTERFACE FLOW: L0 defines → L1 implements
+  L1+ INTERFACE-ONLY DEPS — still portable (copy folder + interface files)
+  Level = number of interface deps. All lightweight (7-20 line .cs files).
 ═══════════════════════════════════════════════════════════════════════
 
-  L0 DEFINES                     L1 IMPLEMENTS
-  ──────────                     ─────────────
-  ShopUISystem ──IShopMoney────→ EconomySystem (+ MoneyBridge)
-  InteractionSys ─IInteract.──→ ToolSystem, BuildingSystem, ConveyorSystem
-  InventorySys ──IInvItem─────→ ToolSystem, BuildingSystem
-  HighlightSys ──IHighlight───→ ToolSystem, BuildingSystem
-  MiningSys ─────IDamageable──→ OreSystem (DamageableOrePiece)
-  SaveSystem ────ISaveable*───→ ToolSystem, BuildingSystem, OreSystem (Phase G)
+  ┌────────────────────────────────────────────────────────────────┐
+  │ OreSystem              L1  ──interface──→ IDamageable          │
+  │ EconomySystem          L1  ──interface──→ IShopMoney           │
+  │ ConveyorSystem         L1  ──interface──→ IInteractable        │
+  │ ToolSystem             L3  ──interface──→ IInvItem + IHighlight│
+  │                                           + IInteractable      │
+  │ BuildingSystem         L3  ──interface──→ IInvItem + IInteract │
+  │                                           + IHighlightable     │
+  └────────────────────────────────────────────────────────────────┘
 
-  CONCRETE DEPS (L2):
-  AutoMinerSys ───→ Singleton<OrePiecePoolManager>.Ins (OreSystem)
-  SellerSys ──────→ OrePiece class + Singleton<EconomyManager>.Ins
-  ProcessingSys ──→ OrePiece class + Singleton<OrePiecePoolManager>.Ins
-  PackagingSys ───→ OrePiece class
-  PauseSys ───────→ Singleton<SavingLoadingManager>.Ins
-  MainMenuSys ────→ Singleton<SavingLoadingManager>.Ins
+  Total portable (L0 + interface-only): 19 systems ✅
+
+═══════════════════════════════════════════════════════════════════════
+  L1+ CONCRETE DEPS — game-specific (must bring entire source system)
+  NOT portable. Tied to mineMGL.
+═══════════════════════════════════════════════════════════════════════
+
+  ┌────────────────────────────────────────────────────────────────┐
+  │ SellerSystem       L1  ──concrete──→ OrePiece (OreSystem)     │
+  │ PackagingSystem    L1  ──concrete──→ OrePiece (OreSystem)     │
+  │ PauseSystem        L1  ──concrete──→ SavingLoadingMgr (Save)  │
+  │ MainMenuSystem     L1  ──concrete──→ SavingLoadingMgr (Save)  │
+  │ AutoMinerSystem    L2  ──concrete──→ OreSystem + IInteractable│
+  │ ProcessingSystem   L2  ──concrete──→ OrePiece + PoolMgr (Ore) │
+  │ WorldObjectSystem  L3+ ──concrete──→ multiple systems         │
+  │ DebugSystem        L3+ ──concrete──→ multiple systems         │
+  │ MenuSystem         L3+ ──concrete──→ multiple systems         │
+  └────────────────────────────────────────────────────────────────┘
+
+  Total game-specific: 9 systems ❌
+
+═══════════════════════════════════════════════════════════════════════
+  INTERFACE OWNERSHIP: L0 defines → others implement
+═══════════════════════════════════════════════════════════════════════
+
+  L0 OWNER                        IMPLEMENTORS (copy interface file)
+  ──────────                       ──────────────────────────────────
+  ShopUISystem    ── IShopMoney ─→ EconomySystem (+MoneyBridge)
+  InteractionSys  ── IInteract. ─→ ToolSystem, BuildingSystem, ConveyorSystem, AutoMiner
+  InventorySys    ── IInvItem   ─→ ToolSystem, BuildingSystem
+  HighlightSys    ── IHighlight ─→ ToolSystem, BuildingSystem
+  MiningSystem    ── IDamageable─→ OreSystem (DamageableOrePiece)
+  SaveSystem      ── ISaveable* ─→ ToolSystem, BuildingSystem, OreSystem (Phase G)
+
+  SCORECARD: 19 portable / 9 game-specific = 68% reusable
 ```
 
 ### Key Principles
@@ -2981,13 +2965,16 @@ For each phase, the agent must produce:
 - **Hybrid folder structure.** Complex multi-file systems (3+ tightly coupled files) → `_-Systems/FeatureName/` with code files + Test.md. Non-MB classes can share a file; inspector-added MBs need own file (filename==classname). Shared infra stays layer-based (`0-Core/`, `2-Data/Enums/`, `4-Utils/`). See GOAL.md folder structure.
 - **System independence.** Systems communicate ONLY via interfaces + GameEvents. No direct class imports between systems. GameEvents use `Action<IInventoryItem>` (interface), never `Action<BaseHeldTool>` (concrete). Bridge scripts (e.g. `ItemEquipBridge`) connect systems and live on the non-portable side.
 - **Portability levels (see GOAL.md diagram):**
-  - **L0 — Fully Independent:** zero imports from any `_-Systems/`. Copy folder → works in any Unity project. Testable in standalone scene with zero other systems. **This is the goal for every system.**
-  - **L1 — Interface-Only Deps:** imports ONLY interfaces from L0 systems (e.g. `IInteractable`, `IInventoryItem`). Still portable — copy folder + interface files. Acceptable when a system MUST implement another system's contract.
-  - **L2 — Concrete Class Deps:** imports `Singleton<ConcreteClass>.Ins` or direct classes from another system. NOT portable. Use ONLY when unavoidable.
-  - **Allowed for L0+L1:** `GameEvents`, `Singleton<UIManager>.Ins` (ONLY UIManager), `SPACE_UTIL`, `INPUT.K`, `GlobalEnumsX`.
-  - **NOT allowed for L0+L1:** `Singleton<OreManager>.Ins`, `OrePiece` class, etc. — any concrete from another `_-Systems/`.
-  - **Priority:** maximize L0 systems → if not possible, use L1 (interface deps) → if not possible, use bridges → L2 is last resort.
+  - **Portability = how many other `_-Systems/` folders must you copy.** Level = count of external system deps.
+  - **FREE (doesn't count):** `GameEvents`, `Singleton<T>` base, `Singleton<UIManager>.Ins`, `GlobalEnumsX`, `SPACE_UTIL`, `INPUT.K`, `UtilsPhaseX`, shared infra in numbered folders (`1-Managers/`, `3-MonoBehaviours/Physics/`, `4-Utils/`). Using any of these = still L0.
+  - **L0 — Truly Portable:** zero imports from any other `_-Systems/`. Copy folder → works in any Unity project. **This is the goal for every system.**
+  - **L1+ — Counted deps:** L1 = 1 external system dep, L2 = 2, L3 = 3. Two kinds:
+    - **Interface dep** (lightweight): copy 1 small `.cs` file (7-20 lines). System is still portable. ✅
+    - **Concrete dep** (heavy): must copy entire source system + its deps. NOT portable. ❌
+  - **Portable = L0, or L1+ where ALL deps are interface-only.** If ANY dep is concrete → game-specific.
+  - **Priority:** maximize L0 → if interface dep unavoidable, keep it interface-only → concrete deps are last resort.
   - **For each file, annotate with `// deps:` showing what it imports.**
+  - **FLOW.md must include a Portability Diagram** with: FREE infra list, L0 systems, L1+ interface-only (still portable), L1+ concrete (game-specific), scorecard.
 - **[AddComponentMenu]** on every MonoBehaviour: `[AddComponentMenu("MineMGL/Category/ClassName")]`.
 - **Unity 6000.3: filename == classname** for any MonoBehaviour added via inspector. Named subfolders: `...BaseSub/`, `Bridge/`, `Field_/`, `SO_/`.
 - **GlobalEnumsX.cs** — all enums for a phase go in ONE file: `2-Data/Enums/GlobalEnumsX.cs` (e.g. `GlobalEnumsB.cs`). No separate file per enum. Use `InteractionType` enum instead of magic strings for interaction names.
@@ -13986,6 +13973,74 @@ RobotGrabberArm (root)
 ### Phase H — Full Mine Environment
 > Multi-level mine with elevator, different biomes per level, cave lighting.
 
+<!-- ==== FILE: learn/phase-a-1(New)/FLOW.md ==== -->
+# Phase A½ — Data Flow & Event Architecture
+
+## Portability Diagram
+
+```
+═══════════════════════════════════════════════════════════════════════════
+  FREE — shared infra, does NOT count as dependency (still L0)
+═══════════════════════════════════════════════════════════════════════════
+  GameEvents, Singleton<T>, Singleton<UIManager>.Ins, GlobalEnumsAll,
+  SPACE_UTIL, INPUT.K, UtilsPhaseAll
+═══════════════════════════════════════════════════════════════════════════
+
+
+═══════════════════════════════════════════════════════════════════════════
+  NO _-Systems/ IN THIS PHASE
+  Phase A½ adds 2 standalone scripts to 3-MonoBehaviours/ (shared infra).
+  No portability tracking needed — these are environment/utility scripts.
+═══════════════════════════════════════════════════════════════════════════
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │  3-MonoBehaviours/                        (shared infra)   │
+  │                                                             │
+  │  StartingElevator.cs — code-driven descent + Perlin shake   │
+  │    fires → OnElevatorLanded (GameEvents)                    │
+  │    deps: GameEvents only                                    │
+  │                                                             │
+  │  CameraShaker.cs — Perlin noise sway + view punch           │
+  │    deps: none (reads camera transform directly)             │
+  │                                                             │
+  │  Both are standalone MonoBehaviours, not _-Systems/.         │
+  │  No interfaces, no singletons, no system deps.              │
+  └─────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════
+  PHASE A½ PORTABILITY SCORECARD
+═══════════════════════════════════════════════════════════════════════════
+
+  Systems: 0 (no _-Systems/ folders)
+  Standalone scripts: 2 (both in shared infra)
+  Both scripts are self-contained — copy either to any project.
+```
+
+## Data Flows
+
+### Elevator Descent (New Game)
+
+Scene loads → `StartingElevator.Start()` begins the descent sequence. The elevator platform (with the player on it) moves downward via code-driven `transform.position` interpolation over ~5 seconds. A roof collider above prevents the player from jumping out mid-descent.
+
+**During descent:** `CameraShaker` applies Perlin noise sway — small random rotational offsets each frame create a subtle rumble feel. Parameters: amplitude (~0.5°), frequency (~2Hz). The camera gently wobbles as if the elevator is shaking.
+
+**On landing:** Elevator reaches target Y position → `StartingElevator` fires `GameEvents.RaiseElevatorLanded()` → landing particle plays at elevator base → roof collider disables → player is free to walk. `CameraShaker` applies a one-time view punch (quick rotation snap + decay) simulating the landing impact.
+
+### View Punch (Reusable)
+
+`CameraShaker.AddViewPunch(Vector3 punch)` is called by StartingElevator on landing and later by ToolPickaxe (Phase B) on swing. It adds an instant angular offset to the camera that decays over ~0.2s via `Mathf.Lerp` toward zero. This makes impacts feel heavy without permanently offsetting the camera.
+
+## Event Registry
+
+| Event | Who Fires | Who Subscribes | Data |
+|-------|-----------|---------------|------|
+| `OnElevatorLanded` | StartingElevator | (future: tutorial triggers) | `()` |
+| `OnGamePaused` | (Phase H PauseSystem) | StartingElevator (stops descent if paused) | `()` |
+| `OnGameUnpaused` | (Phase H PauseSystem) | StartingElevator (resumes descent) | `()` |
+
+Minimal events — Phase A½ is environment setup, not a system.
+
 <!-- ==== FILE: learn/phase-a-1(New)/GUIDE.md ==== -->
 # Phase A½ — The Mine: Environment & Elevator
 
@@ -14410,6 +14465,138 @@ public class ElevatorTest : MonoBehaviour
 	}
 	#endregion
 }
+
+<!-- ==== FILE: learn/phase-a/FLOW.md ==== -->
+# Phase A — Data Flow & Event Architecture
+
+## Portability Diagram
+
+```
+═══════════════════════════════════════════════════════════════════════════
+  FREE — shared infra, does NOT count as dependency (still L0)
+═══════════════════════════════════════════════════════════════════════════
+  GameEvents, Singleton<T>, Singleton<UIManager>.Ins, GlobalEnumsAll,
+  SPACE_UTIL, INPUT.K, UtilsPhaseAll
+
+  → Using ANY of these = still L0. They're project infrastructure.
+═══════════════════════════════════════════════════════════════════════════
+
+
+═══════════════════════════════════════════════════════════════════════════
+  L0 — TRULY PORTABLE (zero deps on other _-Systems/)
+  Copy folder → works in any Unity project.
+═══════════════════════════════════════════════════════════════════════════
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │  ShopUISystem/                              L0 ✅ PORTABLE │
+  │                                                             │
+  │  Owns: IShopMoney (interface)                               │
+  │  Scripts: ShopUI, ShopUIOrchestrator, ShopDataService,      │
+  │    ShopDataWrapper, Field_ShopCategory, Field_ShopItem,     │
+  │    Field_ShopCartItem, SO_ShopCategory, SO_ShopItemDef,     │
+  │    ShopSpawnPoint                                           │
+  │  Deps on other _-Systems/: NONE                             │
+  │  Communicates via: GameEvents + IShopMoney interface        │
+  │    fires → OnOpenShopView, OnCloseShopView                  │
+  │    fires → OnUnlockedCategory                               │
+  │    receives IShopMoney via init (doesn't know who impl.)    │
+  │                                                             │
+  │  Copy test: ✅ drop in empty project + provide IShopMoney   │
+  └─────────────────────────────────────────────────────────────┘
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │  InteractionSystem/                         L0 ✅ PORTABLE │
+  │                                                             │
+  │  Owns: IInteractable (interface)                            │
+  │  Scripts: SimplePlayerInteraction, InteractionWheelUI,      │
+  │    SO_InteractionOption, Field_InteractionOption,            │
+  │    InteractableComputer                                     │
+  │  Deps on other _-Systems/: NONE                             │
+  │  Communicates via: GameEvents + IInteractable interface     │
+  │    fires → OnOpenInteractionView, OnCloseInteractionView    │
+  │    raycasts → finds IInteractable on hit                    │
+  │                                                             │
+  │  Copy test: ✅ drop in empty project + add IInteractable GO │
+  └─────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════
+  L1+ INTERFACE-ONLY DEPS — still portable
+═══════════════════════════════════════════════════════════════════════════
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │  EconomySystem/                       L1 (1 interface dep) │
+  │                                                             │
+  │  Scripts: EconomyManager, moneyUI, Bridge/MoneyBridge       │
+  │                                                             │
+  │  Dep #1: IShopMoney ─── from ShopUISystem (interface)       │
+  │    └─ EconomyManager implements IShopMoney                  │
+  │    └─ MoneyBridge wires EconomyManager → ShopUI             │
+  │    └─ lightweight: copy IShopMoney.cs (1 file)              │
+  │                                                             │
+  │  Communicates via: GameEvents                               │
+  │    fires → OnMoneyChanged                                   │
+  │                                                             │
+  │  Copy test: ✅ folder + IShopMoney.cs → works               │
+  └────────────────────┬────────────────────────────────────────┘
+                       │ interface
+                       ▼
+                  IShopMoney
+                  (ShopUISystem)
+
+
+═══════════════════════════════════════════════════════════════════════════
+  PHASE A PORTABILITY SCORECARD
+═══════════════════════════════════════════════════════════════════════════
+
+  System             │ Level │ External Deps                   │ Portable?
+  ───────────────────┼───────┼─────────────────────────────────┼──────────
+  ShopUISystem       │  L0   │ none                            │ ✅ YES
+  InteractionSystem  │  L0   │ none                            │ ✅ YES
+  EconomySystem      │  L1   │ IShopMoney (interface, 1 file)  │ ✅ YES
+
+  Portable: 3/3 systems ✅
+  Game-specific: 0/3
+
+  Note: SimplePlayerController is in 3-MonoBehaviours/ (shared infra),
+        not a _-Systems/ folder. It's a standalone script, not a system.
+```
+
+## Data Flows
+
+### Opening the Shop
+
+Player walks to the computer terminal → presses E → `SimplePlayerInteraction` raycasts from camera → hits `InteractableComputer` collider → calls `GetInteractions()` → single option "Open Shop" → `InteractableComputer.Interact()` fires `GameEvents.RaiseOpenShopView()`.
+
+**ShopUI** subscribes to `OnOpenShopView` → `SetActive(true)` → `OnEnable` fires `RaiseMenuStateChanged(isAnyMenuOpen: true)` → **UIManager** tracks `isAnyMenuOpen = true` → cursor unlocks, player movement pauses.
+
+On first enable (`isFirstEnable`): ShopUI builds `ShopDataService`, passes `IShopMoney` (received from MoneyBridge at scene start), inits `ShopUIOrchestrator`. Orchestrator calls `BuildCategoryView()` → destroys old children → loops `CATEGORY` → Instantiates `Field_ShopCategory` per category → wires onClick → displays first category's items.
+
+### Adding to Cart + Purchasing
+
+Player clicks an item row → `ShopUIOrchestrator` → `dataService.TryAddNewCartItem(wShopItem)` → cart panel updates. Adjust qty via +/- buttons → `dataService.AlterCartItemQty()`. Click Purchase → `dataService.CanAffordCartItems()` checks `IShopMoney.GetMoney() >= total` → if yes: `IShopMoney.AddMoney(-total)` → `RaiseMoneyChanged` → **moneyUI** updates HUD text. Items spawn at `ShopSpawnPoint` positions.
+
+### Interaction Wheel (Multi-Option)
+
+If `IInteractable.ShouldUseInteractionWheel()` returns true and there are 2+ options → `InteractionWheelUI` opens → spawns `Field_InteractionOption` buttons in a radial layout → player clicks one → `interactable.Interact(selectedOption)` → wheel closes.
+
+### Closing Shop
+
+ESC or E → `ShopUI.Update()` → `SetActive(false)` → `OnDisable` fires `RaiseMenuStateChanged(false)` → UIManager `isAnyMenuOpen = false` → cursor relocks, player movement resumes.
+
+## Event Registry
+
+| Event | Who Fires | Who Subscribes | Data |
+|-------|-----------|---------------|------|
+| `OnOpenShopView` | InteractableComputer | ShopUI (activates self) | `()` |
+| `OnCloseShopView` | ShopUI, UIManager.CloseAll | ShopUI (deactivates self) | `()` |
+| `OnOpenInteractionView` | SimplePlayerInteraction | InteractionWheelUI | `(IInteractable, List<SO_Interaction>)` |
+| `OnCloseInteractionView` | InteractionWheelUI, UIManager | InteractionWheelUI | `()` |
+| `OnMenuStateChanged` | ShopUI, InteractionWheelUI, BgUI | UIManager, PlayerController | `(bool isAnyMenuOpen)` |
+| `OnMoneyChanged` | EconomyManager | moneyUI, ShopUIOrchestrator | `(float newBalance)` |
+| `OnUnlockedCategory` | ShopUIOrchestrator (after purchase) | ShopUIOrchestrator (refresh tabs) | `(SO_ShopCategory)` |
+
+Every connection is a GameEvent or `[SerializeField]`. Zero direct cross-system calls.
 
 <!-- ==== FILE: learn/phase-a/GUIDE_CHANGELOG.md ==== -->
 # Phase A — Changelog from handTyped(latest)
@@ -16246,51 +16433,122 @@ public class ShopUIOrchestrator : MonoBehaviour
 }
 
 <!-- ==== FILE: learn/phase-b(New)/FLOW.md ==== -->
-# Phase B — Data Flow
+# Phase B — Data Flow & Event Architecture
 
-> How data moves between systems. Every connection is either a **GameEvent**, **interface**, or `[SerializeField]`.
-> Zero direct cross-system class imports. Systems only know each other via `IInventoryItem` and `IHighlightable`.
-
----
-
-## System Map
+## Portability Diagram
 
 ```
-╔═══════════════════════╗         ╔══════════════════╗
-║   INVENTORY SYSTEM    ║         ║   PLAYER SYSTEM  ║
-║                       ║         ║                  ║
-║ IInventoryItem ◄──────╫─────── only knows this     ║
-║ InventoryDataService  ║         ║ PlayerMovement   ║
-║ InventoryOrchestrator ║         ║ PlayerCamera     ║
-║ InventoryUI           ║         ║ PlayerGrab ──────╫── subscribes OnItemEquipped
-║ Field_InventorySlot   ║         ║ RbDragger        ║     → item.SetOwnerContext(cam, container, magnetPos)
-║ UIEventRelay          ║         ╚════════╤═════════╝
-╚═══════╤═══════════════╝                  │
-        │                                  │
-        ▼                                  ▼
-╔═══════════════════════════════════════════════════════╗
-║                   GAME EVENTS BUS                     ║
-║  OnToolPickupRequested(IInventoryItem)                ║
-║  OnItemPickedUp(IInventoryItem)                       ║
-║  OnItemDropped(IInventoryItem)                        ║
-║  OnItemEquipped(IInventoryItem)                       ║
-║  OnToolSwitched(int)                                  ║
-║  OnMenuStateChanged(bool)                             ║
-║  OnOpenInventoryView / OnCloseInventoryView           ║
-╚═══════╤══════════════════╤═══════════════╤════════════╝
-        │                  │               │
-        ▼                  ▼               ▼
-╔═══════════════╗  ╔══════════════╗  ╔═══════════╗
-║  TOOL SYSTEM  ║  ║  HIGHLIGHT   ║  ║  PHYSICS  ║
-║               ║  ║              ║  ║           ║
-║ BaseHeldTool  ║  ║ IHighlightable  ║  ║ BasePhys  ║
-║  implements:  ║  ║ ObjHighlighter  ║  ║ Sellable  ║
-║  IInventoryItem  ║  ╚══════════════╝  ║ SoundPl   ║
-║  IHighlightable  ║                    ╚═══════════╝
-║  IInteractable║
-║ ToolPickaxe   ║
-║ ToolMagnet... ║
-╚═══════════════╝
+═══════════════════════════════════════════════════════════════════════════
+  FREE — shared infra, does NOT count as dependency (still L0)
+═══════════════════════════════════════════════════════════════════════════
+  GameEvents, Singleton<T>, Singleton<UIManager>.Ins, GlobalEnumsAll/B,
+  SPACE_UTIL, INPUT.K, UtilsPhaseAll/B, 3-MonoBehaviours/Physics/
+  (BasePhysicsObject, BaseSellableItem, PhysicsSoundPlayer, PhysicsGib)
+
+  → Using ANY of these = still L0. They're project infrastructure.
+═══════════════════════════════════════════════════════════════════════════
+
+
+═══════════════════════════════════════════════════════════════════════════
+  L0 — TRULY PORTABLE (zero deps on other _-Systems/)
+  Copy folder → works in any Unity project.
+═══════════════════════════════════════════════════════════════════════════
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │  InventorySystem/                           L0 ✅ PORTABLE │
+  │                                                             │
+  │  Owns: IInventoryItem (interface)                           │
+  │  Scripts: InventoryData (IInventoryItem + InventorySlot     │
+  │    + InventoryDataService), Field_InventorySlot,            │
+  │    InventorySystem (UIEventRelay + Orchestrator + UI)       │
+  │  Deps on other _-Systems/: NONE                             │
+  │  Communicates via: GameEvents (all use IInventoryItem)      │
+  │    fires → OnItemPickedUp, OnItemDropped, OnToolSwitched    │
+  │    subscribes ← OnToolPickupRequested                       │
+  │    subscribes ← OnOpenInventoryView, OnCloseInventoryView   │
+  │                                                             │
+  │  Copy test: ✅ drop in project + mock IInventoryItem → works│
+  └─────────────────────────────────────────────────────────────┘
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │  PlayerSystem/                              L0 ✅ PORTABLE │
+  │                                                             │
+  │  Scripts: PlayerMovement, PlayerCamera, PlayerGrab,         │
+  │    PlayerSpawnPoint, RigidbodyDraggerController              │
+  │  Deps on other _-Systems/: NONE                             │
+  │  Communicates via: GameEvents                               │
+  │    subscribes ← OnItemEquipped (SetOwnerContext via         │
+  │                  IInventoryItem — but IInventoryItem is in  │
+  │                  the GameEvent signature, not imported)      │
+  │    subscribes ← OnMenuStateChanged (block grab)             │
+  │                                                             │
+  │  Copy test: ✅ drop in project → FPS controller works       │
+  └─────────────────────────────────────────────────────────────┘
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │  HighlightSystem/                           L0 ✅ PORTABLE │
+  │                                                             │
+  │  Owns: IHighlightable (interface)                           │
+  │  Scripts: ObjectHighlighterManager                          │
+  │  Deps on other _-Systems/: NONE                             │
+  │  Communicates via: GetComponentInParent<IHighlightable>()   │
+  │    subscribes ← OnItemEquipped, OnItemDropped (track active)│
+  │    subscribes ← OnMenuStateChanged (block highlight)        │
+  │                                                             │
+  │  Copy test: ✅ drop in project + IHighlightable on any GO   │
+  └─────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════
+  L3 INTERFACE-ONLY DEPS — still portable (copy folder + 3 interface files)
+═══════════════════════════════════════════════════════════════════════════
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │  ToolSystem/                          L3 (3 interface deps)│
+  │                                                             │
+  │  Scripts: BaseHeldTool, ToolPickaxe, ToolMagnet,            │
+  │    ToolHammer, ToolMiningHat, ToolSupportsWrench,           │
+  │    ToolResourceScanner, ToolBuilder (partial),              │
+  │    Bridge/ItemEquipBridge                                   │
+  │                                                             │
+  │  Dep #1: IInventoryItem ─── from InventorySystem (intf)    │
+  │    └─ BaseHeldTool implements IInventoryItem                │
+  │  Dep #2: IHighlightable ─── from HighlightSystem (intf)    │
+  │    └─ BaseHeldTool implements IHighlightable                │
+  │  Dep #3: IInteractable ─── from InteractionSystem (intf)   │
+  │    └─ BaseHeldTool implements IInteractable                 │
+  │                                                             │
+  │  All 3 deps are interfaces (lightweight .cs files).         │
+  │  ItemEquipBridge connects ToolSystem ↔ PlayerSystem         │
+  │    (lives here, on the non-portable side)                   │
+  │                                                             │
+  │  Copy test: ✅ folder + 3 interface .cs files → works       │
+  └────────┬──────────────────┬──────────────────┬──────────────┘
+           │ interface         │ interface         │ interface
+           ▼                  ▼                   ▼
+     IInventoryItem     IHighlightable      IInteractable
+     (InventorySys)     (HighlightSys)      (InteractSys)
+
+
+═══════════════════════════════════════════════════════════════════════════
+  PHASE B PORTABILITY SCORECARD
+═══════════════════════════════════════════════════════════════════════════
+
+  System             │ Level │ External Deps                   │ Portable?
+  ───────────────────┼───────┼─────────────────────────────────┼──────────
+  InventorySystem    │  L0   │ none                            │ ✅ YES
+  PlayerSystem       │  L0   │ none                            │ ✅ YES
+  HighlightSystem    │  L0   │ none                            │ ✅ YES
+  ToolSystem         │  L3   │ IInvItem+IHighlight+IInteract   │ ✅ YES
+                     │       │ (all interface, all lightweight) │
+
+  Portable: 4/4 systems ✅
+  Game-specific: 0/4
+
+  INTERFACE OWNERSHIP (Phase B):
+  InventorySystem  ── IInventoryItem ─→ ToolSystem (BaseHeldTool)
+  HighlightSystem  ── IHighlightable ─→ ToolSystem (BaseHeldTool)
+  (InteractionSystem from Phase A) ── IInteractable ─→ ToolSystem
 ```
 
 ---
@@ -17356,6 +17614,28 @@ Scene Root
 - [ ] Switch: previous ViewModel hides, new ViewModel shows
 - [ ] Drop (G): ViewModel hides, WorldModel appears with forward velocity
 - [ ] Toggle same slot: deselects (no ViewModel), press again re-equips
+
+<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/DamageSystem/IDamageable.cs ==== -->
+// deps: none — generic interface, zero game-specific dependency
+
+using UnityEngine;
+
+/// <summary>
+/// Any object that can take damage at a world position. OreNode (Phase C) implements this
+/// to lose health when the pickaxe hits it. DamageableOrePiece (Phase C) implements this to break
+/// into cluster pieces when hit hard enough by collision. ToolPickaxe calls TakeDamage
+/// on whatever IDamageable the raycast hits.
+///
+/// Lives in DamageSystem (Phase B) because the caller (ToolPickaxe) is Phase B.
+/// Implementors are Phase C+ — they import this interface (FREE, shared infra).
+///
+/// Who implements me: OreNode (Phase C), DamageableOrePiece (Phase C), future destructibles.
+/// Who calls me: ToolPickaxe (Phase B) via raycast → GetComponent&lt;IDamageable&gt;().
+/// </summary>
+public interface IDamageable
+{
+    void TakeDamage(float damage, Vector3 position);
+}
 
 <!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/HighlightSystem/HighlightSystem.cs ==== -->
 using UnityEngine;
@@ -20694,12 +20974,57 @@ public class ToolPickaxe : BaseHeldTool
 		StartCoroutine(PerformAttack(0.2f));
 		lastAttackTime = Time.time;
 	}
+	/// <summary> Waits delaySeconds, then raycasts from camera. If _canBreakOreIntoCrushed and hit
+	/// is an OrePiece with a CrushedPrefab → converts to crushed + particle + explosion. Otherwise
+	/// checks IDamageable → TakeDamage + ore hit particle. Then checks Rigidbody → AddForce.
+	/// Non-damageable, non-rb hit → generic hit particle. Matches original source 100%. </summary>
 	IEnumerator PerformAttack(float delaySeconds)
 	{
 		yield return new WaitForSeconds(delaySeconds);
 		if (!gameObject.activeInHierarchy || ownerCam == null) yield break;
 		if (!Physics.Raycast(ownerCam.transform.position, ownerCam.transform.forward, out RaycastHit hit, _useRange, _hitLayers))
 			yield break;
+
+		// → Phase C: if this pickaxe can break ore into crushed pieces, try that first
+		if (_canBreakOreIntoCrushed)
+		{
+			OrePiece orePiece = hit.collider.GetComponent<OrePiece>();
+			if (orePiece != null && orePiece.CrushedPrefab != null
+				&& orePiece.CrushedPrefab.GetComponent<OrePiece>() != null
+				&& orePiece.PieceType == PieceType.ore
+				&& orePiece.TryConvertToCrushed())
+			{
+				// purpose: ParticleManager creates hit particle at impact point
+				GameEvents.RaiseCreateParticleRequested(
+					Singleton<ParticleManager>.Ins.GetOreNodeHitParticlePrefab(),
+					hit.point, Quaternion.LookRotation(hit.normal));
+				yield return new WaitForFixedUpdate();
+				UtilsPhaseC.SimpleExplosion(hit.point, 0.5f, 2f, 0.5f);
+				yield break;
+			}
+		}
+
+		// → Phase C: check IDamageable (OreNode, DamageableOrePiece)
+		IDamageable damageable = hit.collider.GetComponent<IDamageable>();
+		if (damageable != null)
+		{
+			// → deal damage to the damageable object (OreNode loses health, may break)
+			damageable.TakeDamage(_damage, hit.point);
+			// purpose: ParticleManager creates ore hit particle at impact point
+			GameEvents.RaiseCreateParticleRequested(
+				Singleton<ParticleManager>.Ins.GetOreNodeHitParticlePrefab(),
+				hit.point, Quaternion.LookRotation(hit.normal));
+		}
+		else
+		{
+			// → non-damageable hit: generic impact particle
+			// Phase H: play world hit sound
+			GameEvents.RaiseCreateParticleRequested(
+				Singleton<ParticleManager>.Ins.GetGenericHitImpactParticle(),
+				hit.point, Quaternion.LookRotation(hit.normal));
+		}
+
+		// → apply physics force to rigidbody (pushes loose objects)
 		Rigidbody hitRb = hit.collider.GetComponent<Rigidbody>();
 		if (hitRb != null)
 		{
@@ -21001,69 +21326,142 @@ to target → sets damping high → ignores collision with player → target fli
 <!-- ==== FILE: learn/phase-c(New)/FLOW.md ==== -->
 # Phase C — Data Flow & Event Architecture
 
-## System Map
+## Portability Diagram
 
 ```
-╔════════════════════════════════════════════════════════════════════════════════╗
-║  phase-All (shared)                                                          ║
-║  ┌────────────┐  ┌────────────┐  ┌──────────────┐  ┌───────────────┐       ║
-║  │ Singleton  │  │ UIManager  │  │ GameEvents   │  │ GlobalEnumsAll│       ║
-║  └────────────┘  └────────────┘  │ (partial)    │  │ (TagType)     │       ║
-║                                  └──────────────┘  └───────────────┘       ║
-╚════════════════════════════════════════════════════════════════════════════════╝
+═══════════════════════════════════════════════════════════════════════════
+  FREE — these DO NOT count as dependencies (shared infra, always available)
+═══════════════════════════════════════════════════════════════════════════
+  GameEvents (partial)    — static event bus, every system fires/subscribes
+  Singleton<T>            — base class for managers
+  Singleton<UIManager>    — the ONLY singleton read allowed for L0
+  GlobalEnumsAll/C        — shared enums (TagType, ResourceType, PieceType)
+  SPACE_UTIL / INPUT.K    — user utility extensions
+  UtilsPhaseAll/C         — shared static helpers
+  BaseSellableItem etc.   — phase-b 3-MonoBehaviours/Physics/ (shared infra)
+  1-Managers/             — ParticleManager lives here (shared, not _-Systems/)
 
-╔═══════════════════════════════════════════════════════════════════════════════╗
-║  phase-c                                                                     ║
-║                                                                              ║
-║  ┌─────────────────────────────────────────────────────────────────────┐     ║
-║  │  _-Systems/MiningSystem/ (L0 PORTABLE — owns IDamageable)         │     ║
-║  │  ┌──────────────┐  ┌──────────────────┐  ┌──────────────────┐    │     ║
-║  │  │ IDamageable  │  │ OreNode          │  │ WeightedNodeDrop │    │     ║
-║  │  │ (interface)  │  │ TakeDamage→Break │  │ (entity)         │    │     ║
-║  │  └──────────────┘  │ fires: SpawnOre  │  └──────────────────┘    │     ║
-║  │                    │  CreateParticle  │                           │     ║
-║  │                    │  OreNodeBroken   │                           │     ║
-║  │                    │  OreMined        │                           │     ║
-║  │                    │  StaticBreakable │                           │     ║
-║  │                    └──────────────────┘                           │     ║
-║  └─────────────────────────────────────────────────────────────────────┘     ║
-║                          │ GameEvents                                        ║
-║                          ▼                                                   ║
-║  ┌─────────────────────────────────────────────────────────────────────┐     ║
-║  │  _-Systems/OreSystem/ (L0 PORTABLE)                                │     ║
-║  │  ┌──────────────┐  ┌──────────────────┐  ┌──────────────────┐    │     ║
-║  │  │OrePiecePool  │  │ OreManager       │  │ OreLimitManager  │    │     ║
-║  │  │Manager       │←─│ owns DataService │  │ throttles spawn  │    │     ║
-║  │  │ subscribes:  │  │ round-robin clean│  │ fires: OreLimitC │    │     ║
-║  │  │ SpawnOreReq  │  └──────────────────┘  └──────────────────┘    │     ║
-║  │  └──────────────┘                                                 │     ║
-║  │  ┌──────────────┐  ┌──────────────────┐  ┌──────────────────┐    │     ║
-║  │  │ OrePiece     │  │DamageableOrePiece│  │PhysicsLimitUI    │    │     ║
-║  │  │ fires: Sold  │  │ IDamageable impl │  │Warning           │    │     ║
-║  │  └──────────────┘  └──────────────────┘  │ subscribes:      │    │     ║
-║  │  ┌──────────────┐  ┌──────────────────┐  │ OreLimitChanged  │    │     ║
-║  │  │OreDataService│  │ SO_AutoMiner     │  └──────────────────┘    │     ║
-║  │  │ (pure C#)    │  │ ResourceDef      │                          │     ║
-║  │  └──────────────┘  └──────────────────┘                          │     ║
-║  └─────────────────────────────────────────────────────────────────────┘     ║
-║                                                                              ║
-║  ┌───────────────────────────────────┐  ┌──────────────────────────────┐    ║
-║  │ _-Systems/AutoMinerSystem/ (L2)  │  │ _-Systems/SellerSystem/ (L2)│    ║
-║  │ ┌─────────────┐                  │  │ ┌──────────────┐            │    ║
-║  │ │ AutoMiner   │ reads:           │  │ │SellerMachine │ fires:     │    ║
-║  │ │ IInteract.  │ OrePiecePoolMgr  │  │ │              │ OreSold    │    ║
-║  │ │             │ OreLimitMgr      │  │ └──────────────┘            │    ║
-║  │ └─────────────┘                  │  └──────────────────────────────┘    ║
-║  └───────────────────────────────────┘                                      ║
-║                                                                              ║
-║  ┌───────────────────────┐  ┌──────────────┐                                ║
-║  │ 1-Managers/           │  │ 2-Data/Enums │                                ║
-║  │ ParticleManager       │  │GlobalEnumsC  │                                ║
-║  │ subscribes:           │  │ ResourceType │                                ║
-║  │ CreateParticleReq     │  │ PieceType    │                                ║
-║  └───────────────────────┘  │ OreLimitState│                                ║
-║                              └──────────────┘                                ║
-╚═══════════════════════════════════════════════════════════════════════════════╝
+  → Using ANY of these = still L0. They're project infrastructure.
+═══════════════════════════════════════════════════════════════════════════
+
+
+═══════════════════════════════════════════════════════════════════════════
+  L0 — TRULY PORTABLE (zero deps on other _-Systems/ folders)
+  Copy this folder to ANY Unity project → it compiles and works.
+═══════════════════════════════════════════════════════════════════════════
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │  MiningSystem/                              L0 ✅ PORTABLE │
+  │                                                             │
+  │  Owns: IDamageable (interface)                              │
+  │  Scripts: OreNode, WeightedNodeDrop                         │
+  │  Deps on other _-Systems/: NONE                             │
+  │  Communicates via: GameEvents only                          │
+  │    fires → OnSpawnOreRequested                              │
+  │    fires → OnCreateParticleRequested                        │
+  │    fires → OnOreNodeBroken, OnOreMined                      │
+  │    fires → OnStaticBreakableBroken                          │
+  │                                                             │
+  │  Copy test: ✅ drop in empty project + subscribe events     │
+  └─────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════
+  L1 — 1 external _-Systems/ dependency
+  Portable: copy folder + 1 interface file from the source system.
+═══════════════════════════════════════════════════════════════════════════
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │  OreSystem/                                 L1 (1 dep)     │
+  │                                                             │
+  │  Scripts: OrePiece, DamageableOrePiece, OreDataService,     │
+  │    OrePiecePoolManager, OreManager, OreLimitManager,        │
+  │    PhysicsLimitUIWarning, BaseBasket, SO_ + entities        │
+  │                                                             │
+  │  Dep #1: IDamageable ─── from MiningSystem (interface)      │
+  │    └─ DamageableOrePiece implements IDamageable             │
+  │    └─ lightweight: copy IDamageable.cs (1 file, 7 lines)   │
+  │                                                             │
+  │  Communicates via: GameEvents                               │
+  │    subscribes ← OnSpawnOreRequested (spawns ore for nodes)  │
+  │    subscribes ← OnOreLimitChanged (UI warning)              │
+  │    fires → OnOreSold                                        │
+  │    fires → OnOreLimitChanged                                │
+  │                                                             │
+  │  Copy test: ✅ folder + IDamageable.cs → works              │
+  └────────────────────┬────────────────────────────────────────┘
+                       │ interface
+                       ▼
+                  IDamageable
+                  (MiningSystem)
+
+
+═══════════════════════════════════════════════════════════════════════════
+  L2+ — 2+ external _-Systems/ dependencies (GAME-SPECIFIC)
+  NOT portable — tied to mineMGL. Brings concrete classes.
+═══════════════════════════════════════════════════════════════════════════
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │  AutoMinerSystem/                           L2 (2 deps)    │
+  │                                                             │
+  │  Scripts: AutoMiner, AutoMinerSaveData                      │
+  │                                                             │
+  │  Dep #1: OreSystem ─── concrete                             │
+  │    └─ Singleton<OrePiecePoolManager>.Ins (spawn ore)        │
+  │    └─ Singleton<OreLimitManager>.Ins (throttle check)       │
+  │    └─ OrePiece class (fallback prefab type)                 │
+  │    └─ SO_AutoMinerResourceDefinition + Ext                  │
+  │                                                             │
+  │  Dep #2: InteractionSystem ─── interface                    │
+  │    └─ implements IInteractable (turn on/off)                │
+  │                                                             │
+  │  Cannot copy without: OreSystem + IInteractable.cs          │
+  └─────────┬───────────────────────┬───────────────────────────┘
+            │ concrete               │ interface
+            ▼                        ▼
+       OreSystem               IInteractable
+    (OrePiecePoolMgr,        (InteractionSystem)
+     OreLimitMgr,
+     OrePiece)
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │  SellerSystem/                              L1 (1 dep)     │
+  │                                                             │
+  │  Scripts: SellerMachine                                     │
+  │                                                             │
+  │  Dep #1: OreSystem ─── concrete                             │
+  │    └─ OrePiece class (GetComponentInParent<OrePiece>)       │
+  │    └─ BaseSellableItem (shared infra — FREE, doesn't count)│
+  │                                                             │
+  │  Communicates via: GameEvents                               │
+  │    fires → OnOreSold                                        │
+  │                                                             │
+  │  Cannot copy without: OrePiece.cs from OreSystem            │
+  └─────────┬───────────────────────────────────────────────────┘
+            │ concrete
+            ▼
+       OreSystem
+       (OrePiece)
+
+
+═══════════════════════════════════════════════════════════════════════════
+  PHASE C PORTABILITY SCORECARD
+═══════════════════════════════════════════════════════════════════════════
+
+  System             │ Level │ External Deps                   │ Portable?
+  ───────────────────┼───────┼─────────────────────────────────┼──────────
+  MiningSystem       │  L0   │ none                            │ ✅ YES
+  OreSystem          │  L1   │ IDamageable (interface, 1 file) │ ✅ YES
+  SellerSystem       │  L1   │ OrePiece (concrete, 1 system)   │ ❌ NO
+  AutoMinerSystem    │  L2   │ OreSystem + IInteractable       │ ❌ NO
+
+  Portable: 2/4 systems (MiningSystem + OreSystem)
+  Game-specific: 2/4 (AutoMinerSystem + SellerSystem)
+
+  Note: L1 with interface dep (OreSystem) = still portable.
+        L1 with concrete dep (SellerSystem) = NOT portable.
+        Interface dep = copy 1 small .cs file.
+        Concrete dep = must bring entire system + its deps.
 ```
 
 ## Data Flows
@@ -21346,6 +21744,51 @@ GameEvents.OnOreSold += (sellValue, resourceType, pieceType, polishedPercent) =>
     AddMoney(sellValue);                                                           // ← ADD
     DispatchOnItemSoldEvent();                                                     // ← ADD
 };                                                                                 // ← ADD
+```
+
+### Phase B — ToolPickaxe (CRITICAL — mining won't work without this)
+
+ToolPickaxe.PerformAttack must check `IDamageable` on the raycast hit and call `TakeDamage`. Without this, swinging the pickaxe at an OreNode does nothing. Also adds the `CanBreakOreIntoCrushed` check for Phase E crushable ore, and particle creation via GameEvents.
+
+```csharp
+// File: phase-b(New)/Scripts/_-Systems/ToolSystem/ToolBaseSub/ToolPickaxe.cs
+// REPLACE the PerformAttack coroutine body — after the raycast hit:
+
+// → Phase C: if this pickaxe can break ore into crushed pieces, try that first  // ← ADD
+if (_canBreakOreIntoCrushed)                                                       // ← ADD
+{                                                                                   // ← ADD
+    OrePiece orePiece = hit.collider.GetComponent<OrePiece>();                     // ← ADD
+    if (orePiece != null && orePiece.CrushedPrefab != null                         // ← ADD
+        && orePiece.CrushedPrefab.GetComponent<OrePiece>() != null                 // ← ADD
+        && orePiece.PieceType == PieceType.ore                                     // ← ADD
+        && orePiece.TryConvertToCrushed())                                         // ← ADD
+    {                                                                               // ← ADD
+        GameEvents.RaiseCreateParticleRequested(                                   // ← ADD
+            Singleton<ParticleManager>.Ins.GetOreNodeHitParticlePrefab(),           // ← ADD
+            hit.point, Quaternion.LookRotation(hit.normal));                       // ← ADD
+        yield return new WaitForFixedUpdate();                                     // ← ADD
+        UtilsPhaseC.SimpleExplosion(hit.point, 0.5f, 2f, 0.5f);                   // ← ADD
+        yield break;                                                               // ← ADD
+    }                                                                               // ← ADD
+}                                                                                   // ← ADD
+
+// → Phase C: check IDamageable (OreNode, DamageableOrePiece)                      // ← ADD
+IDamageable damageable = hit.collider.GetComponent<IDamageable>();                  // ← ADD
+if (damageable != null)                                                             // ← ADD
+{                                                                                   // ← ADD
+    damageable.TakeDamage(_damage, hit.point);                                     // ← ADD
+    GameEvents.RaiseCreateParticleRequested(                                       // ← ADD
+        Singleton<ParticleManager>.Ins.GetOreNodeHitParticlePrefab(),              // ← ADD
+        hit.point, Quaternion.LookRotation(hit.normal));                           // ← ADD
+}                                                                                   // ← ADD
+else                                                                                // ← ADD
+{                                                                                   // ← ADD
+    GameEvents.RaiseCreateParticleRequested(                                       // ← ADD
+        Singleton<ParticleManager>.Ins.GetGenericHitImpactParticle(),              // ← ADD
+        hit.point, Quaternion.LookRotation(hit.normal));                           // ← ADD
+}                                                                                   // ← ADD
+
+// → existing AddForce + PhysicsSoundPlayer code stays below                        // ← KEEP
 ```
 
 ### Phase B — BasePhysicsObject
@@ -22723,25 +23166,6 @@ AutoMiner spawning ore on a timer, configurable from SO_AutoMinerResourceDefinit
 - [ ] OreLimitManager slows spawn rate when many objects active
 - [ ] When blocked: no spawning at all
 
-<!-- ==== FILE: learn/phase-c(New)/Scripts/_-Systems/MiningSystem/IDamageable.cs ==== -->
-// deps: none — generic interface, zero ore dependency
-
-using UnityEngine;
-
-/// <summary>
-/// Any object that can take damage at a world position. OreNode implements this
-/// to lose health when the pickaxe hits it. DamageableOrePiece implements this to break
-/// into cluster pieces when hit hard enough by collision. ToolPickaxe calls TakeDamage
-/// on whatever IDamageable the raycast hits.
-///
-/// Who implements me: OreNode (Phase C), DamageableOrePiece (Phase C).
-/// Who calls me: ToolPickaxe (Phase B) via raycast → GetComponent&lt;IDamageable&gt;().
-/// </summary>
-public interface IDamageable
-{
-    void TakeDamage(float damage, Vector3 position);
-}
-
 <!-- ==== FILE: learn/phase-c(New)/Scripts/_-Systems/MiningSystem/MiningTest.md ==== -->
 # MiningSystem — Vertical Slice Test
 
@@ -22856,7 +23280,7 @@ public class MiningTestDriver : MonoBehaviour
 - [ ] System works without OrePiecePoolManager, OreManager, or any singleton
 
 <!-- ==== FILE: learn/phase-c(New)/Scripts/_-Systems/MiningSystem/OreNode.cs ==== -->
-// deps: GameEvents, GlobalEnumsC, UtilsPhaseC, IDamageable, ISaveLoadableStaticBreakable — zero _-Systems/ imports
+// deps: GameEvents, GlobalEnumsC, UtilsPhaseC, IDamageable (phase-b DamageSystem — FREE), ISaveLoadableStaticBreakable — zero _-Systems/ imports
 
 using System.Collections.Generic;
 using UnityEngine;
@@ -23101,7 +23525,7 @@ public class BaseBasket : MonoBehaviour
 }
 
 <!-- ==== FILE: learn/phase-c(New)/Scripts/_-Systems/OreSystem/DamageableOrePiece.cs ==== -->
-// deps: OrePiece, IDamageable (MiningSystem), GlobalEnumsC, GameEvents
+// deps: OrePiece, IDamageable (phase-b DamageSystem — FREE), GlobalEnumsC, GameEvents
 
 using UnityEngine;
 
