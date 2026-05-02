@@ -17298,6 +17298,785 @@ public class PIInteractable : MonoBehaviour
     }
 }
 
+<!-- ==== FILE: learn/phase-a/prototype/Proto_PhaseA_Integration.cs ==== -->
+using System;
+using System.Collections.Generic;
+using UnityEngine;
+
+/// <summary>
+/// STANDALONE PROTOTYPE — Phase A Full Integration (end-to-end cross-system)
+/// Zero dependencies. Drop on empty scene → Press Play.
+///
+/// Tests EVERY cross-system event chain in Phase A:
+///
+///   FLOW 1: Interaction → Shop Open
+///     Player walks to InteractableComputer → E → raycast hits → IInteractable.ShouldUseInteractionWheel()=false
+///     → auto-execute first option → InteractableComputer.Interact() fires RaiseOpenShopView
+///     → ShopUI subscribes → SetActive(true) → OnEnable fires RaiseMenuStateChanged(true)
+///     → PlayerController pauses movement + cursor unlocks
+///
+///   FLOW 2: MoneyBridge Wiring (timing)
+///     MoneyBridge.Start() fires RaiseMoneyProviderReady(IShopMoney)
+///     → ShopUI.OnEnable (isFirstEnable) subscribes → stores IShopMoney reference
+///     → ShopUI passes IShopMoney to Orchestrator.Init()
+///     → EconomyManager.Start() fires RaiseMoneyChanged(400) → moneyUI updates HUD
+///
+///   FLOW 3: Shop Browse → Cart → Purchase
+///     Player clicks category tab → SelectCategoryView → RepopulateShopItems
+///     → clicks "Add to Cart" → TryAddNewCartItem → cart row created
+///     → +/- qty buttons → IncreaseCartItemQty → RefreshAll (total + afford color)
+///     → clicks Purchase → CanAffordCartItems check → IShopMoney.AddMoney(-cost)
+///     → RaiseMoneyChanged → moneyUI updates → items spawn at ShopSpawnPoint
+///     → RaiseCloseShopView → ShopUI.SetActive(false) → OnDisable fires RaiseMenuStateChanged(false)
+///     → PlayerController resumes + cursor relocks
+///
+///   FLOW 4: Interaction Wheel (multi-option)
+///     Player walks to multi-option interactable → E → raycast → ShouldUseInteractionWheel()=true
+///     → RaiseOpenInteractionView(interactable) → InteractionWheelUI subscribes → SetActive(true)
+///     → RaiseMenuStateChanged(true) → builds option buttons → player clicks one
+///     → interactable.Interact(option) → RaiseCloseInteractionView → wheel closes
+///     → RaiseMenuStateChanged(false) → cursor relocks
+///
+///   FLOW 5: Category Unlock
+///     U key → RaiseUnlockedCategory(premium) → ShopUIOrchestrator subscribes
+///     → UnlockEntireCategory → hidden tab becomes visible → items become purchasable
+///
+///   FLOW 6: UIManager.CloseAllSubManager
+///     Opening shop while wheel is open → CloseAllSubManager → wheel closes first → shop opens
+///     Opening wheel while shop is open → CloseAllSubManager → shop closes first → wheel opens
+///
+/// Controls:
+///   WASD = move, Mouse = look
+///   E = interact (raycast)
+///   ESC = close any open menu
+///   U = unlock Premium category
+///   G = gift $100 (external income)
+///   I = print full state (money, menu, events log)
+///   L = print event log (all events fired this session)
+/// </summary>
+public class Proto_PhaseA_Integration : MonoBehaviour
+{
+    // ═══ INLINE EVENT BUS (mirrors GameEvents) ═══
+    static Action onOpenShopView;
+    static Action onCloseShopView;
+    static Action<PAInteractable> onOpenInteractionView;
+    static Action onCloseInteractionView;
+    static Action<bool> onMenuStateChanged;
+    static Action<float> onMoneyChanged;
+    static Action<PACategory> onUnlockedCategory;
+    static Action<PAShopMoney> onMoneyProviderReady;
+
+    static List<string> eventLog = new List<string>();
+    static void LogEvent(string name)
+    {
+        string entry = $"[{Time.frameCount}] {name}";
+        eventLog.Add(entry);
+        Debug.Log($"<color=cyan>[Event] {entry}</color>");
+    }
+
+    // ═══ CORE STATE ═══
+    Camera cam;
+    CharacterController cc;
+    float xRot, yRot;
+    bool isAnyMenuOpen;
+
+    // ═══ ECONOMY (EconomyManager) ═══
+    float currMoney = 400f;
+    PAShopMoney moneyProvider;
+
+    // ═══ SHOP DATA ═══
+    List<PACategory> categories = new List<PACategory>();
+    PADataService dataService;
+
+    // ═══ UI REFERENCES ═══
+    Canvas canvas;
+    // → shop UI panel
+    GameObject shopPanel;
+    GameObject categoryContainer, itemContainer, cartContainer;
+    UnityEngine.UI.Text totalPriceText, moneyHudText, statusHudText;
+    UnityEngine.UI.Button purchaseBtn;
+    // → interaction wheel panel
+    GameObject wheelPanel, wheelContent;
+    UnityEngine.UI.Text wheelTitle;
+    // → tracking
+    PACategory selectedCategory;
+    Dictionary<PACategory, GameObject> catTabs = new Dictionary<PACategory, GameObject>();
+    List<GameObject> itemRows = new List<GameObject>();
+    Dictionary<PADataService.CartItem, GameObject> cartRows = new Dictionary<PADataService.CartItem, GameObject>();
+    List<GameObject> wheelButtons = new List<GameObject>();
+    // → world
+    List<PAInteractable> interactables = new List<PAInteractable>();
+    List<Vector3> spawnPoints = new List<Vector3>();
+
+    // ═══ COLORS ═══
+    Color selectedTabCol = new Color(0.3f, 0.6f, 1f);
+    Color normalTabCol = new Color(0.22f, 0.22f, 0.25f);
+    Color canAffordCol = new Color(0.2f, 0.8f, 0.2f);
+    Color cantAffordCol = new Color(0.8f, 0.2f, 0.2f);
+    Color canBuyCol = new Color(0.3f, 0.7f, 0.3f);
+    Color cantBuyCol = new Color(0.5f, 0.2f, 0.2f);
+
+    // ═══════════════════════════════════════════
+    //  START — wires everything in correct order
+    // ═══════════════════════════════════════════
+    void Start()
+    {
+        // → clear static state (domain reload safety)
+        onOpenShopView = null; onCloseShopView = null;
+        onOpenInteractionView = null; onCloseInteractionView = null;
+        onMenuStateChanged = null; onMoneyChanged = null;
+        onUnlockedCategory = null; onMoneyProviderReady = null;
+        eventLog.Clear();
+
+        // → camera + controller
+        cam = Camera.main;
+        transform.position = new Vector3(0f, 0f, -3f);
+        cc = gameObject.AddComponent<CharacterController>();
+        cc.height = 1.8f; cc.center = new Vector3(0f, 0.9f, 0f);
+        cam.transform.SetParent(transform);
+        cam.transform.localPosition = new Vector3(0f, 1.6f, 0f);
+        cam.transform.localRotation = Quaternion.identity;
+        Cursor.lockState = CursorLockMode.Locked; Cursor.visible = false;
+
+        // → ground + spawn points
+        var ground = GameObject.CreatePrimitive(PrimitiveType.Plane);
+        ground.transform.localScale = new Vector3(5, 1, 5);
+        ground.GetComponent<Renderer>().material.color = new Color(0.2f, 0.2f, 0.25f);
+        for (int i = 0; i < 3; i++)
+        {
+            var sp = new Vector3(-3 + i * 3, 0.5f, -6f);
+            spawnPoints.Add(sp);
+            var m = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            m.transform.position = sp; m.transform.localScale = Vector3.one * 0.2f;
+            m.GetComponent<Renderer>().material.color = Color.green;
+            Destroy(m.GetComponent<Collider>());
+        }
+
+        // → build data
+        BuildCategoryData();
+        dataService = new PADataService();
+        moneyProvider = new PAShopMoney(this);
+
+        // → build UI
+        BuildCanvas();
+        BuildShopPanel();
+        BuildWheelPanel();
+        BuildHUD();
+
+        // ─── SUBSCRIPTION PHASE (mirrors real OnEnable/isFirstEnable) ───
+
+        // → PlayerController subscribes to MenuStateChanged
+        onMenuStateChanged += (open) =>
+        {
+            isAnyMenuOpen = open;
+            LogEvent($"MenuStateChanged → isAnyMenuOpen={open}");
+        };
+
+        // → ShopUI subscribes to open/close (isFirstEnable pattern)
+        onMoneyProviderReady += (m) =>
+        {
+            LogEvent($"MoneyProviderReady received → IShopMoney wired");
+        };
+
+        onOpenShopView += () =>
+        {
+            LogEvent("OpenShopView → CloseAll + ShopUI.SetActive(true)");
+            CloseAll();
+            shopPanel.SetActive(true);
+            dataService.BuildCategories(categories, currMoney);
+            RebuildCategoryView();
+            RefreshShop();
+            RaiseMenuStateChanged(true);
+        };
+        onCloseShopView += () =>
+        {
+            LogEvent("CloseShopView → ShopUI.SetActive(false)");
+            shopPanel.SetActive(false);
+            RaiseMenuStateChanged(false);
+        };
+
+        // → InteractionWheelUI subscribes to open/close
+        onOpenInteractionView += (interactable) =>
+        {
+            LogEvent($"OpenInteractionView → {interactable.objectName}");
+            CloseAll();
+            var options = interactable.GetOptions();
+            if (!interactable.ShouldUseWheel())
+            {
+                LogEvent($"  Single-option shortcut → {options[0].name}");
+                interactable.Interact(options[0]);
+                return;
+            }
+            OpenWheel(interactable, options);
+            RaiseMenuStateChanged(true);
+        };
+        onCloseInteractionView += () =>
+        {
+            LogEvent("CloseInteractionView → wheel closed");
+            wheelPanel.SetActive(false);
+            RaiseMenuStateChanged(false);
+        };
+
+        // → moneyUI subscribes to MoneyChanged
+        onMoneyChanged += (money) =>
+        {
+            LogEvent($"MoneyChanged → ${money:F2}");
+            moneyHudText.text = $"${money:F2}";
+        };
+
+        // → ShopUIOrchestrator subscribes to UnlockedCategory
+        onUnlockedCategory += (cat) =>
+        {
+            LogEvent($"UnlockedCategory → {cat.name}");
+            dataService.UnlockEntireCategory(cat);
+            if (shopPanel.activeSelf) RebuildCategoryView();
+        };
+
+        // → ShopUI subscribes to purchaseButton
+        purchaseBtn.onClick.AddListener(PurchaseAll);
+
+        // ─── BRIDGE FIRES (MoneyBridge.Start pattern) ───
+        shopPanel.SetActive(false);
+        wheelPanel.SetActive(false);
+
+        LogEvent("MoneyBridge.Start → firing MoneyProviderReady");
+        if (onMoneyProviderReady != null) onMoneyProviderReady(moneyProvider);
+
+        // → EconomyManager.Start fires initial MoneyChanged
+        LogEvent("EconomyManager.Start → firing MoneyChanged(400)");
+        RaiseMoneyChanged();
+
+        // → spawn interactables
+        SpawnWorld();
+
+        Debug.Log("[Integration] WASD=move E=interact ESC=close U=unlock G=gift$100 I=info L=eventlog");
+    }
+
+    // ═══ UPDATE ═══
+    void Update()
+    {
+        // → cursor lock (PlayerController pattern)
+        Cursor.lockState = isAnyMenuOpen ? CursorLockMode.None : CursorLockMode.Locked;
+        Cursor.visible = isAnyMenuOpen;
+
+        if (!isAnyMenuOpen)
+        {
+            HandleLook();
+            HandleMovement();
+        }
+
+        // → E = interact or close
+        if (Input.GetKeyDown(KeyCode.E))
+        {
+            if (isAnyMenuOpen) { CloseAll(); RaiseMenuStateChanged(false); }
+            else TryInteract();
+        }
+
+        // → ESC = close
+        if (Input.GetKeyDown(KeyCode.Escape) && isAnyMenuOpen)
+        {
+            CloseAll();
+            RaiseMenuStateChanged(false);
+        }
+
+        // → U = unlock premium
+        if (Input.GetKeyDown(KeyCode.U))
+        {
+            var premium = categories.Find(c => c.name == "Premium");
+            if (premium != null) RaiseUnlockedCategory(premium);
+        }
+
+        // → G = gift money
+        if (Input.GetKeyDown(KeyCode.G))
+        {
+            currMoney += 100f;
+            dataService.SetMoney(currMoney);
+            RaiseMoneyChanged();
+            if (shopPanel.activeSelf) RefreshShop();
+        }
+
+        // → I = info
+        if (Input.GetKeyDown(KeyCode.I))
+        {
+            Debug.Log($"[State] Money=${currMoney:F2} | MenuOpen={isAnyMenuOpen} | ShopActive={shopPanel.activeSelf} | WheelActive={wheelPanel.activeSelf} | Cart={dataService.GetCartItems().Count} | Events={eventLog.Count}");
+        }
+
+        // → L = event log
+        if (Input.GetKeyDown(KeyCode.L))
+        {
+            string log = "[Event Log]\n";
+            foreach (var e in eventLog) log += "  " + e + "\n";
+            Debug.Log(log);
+        }
+
+        UpdateHUD();
+    }
+
+    // ═══ PLAYER MOVEMENT ═══
+    void HandleLook()
+    {
+        float mx = Input.GetAxis("Mouse X") * 2.5f;
+        float my = Input.GetAxis("Mouse Y") * 2.5f;
+        xRot = Mathf.Clamp(xRot - my, -80f, 80f);
+        yRot += mx;
+        cam.transform.localRotation = Quaternion.Euler(xRot, 0f, 0f);
+        transform.rotation = Quaternion.Euler(0f, yRot, 0f);
+    }
+    void HandleMovement()
+    {
+        Vector3 move = transform.right * Input.GetAxisRaw("Horizontal") + transform.forward * Input.GetAxisRaw("Vertical");
+        cc.Move(move.normalized * 5f * Time.deltaTime);
+        cc.Move(Vector3.down * 10f * Time.deltaTime);
+    }
+
+    // ═══ INTERACTION (SimplePlayerInteraction) ═══
+    void TryInteract()
+    {
+        Ray ray = new Ray(cam.transform.position, cam.transform.forward);
+        if (!Physics.Raycast(ray, out RaycastHit hit, 6f)) return;
+        var ia = hit.collider.GetComponent<PAInteractable>();
+        if (ia == null) { Debug.Log($"[Interact] Hit {hit.collider.name} — no interactable"); return; }
+        LogEvent($"Player pressed E → raycast hit {ia.objectName}");
+        RaiseOpenInteractionView(ia);
+    }
+
+    // ═══ EVENT RAISE METHODS (GameEvents pattern) ═══
+    void RaiseOpenShopView() { LogEvent("RAISE OpenShopView"); onOpenShopView?.Invoke(); }
+    void RaiseCloseShopView() { LogEvent("RAISE CloseShopView"); onCloseShopView?.Invoke(); }
+    void RaiseOpenInteractionView(PAInteractable ia) { LogEvent($"RAISE OpenInteractionView({ia.objectName})"); onOpenInteractionView?.Invoke(ia); }
+    void RaiseCloseInteractionView() { LogEvent("RAISE CloseInteractionView"); onCloseInteractionView?.Invoke(); }
+    void RaiseMenuStateChanged(bool open) { LogEvent($"RAISE MenuStateChanged({open})"); onMenuStateChanged?.Invoke(open); }
+    void RaiseMoneyChanged() { LogEvent($"RAISE MoneyChanged({currMoney:F2})"); onMoneyChanged?.Invoke(currMoney); }
+    void RaiseUnlockedCategory(PACategory cat) { LogEvent($"RAISE UnlockedCategory({cat.name})"); onUnlockedCategory?.Invoke(cat); }
+
+    // ═══ CLOSE ALL (UIManager.CloseAllSubManager) ═══
+    void CloseAll()
+    {
+        if (shopPanel.activeSelf) { shopPanel.SetActive(false); LogEvent("CloseAll → shop closed"); }
+        if (wheelPanel.activeSelf) { wheelPanel.SetActive(false); LogEvent("CloseAll → wheel closed"); }
+    }
+
+    // ═══ SHOP UI ═══
+
+    void RebuildCategoryView()
+    {
+        foreach (var kvp in catTabs) Destroy(kvp.Value);
+        catTabs.Clear();
+        float y = 0.88f;
+        PACategory firstVisible = null;
+        foreach (var cat in categories)
+        {
+            if (dataService.ShouldCategoryBeHidden(cat)) continue;
+            var tab = MakeButton($"Tab_{cat.name}", categoryContainer.transform, 0.05f, y - 0.08f, 0.95f, y, cat.name, normalTabCol, null);
+            catTabs[cat] = tab;
+            var cc = cat;
+            tab.GetComponent<UnityEngine.UI.Button>().onClick.AddListener(() => SelectCategory(cc));
+            if (firstVisible == null) firstVisible = cat;
+            y -= 0.1f;
+        }
+        if (firstVisible != null) SelectCategory(firstVisible);
+    }
+
+    void SelectCategory(PACategory cat)
+    {
+        selectedCategory = cat;
+        foreach (var kvp in catTabs)
+            kvp.Value.GetComponent<UnityEngine.UI.Image>().color = kvp.Key == cat ? selectedTabCol : normalTabCol;
+        RepopulateItems();
+    }
+
+    void RepopulateItems()
+    {
+        foreach (var r in itemRows) Destroy(r);
+        itemRows.Clear();
+        float y = 0.95f;
+        foreach (var w in dataService.GetItems(selectedCategory))
+        {
+            var row = MakePanel($"Item_{w.def.name}", itemContainer.transform, 0.02f, y - 0.12f, 0.98f, y, new Color(0.15f, 0.15f, 0.2f, 0.85f));
+            MakePanel("Sw", row.transform, 0.02f, 0.1f, 0.1f, 0.9f, w.def.color);
+            MakeText("N", row.transform, 0.12f, 0.5f, 0.55f, 0.95f, w.def.name, 15, TextAnchor.MiddleLeft, Color.white);
+            MakeText("D", row.transform, 0.12f, 0.05f, 0.55f, 0.48f, w.def.descr, 11, TextAnchor.MiddleLeft, new Color(0.6f, 0.6f, 0.6f));
+            MakeText("P", row.transform, 0.56f, 0.1f, 0.72f, 0.9f, $"${w.def.price:F0}", 15, TextAnchor.MiddleCenter, Color.yellow);
+            bool canBuy = !w.isLocked;
+            var btn = MakeButton("Add", row.transform, 0.74f, 0.15f, 0.97f, 0.85f, canBuy ? "Add" : "Locked", canBuy ? canBuyCol : cantBuyCol, null);
+            if (canBuy) { var cw = w; btn.GetComponent<UnityEngine.UI.Button>().onClick.AddListener(() => AddToCart(cw)); }
+            else btn.GetComponent<UnityEngine.UI.Button>().interactable = false;
+            if (w.IsNewlyUnlocked()) MakeText("New", row.transform, 0.88f, 0.75f, 1f, 1f, "NEW!", 10, TextAnchor.MiddleCenter, Color.cyan);
+            itemRows.Add(row);
+            y -= 0.13f;
+        }
+    }
+
+    void AddToCart(PAWShopItem w)
+    {
+        var ci = dataService.TryAddCartItem(w);
+        if (cartRows.ContainsKey(ci))
+        {
+            var qt = cartRows[ci].transform.Find("Q");
+            if (qt != null) qt.GetComponent<UnityEngine.UI.Text>().text = ci.qty.ToString();
+            RefreshShop(); return;
+        }
+        float rh = 0.1f, ry = 0.88f - cartRows.Count * (rh + 0.01f);
+        var row = MakePanel($"C_{w.def.name}", cartContainer.transform, 0.02f, ry - rh, 0.98f, ry, new Color(0.18f, 0.18f, 0.22f, 0.85f));
+        MakePanel("Sw", row.transform, 0.02f, 0.1f, 0.1f, 0.9f, w.def.color);
+        MakeText("N", row.transform, 0.12f, 0.5f, 0.5f, 0.95f, w.def.name, 13, TextAnchor.MiddleLeft, Color.white);
+        MakeText("Pr", row.transform, 0.12f, 0.05f, 0.5f, 0.45f, $"${w.def.price:F0}", 11, TextAnchor.MiddleLeft, Color.yellow);
+        var qText = MakeText("Q", row.transform, 0.52f, 0.2f, 0.64f, 0.8f, ci.qty.ToString(), 15, TextAnchor.MiddleCenter, Color.white).GetComponent<UnityEngine.UI.Text>();
+        var cci = ci;
+        MakeButton("-", row.transform, 0.44f, 0.15f, 0.52f, 0.85f, "-", new Color(0.6f, 0.3f, 0.3f), () =>
+        {
+            dataService.ChangeQty(cci, -1);
+            if (cci.qty <= 0) RemoveCartRow(cci); else qText.text = cci.qty.ToString();
+            RefreshShop();
+        });
+        MakeButton("+", row.transform, 0.64f, 0.15f, 0.72f, 0.85f, "+", new Color(0.3f, 0.6f, 0.3f), () =>
+        {
+            dataService.ChangeQty(cci, +1);
+            qText.text = cci.qty.ToString();
+            RefreshShop();
+        });
+        MakeButton("X", row.transform, 0.82f, 0.15f, 0.97f, 0.85f, "X", new Color(0.7f, 0.2f, 0.2f), () =>
+        {
+            dataService.RemoveCartItem(cci);
+            RemoveCartRow(cci);
+            RefreshShop();
+        });
+        cartRows[ci] = row;
+        RefreshShop();
+    }
+
+    void RemoveCartRow(PADataService.CartItem ci)
+    {
+        if (!cartRows.ContainsKey(ci)) return;
+        Destroy(cartRows[ci]); cartRows.Remove(ci);
+        int i = 0;
+        foreach (var kvp in cartRows)
+        {
+            float ry = 0.88f - i * 0.11f;
+            var r = kvp.Value.GetComponent<RectTransform>();
+            r.anchorMin = new Vector2(0.02f, ry - 0.1f); r.anchorMax = new Vector2(0.98f, ry);
+            i++;
+        }
+    }
+
+    void PurchaseAll()
+    {
+        float total = dataService.GetCartTotal();
+        if (total <= 0 || currMoney < total) { Debug.Log("[Shop] Can't purchase!"); return; }
+        var items = new List<PADataService.CartItem>(dataService.GetCartItems());
+        foreach (var ci in items)
+        {
+            // → spawn at ShopSpawnPoint (random)
+            Vector3 pt = spawnPoints[UnityEngine.Random.Range(0, spawnPoints.Count)];
+            for (int j = 0; j < ci.qty; j++)
+            {
+                var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                go.name = $"Purchased_{ci.wItem.def.name}";
+                go.transform.localScale = Vector3.one * 0.35f;
+                Vector3 off = UnityEngine.Random.insideUnitSphere; off.y = Mathf.Abs(off.y);
+                go.transform.position = pt + off * 0.3f;
+                go.GetComponent<Renderer>().material.color = ci.wItem.def.color;
+                go.AddComponent<Rigidbody>().mass = 0.3f;
+            }
+            currMoney -= ci.wItem.def.price * ci.qty;
+        }
+        // → IShopMoney.AddMoney(-cost) already applied above
+        dataService.ClearCart();
+        foreach (var kvp in cartRows) Destroy(kvp.Value);
+        cartRows.Clear();
+        dataService.SetMoney(currMoney);
+        RaiseMoneyChanged();
+        RefreshShop();
+        // → close shop after purchase (original behavior)
+        RaiseCloseShopView();
+        LogEvent($"Purchase complete! Spent ${total:F2}, remaining ${currMoney:F2}");
+    }
+
+    void RefreshShop()
+    {
+        float total = dataService.GetCartTotal();
+        bool afford = currMoney >= total;
+        totalPriceText.text = $"Total: ${total:F2}";
+        totalPriceText.color = afford ? canAffordCol : cantAffordCol;
+        purchaseBtn.interactable = afford && dataService.GetCartItems().Count > 0;
+    }
+
+    // ═══ INTERACTION WHEEL ═══
+
+    void OpenWheel(PAInteractable ia, List<PAOption> options)
+    {
+        foreach (var b in wheelButtons) Destroy(b);
+        wheelButtons.Clear();
+        wheelTitle.text = ia.objectName;
+        foreach (var opt in options)
+        {
+            var btn = MakeButton($"W_{opt.name}", wheelContent.transform, 0f, 0f, 1f, 1f, opt.name, opt.color, null);
+            var co = opt; var ci = ia;
+            btn.GetComponent<UnityEngine.UI.Button>().onClick.AddListener(() =>
+            {
+                ci.Interact(co);
+                RaiseCloseInteractionView();
+            });
+            wheelButtons.Add(btn);
+        }
+        wheelPanel.SetActive(true);
+    }
+
+    // ═══ HUD ═══
+
+    void UpdateHUD()
+    {
+        string menu = isAnyMenuOpen ? "<color=lime>MENU OPEN</color>" : "<color=grey>CLOSED</color>";
+        string hint = "";
+        if (!isAnyMenuOpen)
+        {
+            Ray ray = new Ray(cam.transform.position, cam.transform.forward);
+            if (Physics.Raycast(ray, out RaycastHit hit, 6f))
+            {
+                var ia = hit.collider.GetComponent<PAInteractable>();
+                if (ia != null) hint = $" | <color=yellow>[E] {ia.objectName}</color>";
+            }
+        }
+        statusHudText.text = $"{menu}{hint} | Events: {eventLog.Count}";
+    }
+
+    // ═══ WORLD ═══
+
+    void SpawnWorld()
+    {
+        // → Computer: single-option interactable → opens shop (the KEY cross-system flow)
+        SpawnInteractable("Computer", new Vector3(-3f, 0.75f, 5f), new Color(0.2f, 0.4f, 0.8f),
+            false, new List<PAOption> { new PAOption("Open Shop", PAActionType.openShop, new Color(0.3f, 0.5f, 0.9f)) });
+
+        // → Vendor: 3 options (tests wheel)
+        SpawnInteractable("Vendor", new Vector3(0f, 0.75f, 5f), new Color(0.1f, 0.7f, 0.3f),
+            true, new List<PAOption>
+            {
+                new PAOption("Trade", PAActionType.custom, new Color(0.2f, 0.6f, 0.3f)),
+                new PAOption("Talk", PAActionType.custom, new Color(0.3f, 0.3f, 0.7f)),
+                new PAOption("Give Gift", PAActionType.custom, new Color(0.7f, 0.3f, 0.5f))
+            });
+
+        // → Second Computer: tests "open shop while already in wheel" → CloseAll flow
+        SpawnInteractable("Terminal", new Vector3(3f, 0.75f, 5f), new Color(0.6f, 0.2f, 0.6f),
+            false, new List<PAOption> { new PAOption("Open Shop", PAActionType.openShop, new Color(0.5f, 0.2f, 0.5f)) });
+
+        // → Multi-option with 5 options (stress test wheel layout)
+        SpawnInteractable("Workbench", new Vector3(6f, 0.75f, 5f), new Color(0.5f, 0.5f, 0.5f),
+            true, new List<PAOption>
+            {
+                new PAOption("Craft", PAActionType.custom, new Color(0.4f, 0.6f, 0.2f)),
+                new PAOption("Repair", PAActionType.custom, new Color(0.6f, 0.4f, 0.2f)),
+                new PAOption("Upgrade", PAActionType.custom, new Color(0.2f, 0.4f, 0.7f)),
+                new PAOption("Disassemble", PAActionType.custom, new Color(0.7f, 0.2f, 0.2f)),
+                new PAOption("Inspect", PAActionType.custom, new Color(0.4f, 0.4f, 0.4f))
+            });
+    }
+
+    void SpawnInteractable(string name, Vector3 pos, Color col, bool useWheel, List<PAOption> opts)
+    {
+        var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        go.name = name; go.transform.position = pos;
+        go.transform.localScale = new Vector3(1.2f, 1.5f, 1.2f);
+        go.GetComponent<Renderer>().material.color = col;
+        var ia = go.AddComponent<PAInteractable>();
+        ia.Init(name, useWheel, opts, this);
+        interactables.Add(ia);
+        // → marker
+        var m = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        m.transform.position = pos + Vector3.up * 1.3f;
+        m.transform.localScale = Vector3.one * 0.12f;
+        m.GetComponent<Renderer>().material.color = Color.yellow;
+        Destroy(m.GetComponent<Collider>());
+    }
+
+    // ═══ DATA ═══
+
+    void BuildCategoryData()
+    {
+        categories.Add(new PACategory("Tools", false, new List<PAItemDef>
+        {
+            new PAItemDef("Pickaxe", "Basic mining tool", 50f, false, Color.grey),
+            new PAItemDef("Shovel", "Digs dirt", 35f, false, new Color(0.5f, 0.35f, 0.15f)),
+            new PAItemDef("Hammer", "Build & repair", 75f, false, new Color(0.6f, 0.6f, 0.6f)),
+        }));
+        categories.Add(new PACategory("Materials", false, new List<PAItemDef>
+        {
+            new PAItemDef("Wood", "Standard plank", 10f, false, new Color(0.6f, 0.4f, 0.2f)),
+            new PAItemDef("Iron Bar", "Refined ingot", 25f, false, new Color(0.7f, 0.7f, 0.7f)),
+            new PAItemDef("Gold Bar", "Precious metal", 100f, true, new Color(1f, 0.84f, 0f)),
+        }));
+        categories.Add(new PACategory("Premium", true, new List<PAItemDef>
+        {
+            new PAItemDef("TNT Box", "Explosive tool", 200f, true, new Color(0.8f, 0.1f, 0.1f)),
+            new PAItemDef("Jet Pack", "Fly anywhere", 500f, true, new Color(0.2f, 0.2f, 0.8f)),
+        }));
+    }
+
+    // ═══ UI BUILDERS ═══
+
+    void BuildCanvas()
+    {
+        var go = new GameObject("IntegrationCanvas");
+        canvas = go.AddComponent<Canvas>();
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay; canvas.sortingOrder = 10;
+        var sc = go.AddComponent<UnityEngine.UI.CanvasScaler>();
+        sc.uiScaleMode = UnityEngine.UI.CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        sc.referenceResolution = new Vector2(1920, 1080);
+        go.AddComponent<UnityEngine.UI.GraphicRaycaster>();
+    }
+
+    void BuildShopPanel()
+    {
+        shopPanel = MakePanel("Shop", canvas.transform, 0.05f, 0.05f, 0.95f, 0.95f, new Color(0.08f, 0.08f, 0.12f, 0.95f));
+        MakeText("Title", shopPanel.transform, 0f, 0.92f, 1f, 1f, "S H O P", 26, TextAnchor.MiddleCenter, Color.white);
+        categoryContainer = MakePanel("Cats", shopPanel.transform, 0.02f, 0.08f, 0.18f, 0.9f, new Color(0.12f, 0.12f, 0.16f, 0.9f));
+        itemContainer = MakePanel("Items", shopPanel.transform, 0.2f, 0.08f, 0.58f, 0.9f, new Color(0.1f, 0.1f, 0.14f, 0.9f));
+        cartContainer = MakePanel("Cart", shopPanel.transform, 0.6f, 0.15f, 0.98f, 0.9f, new Color(0.12f, 0.12f, 0.16f, 0.9f));
+        MakeText("CartT", cartContainer.transform, 0f, 0.92f, 1f, 1f, "CART", 18, TextAnchor.MiddleCenter, Color.white);
+        var footer = MakePanel("Footer", shopPanel.transform, 0.6f, 0.05f, 0.98f, 0.14f, new Color(0.15f, 0.15f, 0.2f, 0.9f));
+        totalPriceText = MakeText("Total", footer.transform, 0.02f, 0.5f, 0.5f, 1f, "$0.00", 16, TextAnchor.MiddleLeft, canAffordCol).GetComponent<UnityEngine.UI.Text>();
+        var pbtn = MakeButton("Buy", footer.transform, 0.55f, 0.1f, 0.95f, 0.9f, "PURCHASE", new Color(0.2f, 0.6f, 0.2f), null);
+        purchaseBtn = pbtn.GetComponent<UnityEngine.UI.Button>();
+    }
+
+    void BuildWheelPanel()
+    {
+        wheelPanel = MakePanel("Wheel", canvas.transform, 0.3f, 0.2f, 0.7f, 0.8f, new Color(0.1f, 0.1f, 0.15f, 0.92f));
+        wheelTitle = MakeText("WTitle", wheelPanel.transform, 0f, 0.88f, 1f, 1f, "INTERACT", 22, TextAnchor.MiddleCenter, Color.white).GetComponent<UnityEngine.UI.Text>();
+        wheelContent = MakePanel("WContent", wheelPanel.transform, 0.05f, 0.05f, 0.95f, 0.85f, new Color(0f, 0f, 0f, 0f));
+        var vlg = wheelContent.AddComponent<UnityEngine.UI.VerticalLayoutGroup>();
+        vlg.spacing = 6f; vlg.childForceExpandWidth = true; vlg.childForceExpandHeight = true;
+        vlg.padding = new RectOffset(8, 8, 8, 8);
+    }
+
+    void BuildHUD()
+    {
+        moneyHudText = MakeText("Money", canvas.transform, 0.75f, 0.93f, 0.99f, 1f, "$400.00", 22, TextAnchor.MiddleRight, Color.yellow).GetComponent<UnityEngine.UI.Text>();
+        MakeText("MoneyL", canvas.transform, 0.6f, 0.93f, 0.75f, 1f, "Balance:", 16, TextAnchor.MiddleRight, new Color(0.6f, 0.6f, 0.6f));
+        statusHudText = MakeText("Status", canvas.transform, 0.01f, 0.93f, 0.55f, 1f, "", 13, TextAnchor.MiddleLeft, Color.white).GetComponent<UnityEngine.UI.Text>();
+        MakeText("Cross", canvas.transform, 0.49f, 0.48f, 0.51f, 0.52f, "+", 20, TextAnchor.MiddleCenter, new Color(1f, 1f, 1f, 0.6f));
+        MakeText("Help", canvas.transform, 0.01f, 0.01f, 0.5f, 0.06f, "E=interact  ESC=close  U=unlock  G=gift$100  I=info  L=eventlog", 11, TextAnchor.LowerLeft, new Color(0.5f, 0.5f, 0.5f));
+    }
+
+    // ═══ UI HELPERS ═══
+
+    GameObject MakePanel(string n, Transform p, float x0, float y0, float x1, float y1, Color c)
+    {
+        var go = new GameObject(n); go.transform.SetParent(p, false);
+        var r = go.AddComponent<RectTransform>();
+        r.anchorMin = new Vector2(x0, y0); r.anchorMax = new Vector2(x1, y1);
+        r.offsetMin = r.offsetMax = Vector2.zero;
+        go.AddComponent<UnityEngine.UI.Image>().color = c;
+        return go;
+    }
+    GameObject MakeText(string n, Transform p, float x0, float y0, float x1, float y1, string txt, int sz, TextAnchor a, Color c)
+    {
+        var go = new GameObject(n); go.transform.SetParent(p, false);
+        var r = go.AddComponent<RectTransform>();
+        r.anchorMin = new Vector2(x0, y0); r.anchorMax = new Vector2(x1, y1);
+        r.offsetMin = r.offsetMax = Vector2.zero;
+        var t = go.AddComponent<UnityEngine.UI.Text>();
+        t.text = txt; t.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        t.fontSize = sz; t.alignment = a; t.color = c;
+        return go;
+    }
+    GameObject MakeButton(string n, Transform p, float x0, float y0, float x1, float y1, string lbl, Color bg, Action onClick)
+    {
+        var go = MakePanel(n, p, x0, y0, x1, y1, bg);
+        var btn = go.AddComponent<UnityEngine.UI.Button>();
+        MakeText("L", go.transform, 0, 0, 1, 1, lbl, 13, TextAnchor.MiddleCenter, Color.white);
+        if (onClick != null) btn.onClick.AddListener(() => onClick());
+        return go;
+    }
+
+    // → public accessors for PAShopMoney
+    public float GetMoney() => currMoney;
+    public void SetMoney(float m) => currMoney = m;
+
+    // ═══ DATA TYPES ═══
+    public enum PAActionType { openShop, custom }
+    public class PAOption { public string name; public PAActionType type; public Color color; public PAOption(string n, PAActionType t, Color c) { name = n; type = t; color = c; } }
+    public class PAItemDef { public string name, descr; public float price; public bool isDefaultLocked; public Color color; public PAItemDef(string n, string d, float p, bool l, Color c) { name = n; descr = d; price = p; isDefaultLocked = l; color = c; } }
+    public class PACategory { public string name; public bool hideIfAllLocked; public List<PAItemDef> items; public PACategory(string n, bool h, List<PAItemDef> i) { name = n; hideIfAllLocked = h; items = i; } }
+    public class PAWShopItem { public PAItemDef def; public bool isLocked; public int timesPurchased; public PAWShopItem(PAItemDef d) { def = d; isLocked = d.isDefaultLocked; } public bool IsNewlyUnlocked() => !isLocked && timesPurchased == 0 && def.isDefaultLocked; }
+    public class PAShopMoney { Proto_PhaseA_Integration o; public PAShopMoney(Proto_PhaseA_Integration p) { o = p; } public float GetMoney() => o.GetMoney(); public void AddMoney(float d) => o.SetMoney(o.GetMoney() + d); public bool CanAfford(float p) => o.GetMoney() >= p; }
+}
+
+// ═══════════════════════════════════════════
+// PAInteractable — mirrors IInteractable + InteractableComputer
+// ═══════════════════════════════════════════
+public class PAInteractable : MonoBehaviour
+{
+    public string objectName;
+    bool useWheel;
+    List<Proto_PhaseA_Integration.PAOption> options;
+    Proto_PhaseA_Integration proto;
+
+    public void Init(string n, bool w, List<Proto_PhaseA_Integration.PAOption> o, Proto_PhaseA_Integration p)
+    { objectName = n; useWheel = w; options = o; proto = p; }
+
+    public bool ShouldUseWheel() => useWheel;
+    public List<Proto_PhaseA_Integration.PAOption> GetOptions() => options;
+
+    public void Interact(Proto_PhaseA_Integration.PAOption opt)
+    {
+        if (opt.type == Proto_PhaseA_Integration.PAActionType.openShop)
+        {
+            Debug.Log($"<color=lime>[Interact] {objectName} → Open Shop!</color>");
+            // → this is THE cross-system call: InteractableComputer.Interact fires GameEvents.RaiseOpenShopView
+            // in real code: GameEvents.RaiseOpenShopView();
+            // here we call the proto's raise method which triggers the full chain
+            proto.SendMessage("RaiseOpenShopView", SendMessageOptions.DontRequireReceiver);
+        }
+        else
+        {
+            Debug.Log($"<color=lime>[Interact] {objectName} → '{opt.name}' executed!</color>");
+        }
+    }
+}
+
+// ═══════════════════════════════════════════
+// PADataService — mirrors ShopDataService
+// ═══════════════════════════════════════════
+public class PADataService
+{
+    float money;
+    Dictionary<Proto_PhaseA_Integration.PACategory, List<Proto_PhaseA_Integration.PAWShopItem>> doc = new Dictionary<Proto_PhaseA_Integration.PACategory, List<Proto_PhaseA_Integration.PAWShopItem>>();
+    List<CartItem> cart = new List<CartItem>();
+    public class CartItem { public Proto_PhaseA_Integration.PAWShopItem wItem; public int qty; }
+
+    public void BuildCategories(List<Proto_PhaseA_Integration.PACategory> cats, float m)
+    {
+        money = m; doc.Clear();
+        foreach (var c in cats)
+        {
+            var list = new List<Proto_PhaseA_Integration.PAWShopItem>();
+            foreach (var d in c.items) list.Add(new Proto_PhaseA_Integration.PAWShopItem(d));
+            doc[c] = list;
+        }
+    }
+    public void SetMoney(float m) => money = m;
+    public List<Proto_PhaseA_Integration.PAWShopItem> GetItems(Proto_PhaseA_Integration.PACategory c) => doc[c];
+    public bool ShouldCategoryBeHidden(Proto_PhaseA_Integration.PACategory c)
+    {
+        if (!c.hideIfAllLocked) return false;
+        foreach (var w in doc[c]) if (!w.isLocked) return false;
+        return true;
+    }
+    public void UnlockEntireCategory(Proto_PhaseA_Integration.PACategory c) { foreach (var w in doc[c]) w.isLocked = false; }
+    public CartItem TryAddCartItem(Proto_PhaseA_Integration.PAWShopItem w)
+    {
+        foreach (var ci in cart) if (ci.wItem == w) { ci.qty++; return ci; }
+        var n = new CartItem { wItem = w, qty = 1 }; cart.Add(n); return n;
+    }
+    public void RemoveCartItem(CartItem ci) => cart.Remove(ci);
+    public void ChangeQty(CartItem ci, int d) { ci.qty += d; if (ci.qty <= 0) cart.Remove(ci); }
+    public void ClearCart() => cart.Clear();
+    public List<CartItem> GetCartItems() => cart;
+    public float GetCartTotal() { float s = 0; foreach (var ci in cart) s += ci.wItem.def.price * ci.qty; return s; }
+}
+
 <!-- ==== FILE: learn/phase-a/prototype/Proto_ShopSystem.cs ==== -->
 using System.Collections.Generic;
 using UnityEngine;
@@ -23997,6 +24776,753 @@ public class Proto_Inventory : MonoBehaviour
     #endregion
 }
 
+<!-- ==== FILE: learn/phase-b(New)/prototype/Proto_PhaseB_Integration.cs ==== -->
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+/// <summary>
+/// STANDALONE PROTOTYPE — Phase B Full Integration (drag onto empty GO, press Play)
+/// Wires ALL cross-system event chains from FLOW.md inline using static Action fields.
+/// Logs every event raise with frame number. Tests every flow end-to-end.
+///
+/// Systems simulated inline:
+///   InventorySystem — pickup, equip, drop, stack, hotbar, scroll, extended, drag-drop
+///   PlayerSystem — WASD+jump+sprint, camera look, grab (SpringJoint+rope)
+///   ToolSystem — pickaxe swing+hit, magnet pull/push, hammer raycast, ItemEquipBridge
+///   HighlightSystem — raycast outline on hover, clear on look away, blocked when menu open
+///   DamageSystem — IDamageable, health bars, break into pieces
+///
+/// Event Registry (all 8 from FLOW.md):
+///   OnToolPickupRequested, OnItemPickedUp, OnItemDropped, OnItemEquipped,
+///   OnToolSwitched, OnMenuStateChanged, OnOpenInventoryView, OnCloseInventoryView
+///
+/// Controls:
+///   WASD/Space/Shift — move/jump/sprint
+///   Mouse — look
+///   Click world item — pickup
+///   1-5 — hotbar switch (equip)
+///   G — drop
+///   Tab — toggle extended inventory
+///   Hold LMB (pickaxe) — swing + hit damageable
+///   Hold RMB (magnet) — pull; LMB push; R drop gently
+///   F — grab/release physics object (SpringJoint)
+///   L — dump event log to console
+///   M — simulate menu open (tests CloseAll pattern)
+///   N — simulate menu close
+///
+/// Edge cases tested:
+///   - Opening inventory while grab active → grab blocked
+///   - Opening menu while inventory open → CloseAll fires
+///   - Domain reload cleanup (static fields cleared in OnDestroy)
+///   - Start vs OnEnable timing (isFirstEnable pattern)
+///   - Same slot toggle (equip→unequip)
+///   - Stack overflow (inventory full)
+///   - Drop from stack (clone) vs drop last (actual GO)
+/// </summary>
+public class Proto_PhaseB_Integration : MonoBehaviour
+{
+    // ═══════════════════════════════════════════════════════════════
+    // STATIC EVENTS — simulates GameEvents (cleared on destroy for domain reload)
+    // ═══════════════════════════════════════════════════════════════
+    static Action<MockItem> OnToolPickupRequested;
+    static Action<MockItem> OnItemPickedUp;
+    static Action<MockItem> OnItemDropped;
+    static Action<MockItem> OnItemEquipped;
+    static Action<int> OnToolSwitched;
+    static Action<bool> OnMenuStateChanged;
+    static Action OnOpenInventoryView;
+    static Action OnCloseInventoryView;
+
+    // ═══════════════════════════════════════════════════════════════
+    // EVENT LOG
+    // ═══════════════════════════════════════════════════════════════
+    static List<string> eventLog = new List<string>();
+    static void LogEvent(string name, string detail = "")
+    {
+        string entry = $"[F{Time.frameCount}] {name} {detail}";
+        eventLog.Add(entry);
+        Debug.Log(entry);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // MOCK ITEM (replaces IInventoryItem)
+    // ═══════════════════════════════════════════════════════════════
+    class MockItem
+    {
+        public string name;
+        public Color color;
+        public int qty = 1;
+        public int maxStack;
+        public GameObject go;
+        public Vector3 originalScale;
+        public int toolType; // 0=pickaxe 1=magnet 2=hammer 3=generic
+
+        public MockItem(string n, Color c, int max, Vector3 pos, int tool)
+        {
+            name = n; color = c; maxStack = max; toolType = tool;
+            go = GameObject.CreatePrimitive(tool <= 2 ? PrimitiveType.Cube : PrimitiveType.Sphere);
+            go.name = n;
+            go.transform.position = pos;
+            go.transform.localScale = tool <= 2 ? new Vector3(0.08f, 0.08f, 0.4f) : Vector3.one * 0.4f;
+            originalScale = go.transform.localScale;
+            go.GetComponent<Renderer>().material.color = c;
+            go.AddComponent<Rigidbody>().mass = 0.5f;
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // CONFIG
+    // ═══════════════════════════════════════════════════════════════
+    const int HOTBAR = 5, TOTAL = 15;
+    float moveSpeed = 6f, lookSens = 2f;
+
+    // ═══════════════════════════════════════════════════════════════
+    // RUNTIME STATE
+    // ═══════════════════════════════════════════════════════════════
+    // player
+    GameObject player;
+    Camera cam;
+    CharacterController cc;
+    float xRot, yVel;
+    Transform viewModelContainer, magnetPullOrigin;
+
+    // inventory
+    class Slot { public MockItem item; public int qty; }
+    Slot[] slots;
+    int activeSlot = -1;
+    bool extendedOpen, isMenuOpen;
+
+    // tools
+    float lastSwingTime = -1f;
+
+    // magnet
+    List<Rigidbody> heldBodies = new List<Rigidbody>();
+    List<SpringJoint> magnetJoints = new List<SpringJoint>();
+    List<GameObject> magnetAnchors = new List<GameObject>();
+
+    // grab
+    SpringJoint grabJoint;
+    LineRenderer grabRope;
+    GameObject grabDragger;
+    Rigidbody grabbedRb;
+
+    // highlight
+    GameObject highlightOverlay;
+    GameObject highlightTarget;
+
+    // damageable
+    class DmgObj { public GameObject go; public float hp, maxHp; public Color col; }
+    List<DmgObj> damageables = new List<DmgObj>();
+
+    // world items
+    List<MockItem> worldItems = new List<MockItem>();
+
+    // isFirstEnable (simulated)
+    bool inventoryFirstEnable = true;
+
+    // ═══════════════════════════════════════════════════════════════
+    // LIFECYCLE
+    // ═══════════════════════════════════════════════════════════════
+    void Start()
+    {
+        Cursor.lockState = CursorLockMode.Locked;
+        Cursor.visible = false;
+
+        // clear statics (domain reload safety)
+        ClearStaticEvents();
+        eventLog.Clear();
+
+        CreateWorld();
+        CreatePlayer();
+        SubscribeEvents();
+        slots = new Slot[TOTAL];
+        for (int i = 0; i < TOTAL; i++) slots[i] = new Slot();
+
+        // simulate isFirstEnable
+        SimulateInventoryFirstEnable();
+    }
+
+    void OnDestroy()
+    {
+        // domain reload cleanup
+        ClearStaticEvents();
+        LogEvent("CLEANUP", "static events cleared (domain reload safe)");
+    }
+
+    void ClearStaticEvents()
+    {
+        OnToolPickupRequested = null;
+        OnItemPickedUp = null;
+        OnItemDropped = null;
+        OnItemEquipped = null;
+        OnToolSwitched = null;
+        OnMenuStateChanged = null;
+        OnOpenInventoryView = null;
+        OnCloseInventoryView = null;
+    }
+
+    void SubscribeEvents()
+    {
+        // InventoryOrchestrator subscribes to pickup
+        OnToolPickupRequested += HandleItemPickup;
+
+        // ObjectHighlighterManager subscribes
+        OnItemEquipped += (item) => LogEvent("OnItemEquipped→Highlight", $"tracking active: {item.name}");
+        OnItemDropped += (item) => LogEvent("OnItemDropped→Highlight", $"cleared active: {item.name}");
+
+        // UIManager subscribes to menu state
+        OnMenuStateChanged += (open) => {
+            isMenuOpen = open;
+            LogEvent("OnMenuStateChanged", $"isMenuOpen={open}");
+        };
+
+        // InventoryUI subscribes to open/close
+        OnOpenInventoryView += () => {
+            extendedOpen = true;
+            Cursor.lockState = CursorLockMode.None; Cursor.visible = true;
+            // fire menu state (simulates OnEnable)
+            OnMenuStateChanged?.Invoke(true);
+            LogEvent("OnOpenInventoryView", "extended opened + menu state true");
+        };
+        OnCloseInventoryView += () => {
+            extendedOpen = false;
+            Cursor.lockState = CursorLockMode.Locked; Cursor.visible = false;
+            OnMenuStateChanged?.Invoke(false);
+            LogEvent("OnCloseInventoryView", "extended closed + menu state false");
+        };
+
+        LogEvent("SUBSCRIBE", "all events wired");
+    }
+
+    void SimulateInventoryFirstEnable()
+    {
+        // isFirstEnable pattern: first OnEnable does setup + self-disable, doesn't fire MenuStateChanged
+        if (inventoryFirstEnable)
+        {
+            LogEvent("isFirstEnable", "InventoryUI: subscribe + self-disable (NO MenuStateChanged pulse)");
+            inventoryFirstEnable = false;
+            // subscriptions already done in SubscribeEvents
+        }
+    }
+
+    void Update()
+    {
+        HandleMovement();
+        HandleLook();
+
+        if (!isMenuOpen)
+        {
+            HandlePickup();
+            HandleHotbarKeys();
+            HandleScroll();
+            HandleDrop();
+            HandleToolInput();
+            HandleGrab();
+            HandleHighlight();
+        }
+
+        HandleToggleInventory();
+        HandleMenuSim();
+        HandleDumpLog();
+
+        MagnetCleanup();
+        UpdateDamageableHPBars();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // WORLD CREATION
+    // ═══════════════════════════════════════════════════════════════
+    void CreateWorld()
+    {
+        var floor = GameObject.CreatePrimitive(PrimitiveType.Plane);
+        floor.transform.localScale = Vector3.one * 5f;
+        floor.GetComponent<Renderer>().material.color = new Color(0.25f, 0.25f, 0.3f);
+
+        // tools in world
+        worldItems.Add(new MockItem("Pickaxe", Color.cyan, 1, new Vector3(-2, 1, 4), 0));
+        worldItems.Add(new MockItem("Magnet", Color.magenta, 1, new Vector3(0, 1, 4), 1));
+        worldItems.Add(new MockItem("Hammer", Color.yellow, 1, new Vector3(2, 1, 4), 2));
+        worldItems.Add(new MockItem("Dynamite", new Color(1f, 0.5f, 0f), 5, new Vector3(-1, 1, 6), 3));
+        worldItems.Add(new MockItem("Dynamite", new Color(1f, 0.5f, 0f), 5, new Vector3(1, 1, 6), 3));
+
+        // damageable ore nodes
+        CreateDamageable("IronNode", new Vector3(-3, 0.5f, 8), Color.gray, 80f);
+        CreateDamageable("GoldNode", new Vector3(0, 0.5f, 8), Color.yellow, 60f);
+        CreateDamageable("CopperNode", new Vector3(3, 0.5f, 8), new Color(1f, 0.5f, 0f), 100f);
+
+        // physics cubes for grab + magnet
+        for (int i = 0; i < 5; i++)
+        {
+            var cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            cube.name = $"GrabCube_{i}";
+            cube.transform.position = new Vector3(UnityEngine.Random.Range(-3f, 3f), 0.4f, UnityEngine.Random.Range(2f, 6f));
+            cube.transform.localScale = Vector3.one * 0.3f;
+            cube.GetComponent<Renderer>().material.color = Color.Lerp(Color.red, Color.blue, i / 5f);
+            cube.AddComponent<Rigidbody>().mass = 0.5f;
+        }
+    }
+
+    void CreateDamageable(string name, Vector3 pos, Color col, float hp)
+    {
+        var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        go.name = name; go.transform.position = pos;
+        go.GetComponent<Renderer>().material.color = col;
+        damageables.Add(new DmgObj { go = go, hp = hp, maxHp = hp, col = col });
+    }
+
+    void CreatePlayer()
+    {
+        player = new GameObject("Player");
+        player.transform.position = new Vector3(0, 1, 0);
+        cc = player.AddComponent<CharacterController>();
+        cc.height = 2f; cc.radius = 0.4f; cc.center = Vector3.up;
+
+        var camGO = new GameObject("Camera");
+        camGO.transform.parent = player.transform;
+        camGO.transform.localPosition = new Vector3(0, 1.6f, 0);
+        cam = camGO.AddComponent<Camera>();
+        camGO.AddComponent<AudioListener>();
+
+        viewModelContainer = new GameObject("ViewModelContainer").transform;
+        viewModelContainer.parent = camGO.transform;
+        viewModelContainer.localPosition = new Vector3(0.4f, -0.3f, 0.8f);
+
+        magnetPullOrigin = new GameObject("MagnetPull").transform;
+        magnetPullOrigin.parent = camGO.transform;
+        magnetPullOrigin.localPosition = new Vector3(0, 0, 1.5f);
+
+        // grab dragger
+        grabDragger = new GameObject("RigidbodyDragger");
+        grabDragger.transform.parent = camGO.transform;
+        grabDragger.transform.localPosition = new Vector3(0, 0, 2f);
+        grabDragger.AddComponent<Rigidbody>().isKinematic = true;
+        var lr = grabDragger.AddComponent<LineRenderer>();
+        lr.startWidth = 0.02f; lr.endWidth = 0.02f;
+        lr.material = new Material(Shader.Find("Sprites/Default"));
+        lr.positionCount = 2;
+        lr.enabled = false;
+        grabRope = lr;
+        grabDragger.SetActive(false);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // MOVEMENT + LOOK
+    // ═══════════════════════════════════════════════════════════════
+    void HandleMovement()
+    {
+        float h = Input.GetAxis("Horizontal"), v = Input.GetAxis("Vertical");
+        Vector3 move = player.transform.right * h + player.transform.forward * v;
+        move.y = 0; move = move.normalized * (Input.GetKey(KeyCode.LeftShift) ? moveSpeed * 1.8f : moveSpeed);
+        if (cc.isGrounded && Input.GetKeyDown(KeyCode.Space)) yVel = 7f;
+        yVel += Physics.gravity.y * Time.deltaTime;
+        move.y = yVel;
+        cc.Move(move * Time.deltaTime);
+    }
+    void HandleLook()
+    {
+        if (extendedOpen) return;
+        float mx = Input.GetAxis("Mouse X") * lookSens, my = Input.GetAxis("Mouse Y") * lookSens;
+        xRot -= my; xRot = Mathf.Clamp(xRot, -89f, 89f);
+        player.transform.Rotate(Vector3.up * mx);
+        cam.transform.localRotation = Quaternion.Euler(xRot, 0, 0);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // FLOW 1: TOOL PICKUP
+    // ═══════════════════════════════════════════════════════════════
+    void HandlePickup()
+    {
+        if (!Input.GetMouseButtonDown(0) || activeSlot >= 0 && slots[activeSlot].item != null && slots[activeSlot].item.toolType <= 2) return;
+        // only pickup if not using a tool action
+        if (Physics.Raycast(cam.transform.position, cam.transform.forward, out var hit, 4f))
+        {
+            var found = worldItems.Find(i => i.go == hit.collider.gameObject);
+            if (found != null)
+            {
+                LogEvent("PICKUP_CLICK", found.name);
+                OnToolPickupRequested?.Invoke(found);
+            }
+        }
+    }
+
+    void HandleItemPickup(MockItem item)
+    {
+        LogEvent("OnToolPickupRequested", item.name);
+
+        // stack check
+        for (int i = 0; i < TOTAL; i++)
+        {
+            if (slots[i].item != null && slots[i].item.name == item.name && slots[i].qty < item.maxStack)
+            {
+                slots[i].qty++;
+                item.go.SetActive(false);
+                worldItems.Remove(item);
+                LogEvent("STACKED", $"{item.name} into slot {i}, qty={slots[i].qty}");
+                OnItemPickedUp?.Invoke(item);
+                return;
+            }
+        }
+        // empty slot
+        for (int i = 0; i < TOTAL; i++)
+        {
+            if (slots[i].item == null)
+            {
+                slots[i].item = item; slots[i].qty = 1;
+                item.go.SetActive(false);
+                worldItems.Remove(item);
+                if (activeSlot == -1 && i < HOTBAR) SwitchToSlot(i);
+                LogEvent("ADDED", $"{item.name} to slot {i}");
+                OnItemPickedUp?.Invoke(item);
+                return;
+            }
+        }
+        LogEvent("FULL", "inventory full — item not picked up");
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // FLOW 2: EQUIP / SWITCH
+    // ═══════════════════════════════════════════════════════════════
+    void HandleHotbarKeys()
+    {
+        for (int i = 0; i < HOTBAR; i++)
+            if (Input.GetKeyDown(KeyCode.Alpha1 + i)) SwitchToSlot(i);
+    }
+    void HandleScroll()
+    {
+        float s = Input.GetAxis("Mouse ScrollWheel");
+        if (s == 0) return;
+        int dir = s > 0 ? 1 : -1, start = Mathf.Max(activeSlot, 0);
+        for (int i = 1; i <= HOTBAR; i++)
+        {
+            int idx = (start + dir * i + HOTBAR) % HOTBAR;
+            if (slots[idx].item != null) { SwitchToSlot(idx); return; }
+        }
+    }
+    void SwitchToSlot(int idx)
+    {
+        // unequip previous
+        if (activeSlot >= 0 && slots[activeSlot].item != null)
+            slots[activeSlot].item.go.SetActive(false);
+
+        // toggle off (same slot = unequip)
+        if (idx == activeSlot) {
+            LogEvent("TOGGLE_OFF", $"slot {idx} unequipped");
+            activeSlot = -1;
+            OnToolSwitched?.Invoke(-1);
+            return;
+        }
+
+        activeSlot = idx;
+        var item = slots[idx].item;
+        if (item != null)
+        {
+            item.go.SetActive(true);
+            item.go.transform.parent = viewModelContainer;
+            item.go.transform.localPosition = Vector3.zero;
+            item.go.transform.localRotation = Quaternion.identity;
+            item.go.transform.localScale = item.originalScale * 0.6f;
+            var rb = item.go.GetComponent<Rigidbody>(); if (rb) rb.isKinematic = true;
+            var col = item.go.GetComponent<Collider>(); if (col) col.enabled = false;
+
+            // ItemEquipBridge: SetOwnerContext
+            LogEvent("OnItemEquipped", $"{item.name} — ItemEquipBridge sends cam+container");
+            OnItemEquipped?.Invoke(item);
+        }
+        OnToolSwitched?.Invoke(idx);
+        LogEvent("OnToolSwitched", $"slot {idx}");
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // FLOW 3: TOOL ACTIONS
+    // ═══════════════════════════════════════════════════════════════
+    void HandleToolInput()
+    {
+        if (activeSlot < 0 || slots[activeSlot].item == null) return;
+        var tool = slots[activeSlot].item;
+
+        if (tool.toolType == 0) PickaxeInput(tool); // pickaxe
+        if (tool.toolType == 1) MagnetInput(); // magnet
+        if (tool.toolType == 2) HammerInput(); // hammer
+    }
+
+    void PickaxeInput(MockItem pick)
+    {
+        if (!Input.GetMouseButton(0) || Time.time - lastSwingTime < 0.8f) return;
+        lastSwingTime = Time.time;
+        StartCoroutine(PickaxeSwing());
+    }
+    IEnumerator PickaxeSwing()
+    {
+        LogEvent("PICKAXE_SWING", "animation start");
+        yield return new WaitForSeconds(0.2f);
+        if (!Physics.Raycast(cam.transform.position, cam.transform.forward, out var hit, 3f)) yield break;
+
+        // check damageable
+        DmgObj dmg = damageables.Find(d => d.go == hit.collider.gameObject);
+        if (dmg != null)
+        {
+            dmg.hp -= 25f;
+            var r = dmg.go.GetComponent<Renderer>();
+            r.material.color = Color.white;
+            StartCoroutine(FlashBack(r, dmg.col, 0.1f));
+            LogEvent("PICKAXE_HIT", $"{dmg.go.name} hp={dmg.hp}/{dmg.maxHp}");
+            if (dmg.hp <= 0) BreakDamageable(dmg);
+            yield break;
+        }
+        // push rigidbody
+        var rb = hit.collider.GetComponent<Rigidbody>();
+        if (rb != null) { rb.AddForceAtPosition(cam.transform.forward * 5f, hit.point, ForceMode.Impulse); LogEvent("PICKAXE_PUSH", hit.collider.name); }
+    }
+    IEnumerator FlashBack(Renderer r, Color c, float d) { yield return new WaitForSeconds(d); if (r) r.material.color = c; }
+    void BreakDamageable(DmgObj d)
+    {
+        LogEvent("NODE_BREAK", d.go.name);
+        for (int i = 0; i < 3; i++)
+        {
+            var p = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            p.transform.position = d.go.transform.position + UnityEngine.Random.insideUnitSphere * 0.3f;
+            p.transform.localScale = Vector3.one * 0.2f;
+            p.GetComponent<Renderer>().material.color = d.col;
+            var rb = p.AddComponent<Rigidbody>();
+            rb.linearVelocity = UnityEngine.Random.insideUnitSphere * 3f + Vector3.up * 2f;
+            Destroy(p, 8f);
+        }
+        Destroy(d.go); damageables.Remove(d);
+    }
+
+    void MagnetInput()
+    {
+        if (Input.GetMouseButton(1)) MagnetPull();
+        if (Input.GetMouseButtonDown(0)) MagnetDrop(5f);
+        if (Input.GetKeyDown(KeyCode.R)) MagnetDrop(0.5f);
+    }
+    void MagnetPull()
+    {
+        foreach (var c in Physics.OverlapSphere(magnetPullOrigin.position, 3f))
+        {
+            var rb = c.attachedRigidbody;
+            if (rb == null || heldBodies.Contains(rb) || rb.GetComponent<CharacterController>()) continue;
+            var a = new GameObject("Anchor"); a.transform.position = magnetPullOrigin.position; a.transform.parent = magnetPullOrigin;
+            a.AddComponent<Rigidbody>().isKinematic = true;
+            var sj = a.AddComponent<SpringJoint>(); sj.connectedBody = rb;
+            sj.autoConfigureConnectedAnchor = false; sj.connectedAnchor = Vector3.zero;
+            sj.spring = 100f; sj.damper = 25f; sj.breakForce = 120f;
+            rb.linearDamping = 3f;
+            heldBodies.Add(rb); magnetJoints.Add(sj); magnetAnchors.Add(a);
+        }
+    }
+    void MagnetDrop(float force)
+    {
+        for (int i = 0; i < magnetAnchors.Count; i++) if (magnetAnchors[i]) Destroy(magnetAnchors[i]);
+        magnetJoints.Clear(); magnetAnchors.Clear();
+        foreach (var rb in heldBodies) { if (rb) { rb.AddForce(cam.transform.forward * force, ForceMode.Impulse); rb.linearDamping = 0f; } }
+        LogEvent("MAGNET_DROP", $"{heldBodies.Count} bodies, force={force}");
+        heldBodies.Clear();
+    }
+    void MagnetCleanup()
+    {
+        for (int i = magnetJoints.Count - 1; i >= 0; i--)
+        {
+            if (magnetJoints[i] == null || magnetJoints[i].connectedBody == null)
+            {
+                if (i < magnetAnchors.Count && magnetAnchors[i]) Destroy(magnetAnchors[i]);
+                if (i < heldBodies.Count) { var rb = heldBodies[i]; if (rb) rb.linearDamping = 0f; heldBodies.RemoveAt(i); }
+                magnetJoints.RemoveAt(i); magnetAnchors.RemoveAt(i);
+            }
+        }
+    }
+
+    void HammerInput()
+    {
+        if (Input.GetMouseButtonDown(0) && Physics.Raycast(cam.transform.position, cam.transform.forward, out var hit, 3f))
+            LogEvent("HAMMER_HIT", $"{hit.collider.name} (Phase D: TryTakeOrPack)");
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // FLOW 4: DROP
+    // ═══════════════════════════════════════════════════════════════
+    void HandleDrop()
+    {
+        if (!Input.GetKeyDown(KeyCode.G) || activeSlot < 0) return;
+        var slot = slots[activeSlot];
+        if (slot.item == null) return;
+
+        if (slot.qty > 1)
+        {
+            slot.qty--;
+            var clone = new MockItem(slot.item.name, slot.item.color, slot.item.maxStack,
+                cam.transform.position + cam.transform.forward * 1.5f, slot.item.toolType);
+            clone.go.GetComponent<Rigidbody>().linearVelocity = cam.transform.forward * 5f + Vector3.up * 2f;
+            worldItems.Add(clone);
+            LogEvent("DROP_STACK", $"1 clone of {slot.item.name}, remaining={slot.qty}");
+        }
+        else
+        {
+            var item = slot.item;
+            item.go.SetActive(true); item.go.transform.parent = null;
+            item.go.transform.localScale = item.originalScale;
+            item.go.transform.position = cam.transform.position + cam.transform.forward * 1.5f;
+            var rb = item.go.GetComponent<Rigidbody>(); if (rb) { rb.isKinematic = false; rb.linearVelocity = cam.transform.forward * 5f + Vector3.up * 2f; }
+            var col = item.go.GetComponent<Collider>(); if (col) col.enabled = true;
+            worldItems.Add(item);
+            slot.item = null; slot.qty = 0; activeSlot = -1;
+            LogEvent("DROP_LAST", item.name);
+            OnItemDropped?.Invoke(item);
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // FLOW 7: GRAB (SpringJoint)
+    // ═══════════════════════════════════════════════════════════════
+    void HandleGrab()
+    {
+        if (Input.GetKeyDown(KeyCode.F))
+        {
+            if (grabbedRb != null) ReleaseGrab();
+            else TryGrab();
+        }
+        if (grabbedRb != null && grabRope.enabled)
+        {
+            grabRope.SetPosition(0, grabDragger.transform.position);
+            grabRope.SetPosition(1, grabbedRb.transform.position);
+        }
+    }
+    void TryGrab()
+    {
+        if (isMenuOpen) { LogEvent("GRAB_BLOCKED", "menu is open"); return; }
+        if (!Physics.Raycast(cam.transform.position, cam.transform.forward, out var hit, 4f)) return;
+        var rb = hit.collider.GetComponent<Rigidbody>();
+        if (rb == null || rb.isKinematic) return;
+        grabbedRb = rb;
+        grabDragger.SetActive(true);
+        grabJoint = grabDragger.AddComponent<SpringJoint>();
+        grabJoint.connectedBody = rb;
+        grabJoint.spring = 50f; grabJoint.damper = 10f; grabJoint.maxDistance = 0.1f;
+        rb.linearDamping = 5f;
+        grabRope.enabled = true;
+        LogEvent("GRAB", hit.collider.name);
+    }
+    void ReleaseGrab()
+    {
+        if (grabJoint) Destroy(grabJoint);
+        if (grabbedRb) { grabbedRb.linearDamping = 0f; LogEvent("RELEASE", grabbedRb.name); }
+        grabbedRb = null;
+        grabRope.enabled = false;
+        grabDragger.SetActive(false);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // FLOW 6: HIGHLIGHT
+    // ═══════════════════════════════════════════════════════════════
+    void HandleHighlight()
+    {
+        if (highlightOverlay) { Destroy(highlightOverlay); highlightOverlay = null; highlightTarget = null; }
+        if (isMenuOpen) return;
+        if (!Physics.Raycast(cam.transform.position, cam.transform.forward, out var hit, 10f)) return;
+        // highlight damageables + world items
+        bool isDmg = damageables.Exists(d => d.go == hit.collider.gameObject);
+        bool isItem = worldItems.Exists(i => i.go == hit.collider.gameObject);
+        if (!isDmg && !isItem) return;
+
+        highlightTarget = hit.collider.gameObject;
+        var mf = highlightTarget.GetComponent<MeshFilter>();
+        if (mf == null) return;
+        highlightOverlay = new GameObject("HL");
+        highlightOverlay.transform.position = highlightTarget.transform.position;
+        highlightOverlay.transform.rotation = highlightTarget.transform.rotation;
+        highlightOverlay.transform.localScale = highlightTarget.transform.lossyScale * 1.08f;
+        highlightOverlay.AddComponent<MeshFilter>().mesh = mf.sharedMesh;
+        var mat = new Material(Shader.Find("Sprites/Default"));
+        mat.color = new Color(0, 1, 1, 0.35f); mat.renderQueue = 3100;
+        highlightOverlay.AddComponent<MeshRenderer>().material = mat;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // FLOW 8: INVENTORY OPEN/CLOSE + MENU SIM
+    // ═══════════════════════════════════════════════════════════════
+    void HandleToggleInventory()
+    {
+        if (Input.GetKeyDown(KeyCode.Tab))
+        {
+            if (extendedOpen) { OnCloseInventoryView?.Invoke(); LogEvent("TAB", "close inventory"); }
+            else { OnOpenInventoryView?.Invoke(); LogEvent("TAB", "open inventory"); }
+        }
+        if (extendedOpen && Input.GetKeyDown(KeyCode.Escape))
+        {
+            OnCloseInventoryView?.Invoke();
+            LogEvent("ESC", "close inventory");
+        }
+    }
+    void HandleMenuSim()
+    {
+        // M = simulate opening another menu while inventory is open (CloseAll pattern)
+        if (Input.GetKeyDown(KeyCode.M))
+        {
+            LogEvent("MENU_SIM", "CloseAll pattern — closing inventory first");
+            if (extendedOpen) OnCloseInventoryView?.Invoke();
+            OnMenuStateChanged?.Invoke(true);
+        }
+        if (Input.GetKeyDown(KeyCode.N))
+        {
+            OnMenuStateChanged?.Invoke(false);
+            LogEvent("MENU_SIM", "menu closed");
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // DUMP LOG
+    // ═══════════════════════════════════════════════════════════════
+    void HandleDumpLog()
+    {
+        if (Input.GetKeyDown(KeyCode.L))
+        {
+            Debug.Log("═══ EVENT LOG DUMP ═══");
+            foreach (var e in eventLog) Debug.Log(e);
+            Debug.Log($"═══ {eventLog.Count} events total ═══");
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // HP BARS
+    // ═══════════════════════════════════════════════════════════════
+    void UpdateDamageableHPBars() { /* drawn via OnGUI for simplicity */ }
+
+    // ═══════════════════════════════════════════════════════════════
+    // GUI
+    // ═══════════════════════════════════════════════════════════════
+    void OnGUI()
+    {
+        // hotbar
+        for (int i = 0; i < HOTBAR; i++)
+        {
+            var s = slots[i];
+            string label = s.item != null ? $"[{i + 1}]{s.item.name}" + (s.qty > 1 ? $"x{s.qty}" : "") : $"[{i + 1}]";
+            Color bg = i == activeSlot ? Color.white : (s.item != null ? s.item.color * 0.5f : Color.gray * 0.5f);
+            GUI.backgroundColor = bg;
+            GUI.Box(new Rect(Screen.width / 2 - HOTBAR * 35 + i * 70, Screen.height - 60, 65, 50), label);
+        }
+        GUI.backgroundColor = Color.white;
+
+        // status
+        string tool = activeSlot >= 0 && slots[activeSlot].item != null ? slots[activeSlot].item.name : "None";
+        string state = isMenuOpen ? "MENU OPEN" : (extendedOpen ? "INVENTORY" : "GAMEPLAY");
+        GUI.Label(new Rect(10, 10, 500, 25), $"[{state}] Tool:{tool} Held:{heldBodies.Count} Grab:{(grabbedRb != null ? grabbedRb.name : "none")} Events:{eventLog.Count}");
+        GUI.Label(new Rect(10, 30, 500, 20), "1-5=hotbar G=drop Tab=inv F=grab M/N=menu L=log");
+
+        // hp bars
+        int y = 55;
+        foreach (var d in damageables)
+        {
+            float pct = d.hp / d.maxHp;
+            GUI.Label(new Rect(10, y, 200, 18), $"{d.go.name}: {d.hp:F0}/{d.maxHp:F0}");
+            GUI.DrawTexture(new Rect(160, y + 2, 100 * pct, 12), Texture2D.whiteTexture);
+            y += 18;
+        }
+    }
+}
+
 <!-- ==== FILE: learn/phase-b(New)/prototype/Proto_PlayerMovement.cs ==== -->
 using UnityEngine;
 
@@ -29251,6 +30777,625 @@ public class OBasket : MonoBehaviour
     public void Remove(OPiece o) => inside.Remove(o);
 }
 
+<!-- ==== FILE: learn/phase-c(New)/prototype/Proto_PhaseC_Integration.cs ==== -->
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+/// <summary>
+/// STANDALONE INTEGRATION PROTOTYPE — Phase C (all systems wired together)
+/// Zero dependencies. Empty scene → add one GO → add this script → Play.
+///
+/// Wires ALL cross-system event chains from FLOW.md using inline static Action fields.
+/// Every event raise logs with frame number. FPS controller (WASD + mouse).
+///
+/// ALL FLOWS TESTED:
+///   1. Mining flow: hit node → TakeDamage → BreakNode → OnSpawnOreRequested → pool spawns
+///      → OnCreateParticleRequested → particles → OnOreNodeBroken → OnOreMined → OnStaticBreakableBroken
+///   2. Sell flow: ore enters seller trigger → SellAfterDelay → 2s → OnOreSold → money adds
+///   3. AutoMiner flow: timer → probability → weighted random → pool spawn → throttle
+///   4. Limit flow: count moving → OnOreLimitChanged → warning UI show/hide
+///   5. Pool lifecycle: spawn (Instantiate or dequeue) → use → ReturnToPool (full reset) → reuse
+///   6. Crush flow: C key → TryConvertToCrushed → 2 smaller pieces → original returns to pool
+///   7. Polish flow: P key → AddPolish → at 100% CompletePolishing → material swap
+///   8. Cross-system: OnOreSold → EconomyManager adds money (mocked) + QuestManager tracks (mocked)
+///   9. Cleanup flow: ore falls below y=-100 → OreManager round-robin detects → ReturnToPool
+///
+/// EDGE CASES:
+///   - Double-sell prevention: ore enters 2 sellers → only first sells
+///   - Non-rigidbody in seller → ignored
+///   - BaseSellableItem fallback → instant destroy
+///   - Domain reload: static fields reset via [RuntimeInitializeOnLoadMethod]
+///   - OreLimitManager block → AutoMiner stops spawning
+///   - Pool warmup vs reuse (first N = Instantiate, after R = Dequeue)
+///
+/// Controls:
+///   WASD = move, Mouse = look, Space = jump
+///   LMB = hit nearest node (15 damage)
+///   N = spawn ore manually
+///   M = spawn 30 ore (bulk — triggers limit)
+///   C = crush nearest ore → 2 smaller pieces
+///   P = polish nearest ore (+25%)
+///   T = toggle auto-miner on/off
+///   R = return ALL ore to pool
+///   F = drop nearest ore to y=-120 (tests cleanup)
+///   K = print full status (nodes, ore, pool, money, limit, event counts)
+///   L = dump full event log (every event with frame number)
+/// </summary>
+public class Proto_PhaseC_Integration : MonoBehaviour
+{
+    #region inline event bus (mirrors GameEvents from FLOW.md)
+    // → domain reload cleanup
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    static void ResetStatics()
+    {
+        OnSpawnOreRequested = null; OnCreateParticleRequested = null;
+        OnOreNodeBroken = null; OnOreMined = null; OnStaticBreakableBroken = null;
+        OnOreSold = null; OnOreLimitChanged = null;
+        eventLog.Clear(); IPiece.All.Clear();
+    }
+
+    static event Action<Color, Vector3, Vector3, Vector3> OnSpawnOreRequested;
+    static event Action<Vector3> OnCreateParticleRequested;
+    static event Action<Vector3, string> OnOreNodeBroken;
+    static event Action<string, Vector3> OnOreMined;
+    static event Action<Vector3> OnStaticBreakableBroken;
+    static event Action<float, string> OnOreSold;
+    static event Action<string> OnOreLimitChanged;
+
+    static List<string> eventLog = new List<string>();
+    static void Log(string evt, string detail)
+    {
+        string entry = $"[F{Time.frameCount}] {evt}: {detail}";
+        eventLog.Add(entry);
+        Debug.Log(entry);
+    }
+    #endregion
+
+    #region state
+    Camera cam;
+    CharacterController cc;
+    float xRot;
+    float money;
+    int sellCount;
+    List<INode> nodes = new List<INode>();
+    IPool pool;
+    IAutoMiner autoMiner;
+    ILimiter limiter;
+    IWarning warning;
+    ICleanup cleanup;
+    ISeller seller1, seller2;
+    List<Vector3> savedBrokenPositions = new List<Vector3>();
+    Dictionary<string, int> eventCounts = new Dictionary<string, int>();
+    #endregion
+
+    #region setup
+    void Start()
+    {
+        // → FPS controller
+        cam = Camera.main;
+        cc = gameObject.AddComponent<CharacterController>();
+        cc.height = 2f; cc.radius = 0.3f;
+        transform.position = new Vector3(0, 1.1f, 0);
+        Cursor.lockState = CursorLockMode.Locked;
+        Cursor.visible = false;
+
+        // → ground
+        var ground = GameObject.CreatePrimitive(PrimitiveType.Plane);
+        ground.transform.localScale = new Vector3(8, 1, 8);
+        ground.GetComponent<Renderer>().material.color = new Color(0.35f, 0.35f, 0.3f);
+
+        // → pool
+        pool = new GameObject("[Pool]").AddComponent<IPool>();
+
+        // → subscribe events (simulates all system subscriptions)
+        // OrePiecePoolManager subscribes to spawn requests
+        OnSpawnOreRequested += (color, pos, vel, angVel) =>
+        {
+            Count("OnSpawnOreRequested");
+            var piece = pool.Spawn(pos, color);
+            piece.GetRb().linearVelocity = vel;
+            piece.GetRb().angularVelocity = angVel;
+        };
+        // ParticleManager subscribes
+        OnCreateParticleRequested += (pos) =>
+        {
+            Count("OnCreateParticleRequested");
+            for (int i = 0; i < 8; i++)
+            {
+                var p = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                p.transform.position = pos + UnityEngine.Random.insideUnitSphere * 0.3f;
+                p.transform.localScale = Vector3.one * 0.06f;
+                p.GetComponent<Renderer>().material.color = Color.yellow * 0.7f;
+                Destroy(p.GetComponent<Collider>());
+                p.AddComponent<Rigidbody>().useGravity = false;
+                p.GetComponent<Rigidbody>().linearVelocity = UnityEngine.Random.insideUnitSphere * 4f;
+                Destroy(p, 0.35f);
+            }
+        };
+        // Phase D: BuildingManager subscribes (mock)
+        OnOreNodeBroken += (pos, type) => { Count("OnOreNodeBroken"); Log("OreNodeBroken", $"{type} at {pos:F1}"); };
+        // Phase F: QuestManager subscribes (mock)
+        OnOreMined += (type, pos) => { Count("OnOreMined"); Log("OreMined", $"{type}"); };
+        // Phase G: SavingLoadingManager subscribes (mock)
+        OnStaticBreakableBroken += (pos) => { Count("OnStaticBreakableBroken"); savedBrokenPositions.Add(pos); Log("StaticBreakableBroken", $"saved pos {pos:F0}"); };
+        // EconomyManager subscribes
+        OnOreSold += (value, type) => { Count("OnOreSold"); money += value; sellCount++; Log("OreSold", $"${value:F2} ({type}), total=${money:F2}"); };
+        // PhysicsLimitUIWarning subscribes
+        OnOreLimitChanged += (state) => { Count("OnOreLimitChanged"); warning.SetState(state); Log("OreLimitChanged", state); };
+
+        // → spawn nodes (6 along the back wall)
+        var nodeConfigs = new[] {
+            ("Iron", Color.grey, 30f, 2, 4), ("Gold", new Color(1,0.84f,0), 45f, 1, 3),
+            ("Copper", new Color(0.72f,0.45f,0.2f), 25f, 3, 5), ("Iron", Color.grey, 30f, 2, 4),
+            ("Gold", new Color(1,0.84f,0), 45f, 1, 3), ("Coal", Color.black, 20f, 2, 6) };
+        for (int i = 0; i < 6; i++)
+        {
+            var (name, color, hp, minD, maxD) = nodeConfigs[i];
+            var node = SpawnNode(name, color, hp, minD, maxD, new Vector3(-5 + i * 2, 1.2f, 10));
+            nodes.Add(node);
+        }
+
+        // → auto-miner
+        autoMiner = new GameObject("AutoMiner").AddComponent<IAutoMiner>();
+        autoMiner.transform.position = new Vector3(8, 0.5f, 8);
+        autoMiner.pool = pool; autoMiner.limiter = null; // set below
+
+        // → limiter + warning
+        limiter = new GameObject("[Limiter]").AddComponent<ILimiter>();
+        limiter.threshold = 25;
+        warning = new GameObject("[Warning]").AddComponent<IWarning>();
+        autoMiner.limiter = limiter;
+
+        // → cleanup (round-robin)
+        cleanup = new GameObject("[Cleanup]").AddComponent<ICleanup>();
+        cleanup.pool = pool;
+
+        // → 2 seller machines (tests double-sell prevention)
+        seller1 = SpawnSeller("Seller_1", new Vector3(-6, 0.5f, 5));
+        seller2 = SpawnSeller("Seller_2", new Vector3(-6, 0.5f, 8));
+
+        Debug.Log("═══ PHASE C INTEGRATION ═══");
+        Debug.Log("WASD=move, Mouse=look, Space=jump");
+        Debug.Log("LMB=hit node, N=spawn ore, M=bulk 30, C=crush, P=polish");
+        Debug.Log("T=toggle miner, R=return all, F=drop to abyss, K=status, L=event log");
+    }
+    #endregion
+
+    #region FPS controller + input
+    void Update()
+    {
+        // → mouse look
+        float mx = Input.GetAxis("Mouse X") * 4f;
+        float my = Input.GetAxis("Mouse Y") * 4f;
+        xRot = Mathf.Clamp(xRot - my, -80f, 80f);
+        transform.Rotate(0, mx, 0);
+        cam.transform.localEulerAngles = new Vector3(xRot, transform.eulerAngles.y, 0);
+        cam.transform.position = transform.position + Vector3.up * 0.8f;
+        cam.transform.rotation = Quaternion.Euler(xRot, transform.eulerAngles.y, 0);
+
+        // → WASD movement
+        float h = Input.GetAxis("Horizontal");
+        float v = Input.GetAxis("Vertical");
+        Vector3 move = transform.right * h + transform.forward * v;
+        move.y = cc.isGrounded ? -0.1f : -9.8f * Time.deltaTime;
+        if (cc.isGrounded && Input.GetKeyDown(KeyCode.Space)) move.y = 5f;
+        cc.Move(move * 5f * Time.deltaTime);
+
+        // ═══ input ═══
+        if (Input.GetMouseButtonDown(0)) HitNearestNode();
+        if (Input.GetKeyDown(KeyCode.N)) pool.Spawn(cam.transform.position + cam.transform.forward * 2f, RandomOreColor());
+        if (Input.GetKeyDown(KeyCode.M)) { for (int i = 0; i < 30; i++) pool.Spawn(cam.transform.position + cam.transform.forward * 2f + UnityEngine.Random.insideUnitSphere, RandomOreColor()); Debug.Log("[INT] Bulk spawned 30"); }
+        if (Input.GetKeyDown(KeyCode.C)) CrushNearest();
+        if (Input.GetKeyDown(KeyCode.P)) PolishNearest();
+        if (Input.GetKeyDown(KeyCode.T)) autoMiner.Toggle();
+        if (Input.GetKeyDown(KeyCode.R)) { int c = IPiece.All.Count; while (IPiece.All.Count > 0) pool.ReturnToPool(IPiece.All[0]); Debug.Log($"[INT] Returned {c} to pool"); }
+        if (Input.GetKeyDown(KeyCode.F)) { var ore = FindNearest(); if (ore != null) { ore.transform.position = new Vector3(0, -120f, 0); Debug.Log("[INT] Dropped to abyss"); } }
+        if (Input.GetKeyDown(KeyCode.K)) PrintStatus();
+        if (Input.GetKeyDown(KeyCode.L)) DumpLog();
+    }
+    #endregion
+
+    #region mining flow
+    void HitNearestNode()
+    {
+        if (Physics.Raycast(cam.transform.position, cam.transform.forward, out RaycastHit hit, 50f))
+        {
+            var node = hit.collider.GetComponentInParent<INode>();
+            if (node != null)
+            {
+                node.TakeDamage(15f, hit.point);
+                if (node.IsBroken())
+                {
+                    // → BreakNode: fire all events in sequence
+                    int drops = UnityEngine.Random.Range(node.minDrops, node.maxDrops + 1);
+                    Vector3 center = (node.transform.position + hit.point) * 0.5f;
+                    for (int i = 0; i < drops; i++)
+                    {
+                        Vector3 pos = center + UnityEngine.Random.insideUnitSphere * 0.15f;
+                        Vector3 vel = new Vector3(UnityEngine.Random.Range(-1.5f, 1.5f), UnityEngine.Random.Range(2f, 4f), UnityEngine.Random.Range(-1.5f, 1.5f));
+                        Vector3 angVel = UnityEngine.Random.insideUnitSphere * UnityEngine.Random.Range(1f, 50f);
+                        Log("SpawnOreRequested", $"drop {i + 1}/{drops}");
+                        OnSpawnOreRequested?.Invoke(node.color, pos, vel, angVel);
+                    }
+                    Log("CreateParticleRequested", $"at {hit.point:F1}");
+                    OnCreateParticleRequested?.Invoke(hit.point);
+                    OnOreNodeBroken?.Invoke(node.transform.position, node.typeName);
+                    OnOreMined?.Invoke(node.typeName, node.transform.position);
+                    Vector3 tp = new Vector3(Mathf.Floor(node.transform.position.x), Mathf.Floor(node.transform.position.y), Mathf.Floor(node.transform.position.z));
+                    OnStaticBreakableBroken?.Invoke(tp);
+                    nodes.Remove(node);
+                    Destroy(node.gameObject);
+                }
+            }
+        }
+    }
+    #endregion
+
+    #region ore operations
+    void CrushNearest()
+    {
+        var ore = FindNearest();
+        if (ore == null) return;
+        Vector3 pos = ore.transform.position;
+        Color c = ore.color * 0.7f;
+        pool.ReturnToPool(ore);
+        for (int i = 0; i < 2; i++)
+        {
+            var crushed = pool.Spawn(pos + UnityEngine.Random.insideUnitSphere * 0.2f, c);
+            crushed.transform.localScale *= 0.6f;
+            crushed.isCrushed = true;
+        }
+        Log("Crush", $"→ 2 smaller pieces at {pos:F1}");
+    }
+
+    void PolishNearest()
+    {
+        var ore = FindNearest();
+        if (ore == null) return;
+        ore.polishPct = Mathf.Min(1f, ore.polishPct + 0.25f);
+        if (ore.polishPct >= 1f)
+        {
+            ore.GetComponent<Renderer>().material.color = Color.white;
+            ore.isPolished = true;
+            Log("Polish", "100% → material swapped to white (polished)");
+        }
+        else Log("Polish", $"{ore.polishPct * 100:F0}%");
+    }
+
+    IPiece FindNearest()
+    {
+        IPiece best = null; float bd = float.MaxValue;
+        foreach (var o in IPiece.All)
+        { float d = Vector3.Distance(o.transform.position, cam.transform.position); if (d < bd) { bd = d; best = o; } }
+        if (best == null) Debug.Log("[INT] No active ore");
+        return best;
+    }
+    #endregion
+
+    #region helpers
+    INode SpawnNode(string name, Color color, float hp, int minD, int maxD, Vector3 pos)
+    {
+        var go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        go.name = $"Node_{name}"; go.transform.position = pos;
+        go.transform.localScale = Vector3.one * 1.3f;
+        go.GetComponent<Renderer>().material.color = color;
+        var node = go.AddComponent<INode>();
+        node.Init(name, color, hp, minD, maxD);
+        return node;
+    }
+
+    ISeller SpawnSeller(string name, Vector3 pos)
+    {
+        var root = new GameObject(name); root.transform.position = pos;
+        var surface = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        surface.transform.SetParent(root.transform); surface.transform.localPosition = Vector3.zero;
+        surface.transform.localScale = new Vector3(2.5f, 0.3f, 2.5f);
+        surface.GetComponent<Renderer>().material.color = new Color(0, 0.5f, 0);
+        var trigGo = new GameObject("Trigger");
+        trigGo.transform.SetParent(root.transform); trigGo.transform.localPosition = new Vector3(0, 0.5f, 0);
+        var col = trigGo.AddComponent<BoxCollider>(); col.size = new Vector3(2.2f, 1f, 2.2f); col.isTrigger = true;
+        var seller = trigGo.AddComponent<ISeller>();
+        seller.pool = pool;
+        seller.onSold = (value, type) =>
+        {
+            Log("SellerTrigger", $"ore entered → SellAfterDelay");
+            OnOreSold?.Invoke(value, type);
+        };
+        return seller;
+    }
+
+    Color RandomOreColor()
+    {
+        Color[] c = { Color.grey, new Color(1, 0.84f, 0), new Color(0.72f, 0.45f, 0.2f), Color.black };
+        return c[UnityEngine.Random.Range(0, c.Length)];
+    }
+
+    void Count(string evt)
+    {
+        if (!eventCounts.ContainsKey(evt)) eventCounts[evt] = 0;
+        eventCounts[evt]++;
+    }
+
+    void PrintStatus()
+    {
+        Debug.Log($"═══ STATUS ═══");
+        int alive = 0; foreach (var n in nodes) if (n != null) alive++;
+        Debug.Log($"Nodes: {alive}/{nodes.Count}");
+        Debug.Log($"Ore active: {IPiece.All.Count}, pooled: {pool.GetPooledCount()}");
+        Debug.Log($"Money: ${money:F2} ({sellCount} sales)");
+        Debug.Log($"Saved broken positions: {savedBrokenPositions.Count}");
+        Debug.Log($"AutoMiner: {(autoMiner.isOn ? "ON" : "OFF")}, spawned: {autoMiner.spawnCount}");
+        Debug.Log($"Limit state: {limiter.currentState} (threshold={limiter.threshold})");
+        string evtStr = ""; foreach (var kv in eventCounts) evtStr += $"{kv.Key}={kv.Value} ";
+        Debug.Log($"Event counts: {evtStr}");
+    }
+
+    void DumpLog()
+    {
+        Debug.Log($"═══ EVENT LOG ({eventLog.Count} entries) ═══");
+        foreach (var entry in eventLog) Debug.Log(entry);
+        Debug.Log($"═══ END LOG ═══");
+    }
+    #endregion
+}
+
+// ═══════════════════════════════════════════════════════════════
+// INode — breakable node
+// ═══════════════════════════════════════════════════════════════
+public class INode : MonoBehaviour
+{
+    public string typeName; public Color color;
+    public float health, maxHealth; public int minDrops, maxDrops;
+    public void Init(string n, Color c, float hp, int minD, int maxD)
+    { typeName = n; color = c; health = hp; maxHealth = hp; minDrops = minD; maxDrops = maxD; }
+    public void TakeDamage(float dmg, Vector3 hitPoint)
+    {
+        health -= dmg;
+        Debug.Log($"[INT] HIT {typeName}: {health:F0}/{maxHealth}");
+    }
+    public bool IsBroken() => health <= 0f;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// IPiece — poolable ore piece
+// ═══════════════════════════════════════════════════════════════
+public class IPiece : MonoBehaviour
+{
+    public static List<IPiece> All = new List<IPiece>();
+    public Color color; public float sellValue; public float polishPct;
+    public bool isPolished, isCrushed, isMarked;
+    Rigidbody rb;
+    void Awake() { rb = GetComponent<Rigidbody>(); }
+    void OnEnable() { All.Add(this); isMarked = false; polishPct = 0f; isPolished = false; isCrushed = false; }
+    void OnDisable() { All.Remove(this); }
+    public Rigidbody GetRb() => rb;
+
+    public void SellAfterDelay(IPool pool, Action<float, string> onSold)
+    {
+        if (isMarked) { Debug.Log("[INT] Double-sell PREVENTED"); return; }
+        isMarked = true;
+        GetComponent<Renderer>().material.color = Color.red;
+        StartCoroutine(DoSell(pool, onSold));
+    }
+    IEnumerator DoSell(IPool pool, Action<float, string> onSold)
+    {
+        yield return new WaitForSeconds(2f);
+        if (this == null || !isActiveAndEnabled) yield break;
+        onSold?.Invoke(sellValue, isCrushed ? "crushed" : isPolished ? "polished" : "raw");
+        pool.ReturnToPool(this);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// IPool — keyed object pool
+// ═══════════════════════════════════════════════════════════════
+public class IPool : MonoBehaviour
+{
+    Queue<IPiece> pool = new Queue<IPiece>();
+    int instantiateCount, dequeueCount;
+
+    public IPiece Spawn(Vector3 pos, Color color)
+    {
+        IPiece ore;
+        if (pool.Count > 0)
+        {
+            ore = pool.Dequeue(); ore.transform.position = pos;
+            ore.gameObject.SetActive(true); dequeueCount++;
+        }
+        else
+        {
+            var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            go.transform.position = pos;
+            go.transform.localScale = Vector3.one * (0.2f + UnityEngine.Random.Range(-0.04f, 0.04f));
+            go.AddComponent<Rigidbody>().mass = 0.3f;
+            ore = go.AddComponent<IPiece>(); instantiateCount++;
+        }
+        ore.color = color;
+        ore.GetComponent<Renderer>().material.color = color;
+        ore.sellValue = UnityEngine.Random.Range(0.9f, 1.1f);
+        ore.GetRb().linearVelocity = Vector3.zero;
+        ore.GetRb().angularVelocity = Vector3.zero;
+        return ore;
+    }
+
+    public void ReturnToPool(IPiece ore)
+    {
+        if (ore == null || !ore.gameObject.activeSelf) return;
+        ore.gameObject.SetActive(false);
+        ore.GetRb().linearVelocity = Vector3.zero;
+        ore.GetRb().angularVelocity = Vector3.zero;
+        ore.GetRb().Sleep();
+        ore.GetRb().linearDamping = 0.2f;
+        ore.transform.SetParent(transform);
+        pool.Enqueue(ore);
+    }
+    public int GetPooledCount() => pool.Count;
+    public string GetStats() => $"instantiated={instantiateCount}, dequeued={dequeueCount}";
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ISeller — trigger-based seller (dual collider)
+// ═══════════════════════════════════════════════════════════════
+public class ISeller : MonoBehaviour
+{
+    public IPool pool;
+    public Action<float, string> onSold;
+    void OnTriggerEnter(Collider other)
+    {
+        if (other.attachedRigidbody == null) { Debug.Log($"[INT] Seller: ignored {other.name} (no rb)"); return; }
+        var ore = other.GetComponent<IPiece>();
+        if (ore != null) { ore.SellAfterDelay(pool, onSold); return; }
+        // → generic sellable fallback (instant destroy)
+        if (other.GetComponent<IGenericSellable>() is IGenericSellable gs)
+        {
+            onSold?.Invoke(gs.value, "generic");
+            Destroy(gs.gameObject);
+        }
+    }
+}
+
+public class IGenericSellable : MonoBehaviour { public float value = 5f; }
+
+// ═══════════════════════════════════════════════════════════════
+// IAutoMiner — timed spawner with throttle
+// ═══════════════════════════════════════════════════════════════
+public class IAutoMiner : MonoBehaviour
+{
+    public IPool pool;
+    public ILimiter limiter;
+    public bool isOn = true;
+    public int spawnCount;
+    float timer = 2f, spawnRate = 2f, probability = 80f;
+    GameObject rotator, light;
+    static readonly Color[] dropColors = { Color.grey, new Color(1, 0.84f, 0), new Color(0.72f, 0.45f, 0.2f) };
+
+    void Start()
+    {
+        var baseMesh = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        baseMesh.transform.SetParent(transform); baseMesh.transform.localPosition = Vector3.zero;
+        baseMesh.transform.localScale = new Vector3(1, 0.3f, 1);
+        baseMesh.GetComponent<Renderer>().material.color = new Color(0.3f, 0.3f, 0.3f);
+        rotator = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        rotator.transform.SetParent(transform); rotator.transform.localPosition = new Vector3(0, 0.8f, 0);
+        rotator.transform.localScale = new Vector3(0.3f, 0.6f, 0.3f);
+        Destroy(rotator.GetComponent<Collider>());
+        light = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        light.transform.SetParent(transform); light.transform.localPosition = new Vector3(0.4f, 0.3f, 0);
+        light.transform.localScale = Vector3.one * 0.15f; Destroy(light.GetComponent<Collider>());
+        SetLight(true);
+    }
+
+    void Update()
+    {
+        if (!isOn) return;
+        rotator.transform.Rotate(Vector3.right, 360f / (spawnRate * 12f) * Time.deltaTime);
+        timer -= Time.deltaTime;
+        if (timer <= 0f)
+        {
+            // → ShouldBlockOreSpawning
+            if (limiter != null && limiter.currentState == "BLOCKED") { timer = spawnRate; return; }
+            if (UnityEngine.Random.Range(0f, 100f) <= probability)
+            {
+                pool.Spawn(transform.position + Vector3.down * 0.3f + Vector3.forward * 0.8f,
+                    dropColors[UnityEngine.Random.Range(0, dropColors.Length)]);
+                spawnCount++;
+            }
+            float mult = limiter != null ? limiter.GetMultiplier() : 1f;
+            timer += spawnRate * mult;
+        }
+    }
+
+    public void Toggle()
+    {
+        isOn = !isOn; SetLight(isOn);
+        Debug.Log($"[INT] AutoMiner {(isOn ? "ON" : "OFF")}");
+    }
+    void SetLight(bool on) => light.GetComponent<Renderer>().material.color = on ? Color.green : Color.red;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ILimiter — physics limit checker
+// ═══════════════════════════════════════════════════════════════
+public class ILimiter : MonoBehaviour
+{
+    public int threshold = 25;
+    public string currentState = "REGULAR";
+    float timer;
+    public float GetMultiplier() => currentState switch
+    { "SLIGHTLY" => 1.25f, "HIGHLY" => 1.5f, "BLOCKED" => 2f, _ => 1f };
+
+    void Update()
+    {
+        timer += Time.deltaTime;
+        if (timer < 5f) return;
+        timer = 0f;
+        int moving = 0;
+        foreach (var o in IPiece.All)
+            if (o != null && !o.GetRb().IsSleeping()) { moving++; if (moving > threshold + 10) break; }
+        string prev = currentState;
+        currentState = moving > threshold + 10 ? "BLOCKED" :
+                       moving > threshold + 5 ? "HIGHLY" :
+                       moving > threshold ? "SLIGHTLY" : "REGULAR";
+        if (currentState != prev)
+            Proto_PhaseC_Integration.RaiseLimitChanged(currentState);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// IWarning — visual limit warning
+// ═══════════════════════════════════════════════════════════════
+public class IWarning : MonoBehaviour
+{
+    GameObject soft, hard;
+    void Awake()
+    {
+        soft = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        soft.transform.position = new Vector3(0, 5, 5); soft.transform.localScale = new Vector3(3, 0.3f, 0.3f);
+        soft.GetComponent<Renderer>().material.color = Color.yellow; Destroy(soft.GetComponent<Collider>()); soft.SetActive(false);
+        hard = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        hard.transform.position = new Vector3(0, 5.5f, 5); hard.transform.localScale = new Vector3(3, 0.3f, 0.3f);
+        hard.GetComponent<Renderer>().material.color = Color.red; Destroy(hard.GetComponent<Collider>()); hard.SetActive(false);
+    }
+    public void SetState(string state)
+    {
+        soft.SetActive(state == "SLIGHTLY" || state == "HIGHLY");
+        hard.SetActive(state == "BLOCKED");
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ICleanup — round-robin ore cleanup
+// ═══════════════════════════════════════════════════════════════
+public class ICleanup : MonoBehaviour
+{
+    public IPool pool;
+    int idx;
+    void Update()
+    {
+        if (IPiece.All.Count == 0) { idx = 0; return; }
+        if (idx >= IPiece.All.Count) idx = 0;
+        var ore = IPiece.All[idx];
+        if (ore == null) { IPiece.All.RemoveAt(idx); return; }
+        if (ore.transform.position.y < -100f || float.IsNaN(ore.transform.position.x))
+        {
+            Debug.Log("[INT] Cleanup: ore out of bounds → pool");
+            pool.ReturnToPool(ore);
+        }
+        idx++;
+    }
+}
+
+// partial to expose event raise for limiter
+public partial class Proto_PhaseC_Integration
+{
+    public static void RaiseLimitChanged(string state)
+    {
+        OnOreLimitChanged?.Invoke(state);
+    }
+}
+
 <!-- ==== FILE: learn/phase-c(New)/prototype/Proto_SellerSystem.cs ==== -->
 using System.Collections;
 using System.Collections.Generic;
@@ -34022,6 +36167,506 @@ public class Proto_ConveyorFlow : MonoBehaviour
     #endregion
 }
 
+<!-- ==== FILE: learn/phase-d(New)/prototype/Proto_PhaseD_Integration.cs ==== -->
+using System;
+using System.Collections.Generic;
+using UnityEngine;
+
+/// <summary>
+/// STANDALONE INTEGRATION PROTOTYPE — Tests ALL Phase D cross-system event chains.
+/// Single MonoBehaviour, zero deps, empty scene → Play.
+///
+/// What this proves:
+///   The per-system prototypes proved Building + Conveyor work alone. This tests the
+///   EVENT HANDOFFS between systems — the real-world bugs hide in timing, ordering,
+///   and cascade effects (CloseAll, MenuState, equip/unequip, ghost cleanup).
+///
+/// 10 flows tested:
+///   Flow 1: Equip ToolBuilder → ghost appears → OnItemEquipped → SetOwnerContext
+///   Flow 2: Place building (LMB) → OnBuildingPlaced → qty decrements → ghost stays
+///   Flow 3: Hammer "Take" → BuildingObject creates ToolBuilder → OnBuildingTakeRequested
+///           → inventory adds tool → OnItemPickedUp → OnBuildingRemoved
+///   Flow 4: Hammer "Pack" → BuildingObject spawns crate → OnBuildingRemoved
+///   Flow 5: Crate pickup (E) → creates ToolBuilder → OnToolPickupRequested → inventory adds
+///   Flow 6: Drop tool (G) → OnItemDropped → crate spawns with velocity
+///   Flow 7: Conveyor flow → trigger → velocity accumulate → batch apply → ore moves
+///   Flow 8: Interact on placed building (E) → toggle open/close (ChuteHatch/RoutingConveyor)
+///   Flow 9: Menu open (Tab) → OnMenuStateChanged(true) → ghost cleanup → cursor unlock
+///   Flow 10: CloseAll cascade → opening menu while building → ghost destroyed, node ghosts hidden
+///
+/// Controls:
+///   WASD+Mouse = FPS move          LMB = place building (if ghost green)
+///   1 = equip ToolBuilder          2 = equip Hammer            3 = unequip
+///   R = rotate ghost               Q = mirror variant
+///   E = interact (pickup crate / toggle building)
+///   G = drop equipped tool as crate
+///   Tab = toggle inventory (tests MenuState + CloseAll)
+///   N = spawn ore sphere on belt   L = DUMP EVENT LOG
+///   F1 = clear event log
+///
+/// Event log: every static event logs [frame] EventName(args). Press L to dump.
+/// </summary>
+public class Proto_PhaseD_Integration : MonoBehaviour
+{
+    #region Inline Events — mirrors real GameEvents partial per phase
+    // → domain reload cleanup: all nulled in Start()
+    static Action<bool> OnMenuStateChanged;
+    static Action<string> OnItemEquipped;       // item name
+    static Action<string> OnToolPickupRequested; // item name
+    static Action<string> OnItemPickedUp;        // item name
+    static Action<string> OnItemDropped;         // item name
+    static Action<Vector3> OnBuildingPlaced;
+    static Action<Vector3> OnBuildingRemoved;
+    static Action<string> OnBuildingTakeRequested; // tool name
+    static Action OnCloseAllSubManagers;
+    static Action OnOpenInventoryView;
+    static Action OnCloseInventoryView;
+    static List<string> eventLog = new List<string>();
+
+    static void LogEvent(string name, string detail = "")
+    {
+        string entry = $"[{Time.frameCount}] {name}{(detail != "" ? $"({detail})" : "")}";
+        eventLog.Add(entry);
+        Debug.Log(entry);
+    }
+
+    void RaiseMenuStateChanged(bool open) { LogEvent("MenuStateChanged", open.ToString()); OnMenuStateChanged?.Invoke(open); }
+    void RaiseItemEquipped(string name) { LogEvent("ItemEquipped", name); OnItemEquipped?.Invoke(name); }
+    void RaiseToolPickupRequested(string name) { LogEvent("ToolPickupRequested", name); OnToolPickupRequested?.Invoke(name); }
+    void RaiseItemPickedUp(string name) { LogEvent("ItemPickedUp", name); OnItemPickedUp?.Invoke(name); }
+    void RaiseItemDropped(string name) { LogEvent("ItemDropped", name); OnItemDropped?.Invoke(name); }
+    void RaiseBuildingPlaced(Vector3 pos) { LogEvent("BuildingPlaced", pos.ToString()); OnBuildingPlaced?.Invoke(pos); }
+    void RaiseBuildingRemoved(Vector3 pos) { LogEvent("BuildingRemoved", pos.ToString()); OnBuildingRemoved?.Invoke(pos); }
+    void RaiseBuildingTakeRequested(string name) { LogEvent("BuildingTakeRequested", name); OnBuildingTakeRequested?.Invoke(name); }
+    void RaiseCloseAll() { LogEvent("CloseAllSubManagers"); OnCloseAllSubManagers?.Invoke(); }
+    void RaiseOpenInventory() { LogEvent("OpenInventoryView"); OnOpenInventoryView?.Invoke(); }
+    void RaiseCloseInventory() { LogEvent("CloseInventoryView"); OnCloseInventoryView?.Invoke(); }
+    #endregion
+
+    #region State
+    Camera cam; CharacterController cc; float pitch;
+    // → tool system
+    enum EquippedTool { none, builder, hammer }
+    EquippedTool equipped = EquippedTool.none;
+    int builderQty = 5;
+    int variantIndex; Quaternion ghostRot = Quaternion.identity;
+    GameObject ghost; Material matGreen, matRed;
+    bool canPlace, isMenuOpen, ghostActive;
+    // → world objects
+    List<PBuilding> buildings = new List<PBuilding>();
+    List<PCrate> crates = new List<PCrate>();
+    // → conveyor
+    List<PBelt> belts = new List<PBelt>();
+    List<PPhys> physObjs = new List<PPhys>();
+    // → highlight
+    PBuilding highlighted; Color hlOrigColor;
+    #endregion
+
+    #region Start — subscribe + build scene
+    void Start()
+    {
+        // → Pitfall #9: static fields survive domain reload — null them all
+        OnMenuStateChanged = null; OnItemEquipped = null; OnToolPickupRequested = null;
+        OnItemPickedUp = null; OnItemDropped = null; OnBuildingPlaced = null;
+        OnBuildingRemoved = null; OnBuildingTakeRequested = null; OnCloseAllSubManagers = null;
+        OnOpenInventoryView = null; OnCloseInventoryView = null;
+        eventLog.Clear();
+
+        // → subscribe (mirrors real subscription order)
+        // 1. UIManager-like: tracks menu state
+        OnMenuStateChanged += open => { isMenuOpen = open; Cursor.lockState = open ? CursorLockMode.None : CursorLockMode.Locked; };
+        // 2. InventoryOrchestrator-like: handles pickup
+        OnToolPickupRequested += name => { builderQty++; RaiseItemPickedUp(name); LogEvent("Inventory", $"added {name}, qty={builderQty}"); };
+        // 3. BuildingTakeRequested → creates tool and fires ToolPickupRequested
+        OnBuildingTakeRequested += name => { RaiseToolPickupRequested(name); };
+        // 4. CloseAll → close inventory + cleanup ghost
+        OnCloseAllSubManagers += () => { if (isMenuOpen) RaiseCloseInventory(); CleanupGhost(); };
+        // 5. Inventory view
+        OnOpenInventoryView += () => { RaiseMenuStateChanged(true); LogEvent("InventoryUI", "OPENED"); };
+        OnCloseInventoryView += () => { RaiseMenuStateChanged(false); LogEvent("InventoryUI", "CLOSED"); };
+
+        // → player
+        cc = gameObject.AddComponent<CharacterController>(); cc.height = 1.8f;
+        transform.position = new Vector3(3f, 1f, -2f);
+        var cGO = new GameObject("Cam"); cGO.transform.parent = transform;
+        cGO.transform.localPosition = new Vector3(0, 0.8f, 0);
+        cam = cGO.AddComponent<Camera>(); cam.nearClipPlane = 0.1f;
+
+        // → materials
+        matGreen = MakeMat(new Color(0, 1, 0, 0.3f), true);
+        matRed = MakeMat(new Color(1, 0, 0, 0.3f), true);
+
+        // → ghost (starts hidden)
+        ghost = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        ghost.name = "Ghost"; Destroy(ghost.GetComponent<Collider>());
+        ghost.GetComponent<Renderer>().material = matGreen; ghost.SetActive(false);
+
+        // → floor + platform (for scaffolding visual)
+        var floor = GameObject.CreatePrimitive(PrimitiveType.Plane);
+        floor.transform.localScale = new Vector3(3, 1, 3);
+        floor.GetComponent<Renderer>().material.color = new Color(0.2f, 0.2f, 0.2f);
+        var plat = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        plat.name = "Platform"; plat.transform.position = new Vector3(-3, 2, 5);
+        plat.transform.localScale = new Vector3(4, 0.2f, 4);
+        plat.GetComponent<Renderer>().material.color = new Color(0.3f, 0.3f, 0.3f);
+
+        // → conveyor belt line (3 belts for flow test)
+        for (int i = 0; i < 3; i++)
+        {
+            var bGO = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            bGO.name = $"Belt_{i}"; bGO.transform.position = new Vector3(8 + i * 2f, 0.05f, 0);
+            bGO.transform.localScale = new Vector3(1.8f, 0.05f, 1.2f);
+            bGO.GetComponent<Renderer>().material.color = Color.green;
+            var tGO = new GameObject("Trigger"); tGO.transform.parent = bGO.transform;
+            tGO.transform.localPosition = Vector3.up * 0.1f;
+            var tc = tGO.AddComponent<BoxCollider>(); tc.isTrigger = true; tc.size = new Vector3(1, 4, 1);
+            var belt = bGO.AddComponent<PBelt>(); belt.dir = Vector3.right; belt.speed = 2f;
+            belt.proto = this; belts.Add(belt);
+        }
+        // → toggleable building (simulates ChuteHatch / RoutingConveyor interaction)
+        var toggleBld = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        toggleBld.name = "ToggleableBuilding"; toggleBld.transform.position = new Vector3(6, 0.5f, 3);
+        toggleBld.GetComponent<Renderer>().material.color = new Color(0.6f, 0.2f, 0.6f);
+        var tb = toggleBld.AddComponent<PBuilding>(); tb.go = toggleBld; tb.isToggleable = true;
+        buildings.Add(tb);
+        // → pre-placed crate
+        SpawnCrate(new Vector3(2, 0.3f, 2), Quaternion.identity, Vector3.zero);
+
+        // → light
+        var lt = new GameObject("Lt").AddComponent<Light>();
+        lt.type = LightType.Directional; lt.transform.rotation = Quaternion.Euler(50, -30, 0);
+
+        Cursor.lockState = CursorLockMode.Locked;
+        Debug.Log("=== Proto_PhaseD_Integration ===");
+        Debug.Log("1=builder 2=hammer 3=unequip LMB=place R=rot Q=mirror E=interact G=drop Tab=menu N=ore L=log F1=clear");
+    }
+    #endregion
+
+    #region Update
+    void Update()
+    {
+        Move();
+        HandleEquip();
+        HandleHighlight();
+        if (equipped == EquippedTool.builder) GhostUpdate();
+        if (equipped == EquippedTool.builder && Input.GetMouseButtonDown(0)) PlaceBuilding();
+        if (equipped == EquippedTool.hammer) HammerInteract();
+        HandleInteract();
+        HandleDrop();
+        HandleMenu();
+        if (Input.GetKeyDown(KeyCode.N)) SpawnOre();
+        if (Input.GetKeyDown(KeyCode.L)) DumpLog();
+        if (Input.GetKeyDown(KeyCode.F1)) { eventLog.Clear(); Debug.Log("[LOG CLEARED]"); }
+    }
+
+    void FixedUpdate()
+    {
+        // → belt push
+        foreach (var b in belts) b.Push();
+        // → batch apply (ConveyorBeltManager pattern)
+        for (int i = physObjs.Count - 1; i >= 0; i--) { if (physObjs[i] == null) physObjs.RemoveAt(i); }
+        foreach (var o in physObjs)
+        {
+            if (o.count == 0) { o.Reset(); continue; }
+            var rb = o.GetComponent<Rigidbody>();
+            Vector3 v = o.sum / o.count; v.y = rb.linearVelocity.y;
+            rb.linearVelocity = v; o.Reset();
+        }
+    }
+    #endregion
+
+    #region Movement
+    void Move()
+    {
+        if (isMenuOpen) return;
+        float mx = Input.GetAxis("Mouse X") * 2f, my = Input.GetAxis("Mouse Y") * 2f;
+        transform.Rotate(0, mx, 0); pitch = Mathf.Clamp(pitch - my, -80, 80);
+        cam.transform.localEulerAngles = new Vector3(pitch, 0, 0);
+        Vector3 m = transform.right * Input.GetAxis("Horizontal") + transform.forward * Input.GetAxis("Vertical");
+        m.y = -9.8f * Time.deltaTime; cc.Move(m * 5f * Time.deltaTime);
+    }
+    #endregion
+
+    #region Equip — Flow 1
+    void HandleEquip()
+    {
+        if (Input.GetKeyDown(KeyCode.Alpha1) && equipped != EquippedTool.builder)
+        {
+            if (equipped != EquippedTool.none) Unequip();
+            equipped = EquippedTool.builder;
+            RaiseItemEquipped("ToolBuilder");
+            LogEvent("ToolBuilder", "ghost should appear");
+            ghostActive = true;
+        }
+        if (Input.GetKeyDown(KeyCode.Alpha2) && equipped != EquippedTool.hammer)
+        {
+            if (equipped != EquippedTool.none) Unequip();
+            equipped = EquippedTool.hammer;
+            RaiseItemEquipped("ToolHammer");
+        }
+        if (Input.GetKeyDown(KeyCode.Alpha3)) Unequip();
+    }
+
+    void Unequip()
+    {
+        LogEvent("Unequip", equipped.ToString());
+        equipped = EquippedTool.none;
+        CleanupGhost();
+    }
+
+    void CleanupGhost()
+    {
+        ghost.SetActive(false); ghostActive = false;
+    }
+    #endregion
+
+    #region Ghost + Place — Flow 2
+    void GhostUpdate()
+    {
+        if (isMenuOpen || builderQty <= 0) { ghost.SetActive(false); return; }
+        Vector3 aim = Physics.Raycast(cam.transform.position, cam.transform.forward, out RaycastHit h, 6f) ? h.point : cam.transform.position + cam.transform.forward * 6f;
+        Vector3 off = aim - new Vector3(0.5f, 0, 0.5f);
+        Vector3 gp = new Vector3(Mathf.RoundToInt(off.x) + 0.5f, Mathf.Max(0, Mathf.RoundToInt(off.y)), Mathf.RoundToInt(off.z) + 0.5f);
+        ghost.SetActive(true); ghost.transform.position = gp; ghost.transform.rotation = ghostRot;
+        ghost.transform.localScale = variantIndex == 0 ? Vector3.one : new Vector3(2, 1, 1);
+        // → overlap check
+        canPlace = true;
+        foreach (var c in Physics.OverlapBox(gp, Vector3.one * 0.45f, ghostRot, ~0, QueryTriggerInteraction.Ignore))
+            if (c.GetComponent<PBuilding>() != null) { canPlace = false; break; }
+        ghost.GetComponent<Renderer>().material = canPlace ? matGreen : matRed;
+        if (Input.GetKeyDown(KeyCode.R)) { ghostRot *= Quaternion.Euler(0, 90, 0); LogEvent("Rotate", "90°"); }
+        if (Input.GetKeyDown(KeyCode.Q)) { variantIndex = 1 - variantIndex; LogEvent("Mirror", variantIndex == 0 ? "Normal" : "Wide"); }
+    }
+
+    void PlaceBuilding()
+    {
+        if (!canPlace || builderQty <= 0) return;
+        var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        go.name = $"Bld_{buildings.Count}"; go.transform.position = ghost.transform.position;
+        go.transform.rotation = ghost.transform.rotation; go.transform.localScale = ghost.transform.localScale;
+        go.GetComponent<Renderer>().material.color = Color.HSVToRGB(UnityEngine.Random.Range(0f, 1f), 0.4f, 0.8f);
+        var pb = go.AddComponent<PBuilding>(); pb.go = go; buildings.Add(pb);
+        // → spawn supports
+        SpawnSupports(pb);
+        builderQty--;
+        RaiseBuildingPlaced(go.transform.position);
+        LogEvent("ToolBuilder", $"qty={builderQty}");
+        if (builderQty <= 0) { Unequip(); LogEvent("ToolBuilder", "consumed — auto-unequip"); }
+    }
+    #endregion
+
+    #region Hammer Interact — Flow 3+4
+    void HammerInteract()
+    {
+        if (highlighted == null) return;
+        if (Input.GetKeyDown(KeyCode.Mouse0))
+        {
+            // → Take: create ToolBuilder, fire take event chain
+            LogEvent("Hammer", "TAKE");
+            Vector3 pos = highlighted.go.transform.position;
+            buildings.Remove(highlighted); Destroy(highlighted.go); highlighted = null;
+            RaiseBuildingTakeRequested("ToolBuilder_from_Take");
+            RaiseBuildingRemoved(pos);
+        }
+        if (Input.GetKeyDown(KeyCode.Mouse1))
+        {
+            // → Pack: spawn crate, fire remove event
+            LogEvent("Hammer", "PACK");
+            Vector3 pos = highlighted.go.transform.position;
+            SpawnCrate(pos + Vector3.up * 0.5f, Quaternion.identity, Vector3.up * 2f);
+            buildings.Remove(highlighted); Destroy(highlighted.go); highlighted = null;
+            RaiseBuildingRemoved(pos);
+        }
+    }
+    #endregion
+
+    #region Interact (E) — Flow 5+8
+    void HandleInteract()
+    {
+        if (!Input.GetKeyDown(KeyCode.E) || isMenuOpen) return;
+        if (!Physics.Raycast(cam.transform.position, cam.transform.forward, out RaycastHit hit, 4f)) return;
+        // → crate pickup (Flow 5)
+        var cr = hit.collider.GetComponent<PCrate>();
+        if (cr != null)
+        {
+            LogEvent("CratePickup", cr.gameObject.name);
+            crates.Remove(cr); Destroy(cr.gameObject);
+            RaiseToolPickupRequested("ToolBuilder_from_Crate");
+            return;
+        }
+        // → toggleable building interact (Flow 8: ChuteHatch/RoutingConveyor/BlockerT2)
+        var bld = hit.collider.GetComponent<PBuilding>();
+        if (bld != null && bld.isToggleable)
+        {
+            bld.isClosed = !bld.isClosed;
+            bld.GetComponent<Renderer>().material.color = bld.isClosed ? Color.red : new Color(0.6f, 0.2f, 0.6f);
+            LogEvent("Interact", $"toggle {bld.go.name} → {(bld.isClosed ? "CLOSED" : "OPEN")}");
+        }
+    }
+    #endregion
+
+    #region Drop (G) — Flow 6
+    void HandleDrop()
+    {
+        if (!Input.GetKeyDown(KeyCode.G) || equipped == EquippedTool.none) return;
+        if (equipped == EquippedTool.builder && builderQty > 0)
+        {
+            builderQty--;
+            SpawnCrate(cam.transform.position + cam.transform.forward * 0.5f, cam.transform.rotation, cam.transform.forward * 5f);
+            RaiseItemDropped("ToolBuilder");
+            LogEvent("Drop", $"crate spawned, qty={builderQty}");
+            if (builderQty <= 0) Unequip();
+        }
+        else if (equipped == EquippedTool.hammer)
+        {
+            RaiseItemDropped("ToolHammer");
+            Unequip();
+            LogEvent("Drop", "hammer dropped (no crate, just unequip)");
+        }
+    }
+    #endregion
+
+    #region Menu — Flow 9+10
+    void HandleMenu()
+    {
+        if (Input.GetKeyDown(KeyCode.Tab))
+        {
+            if (isMenuOpen)
+            {
+                RaiseCloseInventory();
+            }
+            else
+            {
+                // → Flow 10: CloseAll before opening new panel
+                if (ghostActive) { LogEvent("CloseAll", "ghost was active → cleanup"); RaiseCloseAll(); }
+                RaiseOpenInventory();
+            }
+        }
+        if (Input.GetKeyDown(KeyCode.Escape) && isMenuOpen) RaiseCloseInventory();
+    }
+    #endregion
+
+    #region Highlight
+    void HandleHighlight()
+    {
+        if (highlighted != null) { highlighted.GetComponent<Renderer>().material.color = hlOrigColor; highlighted = null; }
+        if (equipped != EquippedTool.hammer || isMenuOpen) return;
+        if (!Physics.Raycast(cam.transform.position, cam.transform.forward, out RaycastHit hit, 6f)) return;
+        var pb = hit.collider.GetComponent<PBuilding>();
+        if (pb == null) return;
+        highlighted = pb; hlOrigColor = pb.GetComponent<Renderer>().material.color;
+        pb.GetComponent<Renderer>().material.color = Color.Lerp(hlOrigColor, Color.white, 0.5f);
+    }
+    #endregion
+
+    #region Conveyor — Flow 7
+    void SpawnOre()
+    {
+        if (belts.Count == 0) return;
+        var s = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        s.name = "Ore"; s.transform.position = belts[0].transform.position + Vector3.up * 1.5f;
+        s.transform.localScale = Vector3.one * 0.25f;
+        var rb = s.AddComponent<Rigidbody>(); rb.mass = 0.3f;
+        var po = s.AddComponent<PPhys>(); physObjs.Add(po);
+        s.GetComponent<Renderer>().material.color = UnityEngine.Random.ColorHSV(0, 1, 0.5f, 1, 0.6f, 1);
+        LogEvent("SpawnOre", s.transform.position.ToString());
+    }
+    #endregion
+
+    #region Supports
+    void SpawnSupports(PBuilding pb)
+    {
+        Vector3 p = pb.go.transform.position; float hw = 0.45f;
+        Vector3[] corners = { p + new Vector3(-hw, 0, -hw), p + new Vector3(hw, 0, -hw), p + new Vector3(-hw, 0, hw), p + new Vector3(hw, 0, hw) };
+        foreach (var c in corners)
+        {
+            if (!Physics.Raycast(c, Vector3.down, out RaycastHit h, 20f) || h.distance < 0.1f) continue;
+            int n = Mathf.Max(1, Mathf.RoundToInt(h.distance)); Vector3 lp = c;
+            for (int i = 0; i < n; i++)
+            {
+                var leg = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                leg.name = "Leg"; leg.transform.position = lp - Vector3.up * 0.5f;
+                leg.transform.localScale = new Vector3(0.06f, 0.5f, 0.06f); leg.transform.parent = pb.go.transform;
+                leg.GetComponent<Renderer>().material.color = new Color(0.3f, 0.3f, 0.3f);
+                Destroy(leg.GetComponent<Collider>()); pb.legs.Add(leg); lp.y -= 1f;
+            }
+        }
+    }
+    #endregion
+
+    #region Helpers
+    void SpawnCrate(Vector3 pos, Quaternion rot, Vector3 force)
+    {
+        var c = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        c.name = "Crate"; c.transform.position = pos; c.transform.rotation = rot;
+        c.transform.localScale = Vector3.one * 0.35f;
+        c.GetComponent<Renderer>().material.color = new Color(0.6f, 0.4f, 0.2f);
+        var rb = c.AddComponent<Rigidbody>(); rb.mass = 0.5f;
+        if (force.sqrMagnitude > 0) rb.AddForce(force, ForceMode.Impulse);
+        var cr = c.AddComponent<PCrate>(); crates.Add(cr);
+    }
+
+    void DumpLog()
+    {
+        Debug.Log("========== EVENT LOG ==========");
+        foreach (var e in eventLog) Debug.Log(e);
+        Debug.Log($"========== {eventLog.Count} events ==========");
+    }
+
+    Material MakeMat(Color col, bool transparent)
+    {
+        var m = new Material(Shader.Find("Standard")); m.color = col;
+        if (transparent)
+        {
+            m.SetFloat("_Mode", 3);
+            m.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            m.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            m.SetInt("_ZWrite", 0); m.DisableKeyword("_ALPHATEST_ON");
+            m.EnableKeyword("_ALPHABLEND_ON"); m.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+            m.renderQueue = 3000;
+        }
+        return m;
+    }
+
+    void OnGUI()
+    {
+        string tool = equipped == EquippedTool.builder ? $"Builder (qty:{builderQty})" : equipped == EquippedTool.hammer ? "Hammer" : "Empty";
+        GUI.Label(new Rect(10, 10, 400, 20), $"Tool: {tool}  Menu: {(isMenuOpen ? "OPEN" : "closed")}  Events: {eventLog.Count}");
+        GUI.Label(new Rect(10, 28, 500, 20), "1=builder 2=hammer 3=unequip LMB=place RMB=pack E=interact G=drop Tab=menu N=ore L=log");
+        if (highlighted != null) GUI.Label(new Rect(10, 46, 300, 20), $"Looking at: {highlighted.go.name} {(highlighted.isToggleable ? "[E=toggle]" : "[LMB=take RMB=pack]")}");
+    }
+    #endregion
+
+    #region Nested Classes
+    public class PBuilding : MonoBehaviour
+    {
+        public GameObject go; public bool isToggleable, isClosed;
+        public List<GameObject> legs = new List<GameObject>();
+    }
+    public class PCrate : MonoBehaviour { }
+    public class PPhys : MonoBehaviour
+    {
+        public Vector3 sum; public int count;
+        public void Add(Vector3 v) { if (count == 0) sum = v; else sum += v; count++; }
+        public void Reset() { sum = default; count = 0; }
+    }
+    public class PBelt : MonoBehaviour
+    {
+        public Vector3 dir; public float speed; public bool disabled;
+        public Proto_PhaseD_Integration proto;
+        List<PPhys> objs = new List<PPhys>();
+        void OnTriggerEnter(Collider c) { var o = c.attachedRigidbody?.GetComponent<PPhys>(); if (o != null && !objs.Contains(o)) objs.Add(o); }
+        void OnTriggerExit(Collider c) { var o = c.attachedRigidbody?.GetComponent<PPhys>(); if (o != null) objs.Remove(o); }
+        public void Push()
+        {
+            if (disabled) return;
+            for (int i = objs.Count - 1; i >= 0; i--) { if (objs[i] == null) objs.RemoveAt(i); }
+            foreach (var o in objs) o.Add(dir * speed);
+        }
+    }
+    #endregion
+}
+
 <!-- ==== FILE: learn/prototype/Proto_InventoryFull.cs ==== -->
 using System.Collections.Generic;
 using UnityEngine;
@@ -36229,4 +38874,39 @@ After initial delivery, did a method-by-method cross-reference of every original
 - **Missing cross-phase mods found:** (1) `SO_ShopItemDef` needs `_buildingDefinition` field + delegation methods from original ShopItemDefinition.cs. (2) `EconomyManager` needs `GetPriceOfBuildingDefinition()` method — BuildingCrate.GetSellValue() calls it. (3) `BasePhysicsObject` needs `AddTouchingConveyorBelt`/`RemoveTouchingConveyorBelt` methods — Phase B only had `AddConveyorVelocity` + `ResetAccum`, not the belt tracking list.
 - **FLOW.md portability format:** Updated to match user's Phase C format — per-system boxes with deps, copy test notes, scorecard table. Noted RobotGrabberArm as the one concrete dep (OrePiece) in otherwise interface-only BuildingSystem.
 - **Isolation verified:** ConveyorSystem core (belt + manager) is truly L0. The 2 IInteractable implementations (BlockerT2 + RoutingConveyor) are interface-only L1 deps. BuildingSystem is L3 but all interface-only. Only RobotGrabberArm breaks portability with concrete OrePiece dep.
+
+---
+
+## Prompt: "Build standalone prototypes for each Phase A system"
+
+**What I thought:**
+- Phase A has 3 systems: InteractionSystem (L0), ShopUISystem (L0), EconomySystem (L1 interface-only). Each gets its own single-file prototype.
+- **Proto_InteractionSystem:** Covers IInteractable interface, raycast from camera, single-option shortcut (ShouldUseInteractionWheel=false → auto-execute), multi-option wheel UI with runtime button creation, menu state toggling cursor lock. 5 interactable types stress-test the wheel: 1-option (Computer, Terminal), 2-option (Crate), 3-option (Vendor), 4-option (Workbench). Used Unity UI (Canvas + Button + Text) built entirely in code — no prefabs.
+- **Proto_ShopSystem:** The big one. Covers SO_ShopCategory/SO_ShopItemDef as inline data classes, WShopItem wrapper with lock/unlock state, full PSDataService mirroring ShopDataService (BuildCategories, TryAddNewCartItem, RemoveCartItem, IncreaseCartItemQty, AlterCartItemQty, ClearCartItems, GetCartTotalPrice, CanAffordCartItems, shouldCategoryBeHiddenInView, UnlockEntireCategory). UI has category tabs (highlight selected), item rows (name, descr, price, add-to-cart, locked state), cart rows (qty +/- buttons, remove, price), total price with afford coloring, purchase button with disabled state. Spawn purchased items as colored cubes at random spawn points. U key unlocks hidden "Premium" category — tests hideIfAllItemsLocked + unlock flow.
+- **Proto_EconomySystem:** Covers IShopMoney interface (GetMoney, AddMoney, CanAfford), the MoneyBridge pattern (provider decoupled from consumer via event), moneyUI subscribing to OnMoneyChanged, formatMoney/formatMoneyShort extensions. 3D world with purchasable items (E to buy) + sell zone (E to sell). G/T keys for gift/tax to test external money changes. HUD shows formatted balance with flash-on-change effect.
+- **Avoided** using TMPro or any custom namespace (SPACE_UTIL, etc.) — prototypes use only UnityEngine.UI.Text + built-in font. All helper classes (PIInteractable, PSDataService, PEShopMoney, etc.) live in the same .cs file as nested or sibling classes.
+- **Each prototype is truly 1 MonoBehaviour + drag-and-drop.** Empty scene → add script to empty GO → press Play. No SerializeField wiring, no prefabs, no ScriptableObjects needed.
+
+---
+
+## Prompt: "Proto_PhaseA_Integration — cross-system event chain validation"
+
+**What I thought:**
+- The per-system prototypes proved each system works alone. The gap is the *event handoff* between systems — this is where real Phase A bugs hide (timing, isFirstEnable, CloseAllSubManager cascade).
+- **6 flows tested:** (1) E→raycast→InteractableComputer→RaiseOpenShopView→ShopUI activates→MenuStateChanged(true)→cursor unlocks. (2) MoneyBridge.Start→MoneyProviderReady→ShopUI stores IShopMoney→EconomyManager.Start→MoneyChanged→moneyUI updates. (3) Full shop flow: browse→cart→purchase→IShopMoney.AddMoney(-cost)→MoneyChanged→spawn→CloseShopView→MenuStateChanged(false). (4) Multi-option wheel open/close with MenuStateChanged. (5) UnlockedCategory→hidden tab appears. (6) CloseAll: opening shop while wheel is open (and vice versa) — tests UIManager.CloseAllSubManager.
+- **Inline GameEvents** — used static Action fields + LogEvent wrapper. Every event raise logs `[frameCount] EventName` to a list. Press L to dump full event sequence — lets you verify the exact order of cross-system calls.
+- **Subscription order mirrors real code** — PlayerController subscribes first (MenuStateChanged), then ShopUI (isFirstEnable block with OpenShopView/CloseShopView/MoneyProviderReady), then InteractionWheelUI, then moneyUI, then UnlockedCategory. This is the actual execution order in the real scene.
+- **Static state cleanup** — all static Action fields set to null in Start() to handle Unity domain reload. The real GameEvents has this issue too (static lists surviving domain reload — Pitfall Rule #9).
+- **SendMessage for cross-boundary call** — PAInteractable.Interact uses `proto.SendMessage("RaiseOpenShopView")` to trigger the shop open chain. This simulates the real flow where InteractableComputer fires a static GameEvent that ShopUI subscribes to — neither knows the other exists.
+
+---
+
+## Prompt: "Proto_PhaseD_Integration — full end-to-end with event chain validation"
+
+**What I thought:**
+- Phase D has 2 systems (Building + Conveyor) but the real complexity is **cross-phase event chains** — ToolBuilder.PrimaryFire → OnBuildingPlaced, BuildingObject.TryTakeOrPack → OnBuildingTakeRequested → OnToolPickupRequested (cascades to inventory), BuildingCrate.E → OnToolPickupRequested, drop → OnItemDropped.
+- **10 flows tested:** (1) Equip builder → ghost + OnItemEquipped (2) Place → OnBuildingPlaced + qty decrement (3) Hammer Take → OnBuildingTakeRequested → OnToolPickupRequested → OnItemPickedUp → OnBuildingRemoved (full cascade) (4) Hammer Pack → crate spawn + OnBuildingRemoved (5) Crate pickup → OnToolPickupRequested chain (6) Drop G → OnItemDropped + crate (7) Conveyor trigger flow (8) Toggleable building interact (9) Menu → OnMenuStateChanged + ghost cleanup (10) CloseAll cascade — Tab while ghost active → ghost killed + inventory opens.
+- **Subscription order matters:** UIManager sub first (MenuStateChanged → cursor), InventoryOrchestrator sub second (ToolPickupRequested → adds qty → fires ItemPickedUp), BuildingTakeRequested sub third (cascades to ToolPickupRequested). This is the real execution order.
+- **CloseAll edge case:** if player presses Tab while builder ghost is active, CloseAll fires first (ghost cleaned, nodes hidden), THEN OpenInventory fires. Without this order, the ghost persists behind the menu.
+- **Static cleanup in Start():** all 11 static Action fields nulled — Pitfall #9. eventLog also cleared. Second Play press starts clean.
 
