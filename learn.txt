@@ -2250,7 +2250,7 @@ private void OnDisable()
 - Manual `foreach` accumulation → `.sum(selector)` extension
 - Keep `if (x == null) return;` guard clauses when the block does multiple things — `?.` can't replace those
 
-**Not allowed:** `async/await` (use coroutines), `Span<T>`, `Memory<T>`, `ValueTuple` deconstruction
+**Not allowed:** `async/await` (use coroutines), `Span<T>`, `Memory<T>`, `ValueTuple` deconstruction, `switch` expressions (`x switch { ... }` — C# 8.0+, use if-return chains instead)
 
 ---
 
@@ -28675,13 +28675,13 @@ public class OreLimitManager : Singleton<OreLimitManager>
 
     /// <summary> Returns a multiplier for AutoMiner spawn delay. 1.0 = normal, 1.25 = slightly slow,
     /// 1.5 = very slow, 2.0 = blocked (double delay + block check prevents actual spawn). </summary>
-    public float GetAutoMinerSpawnTimeMultiplier() => oreLimitState switch
+    public float GetAutoMinerSpawnTimeMultiplier()
     {
-        OreLimitState.slightlyLimited => 1.25f,
-        OreLimitState.highlyLimited => 1.5f,
-        OreLimitState.blocked => 2f,
-        _ => 1f,
-    };
+        if (oreLimitState == OreLimitState.slightlyLimited) return 1.25f;
+        if (oreLimitState == OreLimitState.highlyLimited) return 1.5f;
+        if (oreLimitState == OreLimitState.blocked) return 2f;
+        return 1f;
+    }
 
     /// <summary> Forces a limit recheck sooner (e.g. after a large batch sell). </summary>
     public void OnObjectLimitChanged() => timeSinceLastCheck = 10f;
@@ -30661,8 +30661,13 @@ public class OLimiter : MonoBehaviour
     public int threshold = 25;
     float timer;
     string currentState = "REGULAR";
-    public float GetMultiplier() => currentState switch
-    { "SLIGHTLY" => 1.25f, "HIGHLY" => 1.5f, "BLOCKED" => 2f, _ => 1f };
+    public float GetMultiplier()
+    {
+        if (currentState == "SLIGHTLY") return 1.25f;
+        if (currentState == "HIGHLY") return 1.5f;
+        if (currentState == "BLOCKED") return 2f;
+        return 1f;
+    }
 
     public void ForceCheck() => timer = 999f;
 
@@ -31323,8 +31328,13 @@ public class ILimiter : MonoBehaviour
     public int threshold = 25;
     public string currentState = "REGULAR";
     float timer;
-    public float GetMultiplier() => currentState switch
-    { "SLIGHTLY" => 1.25f, "HIGHLY" => 1.5f, "BLOCKED" => 2f, _ => 1f };
+    public float GetMultiplier()
+    {
+        if (currentState == "SLIGHTLY") return 1.25f;
+        if (currentState == "HIGHLY") return 1.5f;
+        if (currentState == "BLOCKED") return 2f;
+        return 1f;
+    }
 
     void Update()
     {
