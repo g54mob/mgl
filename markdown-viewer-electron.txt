@@ -315,6 +315,7 @@ body {
     transition: color .16s, border-color .16s;
 }
 .icon-btn:hover { color: var(--text); border-color: var(--text-muted); }
+.icon-btn.active { color: var(--accent); border-color: var(--accent); background: var(--accent-mid); }
 
 #hdr-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 
@@ -342,7 +343,8 @@ body {
 /* ══ File sidebar ════════════════════════════════════════════ */
 #file-sidebar {
     width: var(--sidebar-w);
-    min-width: var(--sidebar-w);
+    min-width: 180px;
+    max-width: 500px;
     background: var(--surface);
     border-right: 1px solid var(--border);
     display: flex;
@@ -350,8 +352,18 @@ body {
     overflow: hidden;
     z-index: 10;
     transition: margin-left .2s var(--ease);
+    position: relative;
 }
-#file-sidebar.hidden { margin-left: calc(var(--sidebar-w) * -1); }
+#file-sidebar.hidden { margin-left: calc(var(--sidebar-w) * -1); min-width: 0; }
+#sidebar-resize {
+    position: absolute;
+    top: 0; right: 0; bottom: 0;
+    width: 4px;
+    cursor: col-resize;
+    z-index: 11;
+    transition: background .15s;
+}
+#sidebar-resize:hover, #sidebar-resize.drag { background: var(--accent); }
 
 #sidebar-hdr {
     display: flex;
@@ -838,7 +850,11 @@ body {
     font-size: var(--md-font-size, 16px);
     line-height: 1.8;
     color: var(--text);
-    padding-bottom: 12em;
+}
+.md::after {
+    content: '';
+    display: block;
+    height: 12em;
 }
 .md h1,.md h2,.md h3,.md h4,.md h5,.md h6 {
     font-family: var(--font-prose);
@@ -1226,6 +1242,32 @@ body {
 }
 #width-val, #font-size-val { font-family: var(--font-code); font-size: 10.5px; color: var(--accent); min-width: 28px; text-align: right; }
 
+/* ══ Landing social links ═════════════════════════════ */
+#land-social {
+    position: absolute;
+    top: 14px;
+    right: 18px;
+    display: flex;
+    gap: 8px;
+    z-index: 21;
+}
+.social-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px; height: 34px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--text-muted);
+    transition: color .15s, border-color .15s, background .15s;
+}
+.social-link:hover {
+    color: var(--text);
+    border-color: var(--accent);
+    background: var(--accent-mid);
+}
+
 /* ══ Context menu ════════════════════════════════════════ */
 #ctx-menu {
     position: fixed;
@@ -1423,6 +1465,7 @@ body {
 
     <!-- File Sidebar -->
     <div id="file-sidebar">
+        <div id="sidebar-resize"></div>
         <div id="sidebar-hdr">
             <span id="sidebar-dir">No folder open</span>
             <button class="hbtn" id="btn-change-dir" title="Change folder">&#128194;</button>
@@ -1439,6 +1482,14 @@ body {
 
         <!-- Landing -->
         <div id="landing">
+            <div id="land-social">
+                <a class="social-link" href="https://github.com" target="_blank" rel="noopener" title="GitHub">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+                </a>
+                <a class="social-link" href="https://discord.com" target="_blank" rel="noopener" title="Discord">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.37a19.791 19.791 0 00-4.885-1.515.074.074 0 00-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 00-5.487 0 12.64 12.64 0 00-.617-1.25.077.077 0 00-.079-.037A19.736 19.736 0 003.677 4.37a.07.07 0 00-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 00.031.057 19.9 19.9 0 005.993 3.03.078.078 0 00.084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 00-.041-.106 13.107 13.107 0 01-1.872-.892.077.077 0 01-.008-.128 10.2 10.2 0 00.372-.292.074.074 0 01.077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 01.078.01c.12.098.246.198.373.292a.077.077 0 01-.006.127 12.299 12.299 0 01-1.873.892.077.077 0 00-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 00.084.028 19.839 19.839 0 006.002-3.03.077.077 0 00.032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 00-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>
+                </a>
+            </div>
             <div class="land-card" id="land-card">
                 <div class="card-chrome">
                     <span class="dot dot-r"></span>
@@ -6488,6 +6539,11 @@ $('logo').addEventListener('click', () => {
     clearTimeout(autoSaveTimer);
     workspace.classList.remove('active');
     landing.classList.remove('hidden');
+    // Collapse both side panels
+    fileSidebar.classList.add('hidden');
+    sidebarVisible = false;
+    updateSidebarBtn();
+    setTocHidden(true);
     renderRecentFolders();
 });
 
@@ -6495,11 +6551,45 @@ $('logo').addEventListener('click', () => {
 let sidebarVisible = localStorage.getItem('mdv_sidebar') !== '0';
 if (!sidebarVisible) fileSidebar.classList.add('hidden');
 
+function updateSidebarBtn() {
+    $('btn-sidebar').classList.toggle('active', sidebarVisible);
+}
+updateSidebarBtn();
+
 $('btn-sidebar').addEventListener('click', () => {
     sidebarVisible = !sidebarVisible;
     fileSidebar.classList.toggle('hidden', !sidebarVisible);
     localStorage.setItem('mdv_sidebar', sidebarVisible ? '1' : '0');
+    updateSidebarBtn();
 });
+
+/* ── Sidebar resize drag ─────────────────────── */
+(function() {
+    const handle = $('sidebar-resize');
+    let dragging = false;
+    handle.addEventListener('mousedown', e => {
+        e.preventDefault();
+        dragging = true;
+        handle.classList.add('drag');
+        document.body.style.cssText += 'cursor:col-resize;user-select:none';
+    });
+    document.addEventListener('mousemove', e => {
+        if (!dragging) return;
+        const newW = Math.max(180, Math.min(500, e.clientX));
+        fileSidebar.style.width = newW + 'px';
+    });
+    document.addEventListener('mouseup', () => {
+        if (!dragging) return;
+        dragging = false;
+        handle.classList.remove('drag');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        localStorage.setItem('mdv_sidebar_w', fileSidebar.offsetWidth);
+    });
+    // Restore saved width
+    const savedW = localStorage.getItem('mdv_sidebar_w');
+    if (savedW) fileSidebar.style.width = savedW + 'px';
+})();
 
 $('btn-change-dir').addEventListener('click', pickFolder);
 
@@ -6527,6 +6617,7 @@ async function openFolderByPath(dir) {
         sidebarVisible = true;
         fileSidebar.classList.remove('hidden');
         localStorage.setItem('mdv_sidebar', '1');
+        updateSidebarBtn();
     }
 
     // Hide landing, show workspace
@@ -6983,9 +7074,12 @@ function setTocHidden(hide) {
     localStorage.setItem('mdv_toc_hidden', hide ? '1' : '0');
     if (hide) {
         tocEl.classList.remove('show');
-        $('btn-toc').style.color = '';
-        $('btn-toc').style.borderColor = '';
     }
+    updateTocBtn();
+}
+
+function updateTocBtn() {
+    $('btn-toc').classList.toggle('active', tocEl.classList.contains('show'));
 }
 
 $('btn-toc').addEventListener('click', () => {
@@ -6995,9 +7089,8 @@ $('btn-toc').addEventListener('click', () => {
         tocUserHidden = false;
         localStorage.setItem('mdv_toc_hidden', '0');
         tocEl.classList.add('show');
-        $('btn-toc').style.color = 'var(--accent)';
-        $('btn-toc').style.borderColor = 'var(--accent)';
     }
+    updateTocBtn();
 });
 $('toc-close').addEventListener('click', () => setTocHidden(true));
 
@@ -7041,6 +7134,29 @@ function applyFontSize(val) {
 fontSlider.addEventListener('input', () => {
     applyFontSize(parseInt(fontSlider.value));
     localStorage.setItem('mdv_font_size', fontSlider.value);
+});
+
+/* ══ Ctrl+/- zoom (font size) ═══════════════════════ */
+document.addEventListener('keydown', e => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    if (e.key === '=' || e.key === '+') {
+        e.preventDefault();
+        const v = Math.min(24, parseInt(fontSlider.value) + 1);
+        fontSlider.value = v;
+        applyFontSize(v);
+        localStorage.setItem('mdv_font_size', v);
+    } else if (e.key === '-') {
+        e.preventDefault();
+        const v = Math.max(12, parseInt(fontSlider.value) - 1);
+        fontSlider.value = v;
+        applyFontSize(v);
+        localStorage.setItem('mdv_font_size', v);
+    } else if (e.key === '0') {
+        e.preventDefault();
+        fontSlider.value = 16;
+        applyFontSize(16);
+        localStorage.setItem('mdv_font_size', 16);
+    }
 });
 
 /* ══ Theme toggle ═════════════════════════════════════════ */
