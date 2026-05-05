@@ -1657,7 +1657,7 @@ Root of system folder keeps: base class, interfaces, DataService, non-MB shared 
 | OreSystem | C | L0 | — | nothing (IDamageable is FREE from phase-b) | ✅ |
 | EconomySystem | A | L1 | interface | `IShopMoney` (ShopUISystem) | ✅ |
 | ConveyorSystem | D | L1 | interface | `IInteractable` (InteractionSystem) | ✅ |
-| ToolSystem | B | L8 | interface | `IInvItem` + `IHighlight` + `IInteract` + `IDamage` + `ICrush` + `IHammerTarget` + `ISupportToggle` + `IMoldReceiver` | ✅ |
+| ToolSystem | B-1 | L5 | interface | Imports 5 (IInvItem+IHighlight+IInteract+ISave+IIcon), Owns 9 (IDamage+ICrush+IMagnetGrab+IScan+IHammerTgt+ISupportTgl+IMoldRecv+IBuildCtx+IDrillHost) | ✅ |
 | BuildingSystem | D | L3 | interface | `IInventoryItem` + `IInteractable` + `IHighlightable` | ✅ |
 | SellerSystem | C | L1 | **concrete** | `OrePiece` (OreSystem) | ❌ |
 | AutoMinerSystem | C | L2 | **concrete** | OreSystem + `IInteractable` (InteractionSystem) | ❌ |
@@ -6023,6 +6023,294 @@ phase-All/
 - `MathExtensions.cs` → math helpers (Phase B UtilsPhaseB or 0-Core)
 - `TimeSince.cs` / `TimeUntil.cs` / `TimeUtil.cs` → time helper structs (0-Core)
 - `CollisionDisabler.cs` / `TemporaryContinuousCollisionSetter.cs` → physics utilities (Phase B)
+
+<!-- ==== FILE: learn/SystemPortabilityMap.md ==== -->
+# System Portability Map — Professional Architecture Analysis
+
+> In-depth analysis of all 28 systems. For each: what it does (behavior triggers → procedures), portability level, interfaces, bridges, concrete deps, finalization status, and L0 potential for future systems.
+>
+> **Goal:** 100% main-source functionality with clever architecture — maximize portable L0 systems reusable in any future Unity3D project.
+
+---
+
+## Master Table
+
+| # | System | Phase | L | Owns Interface | Implements External Interface | Bridge | Concrete Deps | Portable | Finalized |
+|---|--------|-------|---|---------------|------------------------------|--------|--------------|----------|-----------|
+| 1 | ShopUISystem | A | 0 | IShopMoney | — | — | — | ✅ | ✅ |
+| 2 | InteractionSystem | A | 0 | IInteractable | — | — | — | ✅ | ✅ |
+| 3 | EconomySystem | A | 1 | — | IShopMoney ← ShopUISystem | MoneyBridge (owns) | — | ✅ | ✅ |
+| 4 | InventorySystem | B | 0 | IInventoryItem | — | — | — | ✅ | ✅ |
+| 5 | PlayerSystem | B | 0 | — | — | — | — | ✅ | ✅ |
+| 6 | HighlightSystem | B | 0 | IHighlightable | — | — | — | ✅ | ✅ perm |
+| 7 | DamageSystem | B | 0 | IDamageable | — | — | — | ✅ | ✅ perm |
+| 8 | ToolSystem | B | 8 | — | IInventoryItem + IHighlightable + IInteractable + IDamageable + ICrushable + IHammerTarget + ISupportToggle + IMoldReceiver | ItemEquipBridge (owns) | — | ✅ | ⚠️ D completes ToolBuilder |
+| 9 | MiningSystem | C | 0 | — | — | — | — | ✅ | ✅ |
+| 10 | OreSystem | C | 0 | — | — | — | — | ✅ | ✅ |
+| 11 | AutoMinerSystem | C | 2 | — | IInteractable ← InteractionSys | — | OreSystem (concrete) | ❌ | ✅ |
+| 12 | SellerSystem | C | 1 | — | — | — | OrePiece (concrete) | ❌ | ⚠️ E adds BoxObject |
+| 13 | BuildingSystem | D | 3 | — | IInventoryItem + IInteractable + IHighlightable | — | — | ✅ | ✅ |
+| 14 | ConveyorSystem | D | 1 | — | IInteractable ← InteractionSys | — | — | ✅ | ✅ |
+| 15 | ProcessingSystem | E | 2 | — | IInteractable ← InteractionSys | — | OreSystem (concrete) | ❌ | planned |
+| 16 | SortingSystem | E | 0 | — | — | — | — | ✅ | planned |
+| 17 | PackagingSystem | E | 1 | — | — | — | OrePiece (concrete) | ❌ | planned |
+| 18 | QuestSystem | F | 0 | — | — | — | — | ✅ | planned |
+| 19 | ResearchSystem | F | 0 | — | — | — | — | ✅ | planned |
+| 20 | SaveSystem | G | 0 | ISaveLoadable* ×5 | — | — | — | ✅ | planned |
+| 21 | SoundSystem | H | 0 | — | — | — | — | ✅ | planned |
+| 22 | SettingsSystem | H | 0 | — | — | — | — | ✅ | planned |
+| 23 | PauseSystem | H | 1 | — | — | — | SavingLoadingMgr (concrete) | ❌ | planned |
+| 24 | ContractSystem | I | 0 | — | — | — | — | ✅ | planned |
+| 25 | WorldObjectSystem | I | 3+ | — | — | — | multiple (concrete) | ❌ | planned |
+| 26 | MainMenuSystem | I | 1 | — | — | — | SavingLoadingMgr (concrete) | ❌ | planned |
+| 27 | DebugSystem | J | 3+ | — | — | — | multiple (concrete) | ❌ | planned |
+| 28 | MenuSystem | J | 3+ | — | — | — | multiple (concrete) | ❌ | planned |
+
+---
+
+## Per-System Deep Dive
+
+### 1. ShopUISystem — L0 ✅ FINALIZED
+
+**What it does:** When the player walks to a shop terminal and presses E → InteractableComputer fires OnOpenShopView → ShopUI activates → ShopUIOrchestrator builds category tabs from SO_ShopCategory assets → player browses items, adds to cart → adjusts quantity → clicks Purchase → ShopDataService checks IShopMoney.CanAfford() → deducts money via IShopMoney.AddMoney(-total) → spawns purchased prefabs at ShopSpawnPoints → fires OnMoneyChanged so HUD refreshes.
+
+**Portability:** Truly L0. The system never imports any concrete class. It receives `IShopMoney` via Build() and never knows if it's EconomyManager, a mock, or a server-backed wallet. Every cross-system wire is a GameEvent. Drop the folder in a new project, provide any IShopMoney implementation, subscribe to events → full shopping UI works.
+
+**Interface owned:** `IShopMoney` — sits at the system boundary. ShopDataService calls GetMoney/AddMoney/CanAfford on it. EconomyManager (external) implements it. MoneyBridge (in EconomySystem) wires the concrete to the interface.
+
+**Finalized:** ✅ Yes. Phase F adds OnUnlockedCategory subscribers (no change to ShopUI). Phase G adds purchase tracking (minor DataService field). Core architecture is permanent.
+
+---
+
+### 2. InteractionSystem — L0 ✅ FINALIZED
+
+**What it does:** Every frame, SimplePlayerInteraction raycasts from the camera. If it hits a collider with IInteractable → E key pressed → if single option: calls Interact() directly. If multiple options: fires OnOpenInteractionView → InteractionWheelUI spawns radial Field_InteractionOption buttons → player clicks one → calls interactable.Interact(selectedOption) → wheel closes.
+
+**Portability:** Truly L0. The system only knows about `IInteractable` (which it owns). It doesn't know what tools, buildings, or machines are — it just finds IInteractable on any GO and presents options. 8+ classes across 6 phases implement it.
+
+**Interface owned:** `IInteractable` — the most widely implemented interface in the project (BaseHeldTool, AutoMiner, BuildingObject, ChuteHatch, ConveyorBlockerT2, RoutingConveyor, ContractsTerminal, OreSled). Each implementor decides its own name, options, and Interact behavior.
+
+**Finalized:** ✅ Permanently. Future phases only add new IInteractable implementors. The system code never changes.
+
+---
+
+### 3. EconomySystem — L1 ✅ FINALIZED
+
+**What it does:** EconomyManager owns a float `money`. When OnOreSold fires (ore sold via SellerMachine) → EconomyManager.AddMoney(value) → fires OnMoneyChanged → moneyUI updates HUD text. When shop purchases → AddMoney(-cost). MoneyBridge on Start passes EconomyManager (cast to IShopMoney) to ShopUI so the shop can query CanAfford without importing EconomyManager.
+
+**Portability:** L1 (interface dep on IShopMoney from ShopUISystem). Copy folder + IShopMoney.cs (8 lines) → works. The bridge pattern keeps ShopUISystem unaware of EconomyManager's existence.
+
+**Bridge:** `MoneyBridge` — lives HERE (non-portable consumer side). On Start: gets EconomyManager reference, passes it as IShopMoney to ShopUI. This is the single wiring point between the two systems.
+
+**Finalized:** ✅ Phase C already adds OnOreSold subscription. Phase G adds SetMoney() (1 method). Core is done.
+
+---
+
+### 4. InventorySystem — L0 ✅ FINALIZED
+
+**What it does:** When BaseHeldTool.Interact("Take") fires OnToolPickupRequested(IInventoryItem) → InventoryOrchestrator.HandleItemPickup receives it → duplicate guard (GetIndexFor) → TryAdd (stack if same type, else first empty slot) → tool WorldModel hides → if GetShouldEquipWhenPickedUp → SwitchToSlot. Press 1-0 or scroll → SwitchTo/Scroll → previous item hides, new item shows ViewModel → item.OnEquipped() fires OnItemEquipped. Tab → OnOpenInventoryView → InventoryUI activates → full grid with drag-drop (UIEventRelay). G → DropItem → item.DropItem() shows WorldModel with velocity.
+
+**Portability:** Truly L0. All events use Action\<IInventoryItem\>, never Action\<BaseHeldTool\>. The system doesn't know what tools or buildings are — anything implementing IInventoryItem can sit in a slot.
+
+**Interface owned:** `IInventoryItem` — the contract for anything storable. BaseHeldTool and BuildingCrate implement it. Future phases could add new item types without touching InventorySystem.
+
+**Finalized:** ✅ Phase D adds BuildingCrate (implements IInventoryItem — zero change to InventorySystem). Phase G adds save/load (minor DataService serialization).
+
+---
+
+### 5. PlayerSystem — L0 ✅ FINALIZED
+
+**What it does:** PlayerMovement handles WASD/sprint/duck/jump/slope sliding via CharacterController. PlayerCamera handles mouse look/FOV/bob. PlayerGrab: right-click → raycast → if Grabbable tag → SpringJoint + LineRenderer rope → drag physics object → right-click again releases. PlayerGrab subscribes OnItemEquipped → calls item.SetOwnerContext(cam, viewModelContainer, magnetPos) so the equipped tool gets camera + transform refs without knowing PlayerMovement exists.
+
+**Portability:** Truly L0. PlayerGrab receives IInventoryItem via the GameEvent signature (Action\<IInventoryItem\>) — it never imports InventorySystem or ToolSystem. The FPS controller is completely standalone.
+
+**Finalized:** ✅ for core. Phase H refactors Input.GetKeyDown → Input System for rebindable keybinds (structural change but doesn't affect portability).
+
+---
+
+### 6. HighlightSystem — L0 ✅ PERMANENTLY FINALIZED
+
+**What it does:** ObjectHighlighterManager.Update() raycasts from camera every frame → GetComponentInParent\<IHighlightable\>() → if found: GetHighlightProfile() returns a HighlightProfile (or null to skip) → applies Highlight Plus outline/glow effect. Subscribes OnItemEquipped to track the active item. Subscribes OnMenuStateChanged to disable highlighting when a menu is open.
+
+**Portability:** Truly L0. The system doesn't know about tools, buildings, or any game concept. It just finds IHighlightable on any GO and applies whatever profile the object returns. GetHighlightProfile() takes NO parameters — the object decides its own profile internally.
+
+**Interface owned:** `IHighlightable` — parameterless by design. BaseHeldTool returns cyan. BuildingObject returns green/red based on placement validity. Any future object just implements the interface.
+
+**Finalized:** ✅ PERMANENTLY. This system will never change. New highlightable objects just implement the interface.
+
+---
+
+### 7. DamageSystem — L0 ✅ PERMANENTLY FINALIZED
+
+**What it does:** Defines the contract `IDamageable` — any world object that can take damage at a position. ToolPickaxe raycasts → GetComponent\<IDamageable\>() → calls TakeDamage(damage, hitPoint).
+
+**Portability:** Truly L0. Single interface, 7 lines, zero imports. The smallest possible system.
+
+**Finalized:** ✅ PERMANENTLY. One interface, never changes. OreNode and DamageableOrePiece implement it. Future damageable objects just implement it.
+
+---
+
+### 8. ToolSystem — L8 ✅ MOSTLY FINALIZED
+
+**What it does:** BaseHeldTool is the base class for all equippable items. On equip → parents ViewModel to camera's viewModelContainer → hides WorldModel → fires OnItemEquipped. HandleActiveInput routes per-frame input (LMB/RMB/R/Q) to virtual methods. Each tool subclass overrides what it needs: ToolPickaxe swings + delayed raycast → IDamageable.TakeDamage + ICrushable check for ore crushing. ToolMagnet pulls Rigidbodies via SpringJoint. ToolHammer targets IHammerTarget for pack/take. ToolSupportsWrench targets ISupportToggle. ToolCastingMold (Phase E) targets IMoldReceiver. ToolBuilder shows ghost preview + places buildings. ItemEquipBridge sits on the Player GO, subscribes OnItemEquipped → calls item.SetOwnerContext(cam, container, magnetPos).
+
+**Portability:** L8 (8 interface deps — all lightweight). Implements/uses: IInventoryItem (slot storage), IHighlightable (outline on hover), IInteractable (pickup via E key), IDamageable (pickaxe hits), ICrushable (pickaxe ore crushing), IHammerTarget (hammer pack/take), ISupportToggle (wrench scaffolding), IMoldReceiver (casting mold placement). Copy folder + 8 interface files → works. All are small .cs files (7-20 lines each).
+
+**Bridge:** `ItemEquipBridge` — lives HERE. Connects ToolSystem ↔ PlayerSystem. When a tool is equipped, the bridge provides camera + transform context without PlayerMovement knowing about tools.
+
+**Finalized:** ⚠️ MOSTLY. ToolBuilder is partial — Phase D completes it with full placement logic. ToolCastingMold is Phase E. All other tools (Pickaxe, Magnet, Hammer, MiningHat, SupportsWrench, ResourceScanner) are done.
+
+---
+
+### 9. MiningSystem — L0 ✅ FINALIZED
+
+**What it does:** When ToolPickaxe hits an OreNode via IDamageable.TakeDamage → health decreases. At health ≤ 0 → BreakNode: picks random drop count (2-4), weighted random prefab per drop from WeightedNodeDrop list → fires OnSpawnOreRequested for each (OrePiecePoolManager subscribes and spawns with physics velocity) → fires OnCreateParticleRequested (ParticleManager subscribes) → fires OnOreNodeBroken (Phase D supports update) → fires OnOreMined (Phase F quest tracking) → fires OnStaticBreakableBroken (Phase G save) → Destroy(gameObject).
+
+**Portability:** Truly L0. OreNode fires 5 events and calls zero singletons from other systems. WeightedNodeDrop stores `GameObject` (not OrePiece) so MiningSystem has zero OreSystem imports. The system is a pure event emitter — it doesn't know who spawns the ore, who creates particles, or who saves positions.
+
+**Finalized:** ✅ All future phases just add subscribers to existing events. No MiningSystem code changes needed. Phase H adds 1-line sound call (minor).
+
+---
+
+### 10. OreSystem — L0 ✅ FINALIZED
+
+**What it does:** OrePiecePoolManager subscribes OnSpawnOreRequested → spawns ore from keyed pool (Instantiate first time, dequeue from pool after return) → applies velocity → ore flies out and bounces. OrePiece tracks ResourceType + PieceType + IsPolished + RandomPriceMultiplier. Has 7 conversion methods for Phase E machines (TryConvertToCrushed → 2 smaller pieces, ConvertToPlate/Rod/Pipe/Threaded, AddPolish → CompletePolishing, AddSieveValue → CompleteSieving, CompleteClusterBreaking). SellAfterDelay: tag as markedForDestruction → 2s wait → fire OnOreSold → ReturnToPool (full physics + state reset). OreManager: round-robin cleanup (1 piece/frame — removes fallen/NaN). OreLimitManager: every 15s counts non-sleeping → sets OreLimitState → fires OnOreLimitChanged → PhysicsLimitUIWarning shows yellow/red bars.
+
+**Portability:** Truly L0. IDamageable (implemented by DamageableOrePiece) and IInteractable (implemented by OreSled) are both FREE infra — not from any _-Systems/. All cross-system communication via GameEvents. OrePiece.SellAfterDelay fires OnOreSold (EconomyManager subscribes) — never calls EconomyManager directly.
+
+**Finalized:** ✅ Phase E machines call existing conversion methods (no change needed). Phase G uses OrePieceEntry for serialization (no change needed). All conversion, pool, cleanup, and limit logic is complete.
+
+---
+
+### 11. AutoMinerSystem — L2 ❌ FINALIZED (game-specific by design)
+
+**What it does:** AutoMiner rotates drill visual continuously. Every SpawnRate seconds: checks OreLimitManager.ShouldBlockOreSpawning() → rolls probability → ResourceDefinition.GetOrePrefab(canProduceGems) weighted random → OrePiecePoolManager.SpawnPooledOre at spawn point. Toggle on/off via IInteractable ("Turn On"/"Turn Off"). Green/red light material swap. ICustomSaveDataProvider saves IsOn state as JSON.
+
+**Why L2 not L0:** AutoMiner MUST call `Singleton<OrePiecePoolManager>.Ins` to spawn ore and `Singleton<OreLimitManager>.Ins` to check throttling. These are concrete class reads from OreSystem. No way around it — an auto-miner that doesn't spawn ore isn't an auto-miner.
+
+**L0 potential:** ❌ None. The system's purpose is inherently tied to ore spawning. Could theoretically fire an event and let OreSystem subscribe, but the timer/probability/fallback logic is so intertwined with OreSystem types that it would be artificial.
+
+---
+
+### 12. SellerSystem — L1 ❌ MOSTLY FINALIZED
+
+**What it does:** SellerMachine OnTriggerEnter → skip markedForDestruction → skip no-Rigidbody → GetComponentInParent\<OrePiece\>() → orePiece.SellAfterDelay(2f). Fallback: GetComponentInParent\<BaseSellableItem\>() → instant sell + Destroy. Phase E adds BoxObject path.
+
+**Why L1 not L0:** Needs `OrePiece` type to detect ore in trigger via GetComponentInParent. Without it, the seller doesn't know what entered.
+
+**L0 potential:** 🤔 Possible if we introduced an `ISellable` interface on OrePiece. Then SellerMachine finds ISellable instead of OrePiece. But ISellable would need SellAfterDelay — that's OrePiece-specific behavior. Marginal benefit for significant refactor.
+
+**Finalized:** ⚠️ Phase E adds BoxObject handling (~15 lines).
+
+---
+
+### 13. BuildingSystem — L3 ✅ FINALIZED
+
+**What it does:** ToolBuilder equipped → Update: camera aim → BuildingDataService.GetClosestGridPosition (snap to 1m grid) → BuildingManager.UpdateGhostObject (Instantiate ghost, strip triggers, make kinematic) → CanPlaceObject: overlap box check + BuildingPlacementNode match + flat ground check + conveyor snap alignment → material swap green/red/orange. Left-click → Instantiate real building → quantity decrements. ToolHammer + E on BuildingObject → interaction wheel "Take"/"Pack". Take → creates ToolBuilder in inventory. Pack → creates BuildingCrate with physics. Scaffolding: ModularBuildingSupports raycasts down → spawns ScaffoldingSupportLeg segments dynamically.
+
+**Portability:** L3 (3 interface deps — all lightweight). BuildingCrate implements IInventoryItem. BuildingObject implements IInteractable + IHighlightable. All interface-only → copy folder + 3 files → works.
+
+**Finalized:** ✅ Core placement + snap + scaffold + take/pack complete. Phase G adds ISaveLoadableBuildingObject (interface add).
+
+---
+
+### 14. ConveyorSystem — L1 ✅ FINALIZED
+
+**What it does:** ConveyorBelt OnTriggerEnter → gets BasePhysicsObject → adds to belt list → FixedUpdate: calls bpo.AddConveyorVelocity(pushVelocity, retainY). ConveyorBeltManager (runs first via [DefaultExecutionOrder(-10)]) FixedUpdate: iterates all registered BasePhysicsObjects → averages accumulated velocities → sets rb.linearVelocity → resets accumulators. Variants: Blocker (hinge gate), BlockerT2 (sliding gate — IInteractable), SplitterT2 (swinging arm), RoutingConveyor (direction switch — IInteractable). ConveyorRenderer batch-renders all belts via DrawMeshInstanced.
+
+**Portability:** L1 (IInteractable for BlockerT2 + RoutingConveyor). The KEY design choice: ConveyorBelt works with `BasePhysicsObject`, NOT `OrePiece`. Any Rigidbody object on the belt moves. Generic conveyor reusable in any physics game.
+
+**Finalized:** ✅ Phase G adds RoutingConveyorSaveData (minor). Phase H wires sound (1-line).
+
+---
+
+### 15–17. Phase E Systems (planned)
+
+**ProcessingSystem — L2 ❌:** Machines call OrePiece.TryConvertToCrushed(), ConvertToPlate(), etc. directly. Inherently tied to OreSystem. **No L0 potential** — the system's purpose IS to process OrePiece objects.
+
+**SortingSystem — L0 ✅:** SorterMachine/BulkSorter work with BaseBasket trigger tracking. Sorts by any criteria — not ore-specific. **Already L0. WILL be finalized as portable.**
+
+**PackagingSystem — L1 ❌:** PackagerMachine reads OrePiece.ResourceType/PieceType. BoxObject stores ore contents. **No L0 potential** — packages specifically ore.
+
+---
+
+### 18–19. Phase F Systems (planned)
+
+**QuestSystem — L0 ✅:** Purely event-driven. Subscribes to OnOreSold, OnOreMined, OnBuildingPlaced via GameEvents. QuestDataService is pure C# (testable via `new`). Never imports any concrete class from any system. **WILL be finalized as L0 portable.** Perfect for reuse in any game with quest progression.
+
+**ResearchSystem — L0 ✅:** Event-driven. Research items unlock shop items via GameEvents. **WILL be finalized as L0 portable.**
+
+---
+
+### 20. SaveSystem — L0 ✅ (planned)
+
+**What it will do:** SavingLoadingManager queries `FindObjectsOfType<ISaveLoadableObject>()` to find everything that needs saving. Serializes to JSON. On load: Instantiates from prefab lookup + restores state. Defines 5 interfaces — all other systems implement them.
+
+**L0 potential:** ✅ Already designed as L0. SaveSystem defines contracts (ISaveLoadable*). It never imports concrete classes. Other systems implement the interfaces. This is the pattern working perfectly.
+
+---
+
+### 21–22. Phase H Systems (planned)
+
+**SoundSystem — L0 ✅:** Generic audio pooling + distance culling. Other scripts call SoundManager.Play(). **WILL be finalized as L0.**
+
+**SettingsSystem — L0 ✅:** Generic PlayerPrefs UI. **WILL be finalized as L0.**
+
+**PauseSystem — L1 ❌:** PauseMenuUI has save/load buttons that call SavingLoadingManager directly. **No L0 potential** — the pause menu's purpose includes triggering saves.
+
+---
+
+### 23–26. Phase I–J Systems (planned)
+
+**ContractSystem — L0 ✅:** Purely event-driven like QuestSystem. **WILL be finalized as L0.** Reusable contract/bounty system for any game.
+
+**WorldObjectSystem — L3+ ❌:** Misc world objects (dynamite, fire, water, signs) with diverse deps. **No L0 potential.** These are mineMGL-specific world flavoring.
+
+**MainMenuSystem — L1 ❌:** Calls SavingLoadingManager for file browser. **No L0 potential** — menu directly integrated with save system.
+
+**DebugSystem / MenuSystem — L3+ ❌:** Touch everything. **No L0 potential.** Dev/meta tools are inherently game-wide.
+
+---
+
+## L0 Potential Summary for Future Phases
+
+| System | Phase | Currently | L0 Potential? | How |
+|--------|-------|-----------|--------------|-----|
+| SortingSystem | E | planned L0 | ✅ Already L0 | Generic BaseBasket sorting, not ore-specific |
+| QuestSystem | F | planned L0 | ✅ Already L0 | Pure event-driven, QuestDataService = pure C# |
+| ResearchSystem | F | planned L0 | ✅ Already L0 | Pure event-driven |
+| SaveSystem | G | planned L0 | ✅ Already L0 | Defines ISaveLoadable* contracts, never imports concrete |
+| SoundSystem | H | planned L0 | ✅ Already L0 | Generic audio pooling |
+| SettingsSystem | H | planned L0 | ✅ Already L0 | Generic PlayerPrefs |
+| ContractSystem | I | planned L0 | ✅ Already L0 | Pure event-driven |
+| ProcessingSystem | E | planned L2 | ❌ No | Purpose IS to process OrePiece |
+| PackagingSystem | E | planned L1 | ❌ No | Purpose IS to package OrePiece |
+| PauseSystem | H | planned L1 | ❌ No | Purpose includes save/load buttons |
+| MainMenuSystem | I | planned L1 | ❌ No | Integrated with save file browser |
+| WorldObjectSystem | I | planned L3+ | ❌ No | Misc game-specific objects |
+| DebugSystem | J | planned L3+ | ❌ No | Touches everything |
+| MenuSystem | J | planned L3+ | ❌ No | Game-wide meta |
+
+**7 future systems WILL be L0 → brings total to 22/28 = 79% portable at project completion.**
+
+---
+
+## Final Scorecard
+
+```
+  CURRENT (Phases A–D built):
+    Portable: 19/28 = 68%
+    Built + finalized L0: 15 systems
+
+  PROJECTED (all phases complete):
+    Portable: 22/28 = 79%
+    L0: 22 systems
+    Game-specific: 6 systems (AutoMiner, Seller, Processing, Packaging, Pause, MainMenu)
+    Unavoidably game-specific: 3 systems (WorldObject, Debug, Menu)
+
+  INTERFACES: 10 owned by L0 systems
+  BRIDGES: 2 (MoneyBridge, ItemEquipBridge)
+```
 
 <!-- ==== FILE: learn/handTyped(latest)/Scripts/DEBUG_Check.cs ==== -->
 ﻿using System;
@@ -20273,228 +20561,6 @@ Scene Root
 - [ ] Drop (G): ViewModel hides, WorldModel appears with forward velocity
 - [ ] Toggle same slot: deselects (no ViewModel), press again re-equips
 
-<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/DamageSystem/DamageSystemTest.cs ==== -->
-// deps: IDamageable — standalone test, zero Phase C imports
-
-using UnityEngine;
-
-/// <summary>
-/// Vertical slice test for IDamageable in complete isolation. Creates a mock damageable
-/// cube that takes damage and destroys itself at zero health. Press M to raycast from
-/// camera and call TakeDamage on whatever IDamageable the ray hits.
-///
-/// Proves the DamageSystem interface works without OreNode, OrePiece, or any Phase C script.
-///
-/// Prerequisites: IDamageable.cs, this script. That's it.
-/// NOT required: OreNode, OrePiece, OrePiecePoolManager, OreManager, ParticleManager,
-///   InventorySystem, ShopSystem — nothing else.
-///
-/// How to test:
-///   1. Create scene with Camera + MockDamageable cubes + this script
-///   2. Press Play, aim at cube, press M
-///   3. Console: "MockDamageable took 10 damage, health: 90"
-///   4. After 10 hits: "MockDamageable DESTROYED", cube disappears
-/// </summary>
-[AddComponentMenu("MineMGL/Tests/DamageSystemTest")]
-public class DamageSystemTest : MonoBehaviour
-{
-    #region inspector
-    [SerializeField] float _damage = 10f;
-    [SerializeField] float _range = 50f;
-    #endregion
-    #region private state
-    Camera cam;
-    #endregion
-
-    #region unity lifecycle
-    /// <summary> Caches camera, locks cursor, spawns mock damageable cubes if none exist. </summary>
-    private void Start()
-    {
-        cam = Camera.main;
-        Cursor.lockState = CursorLockMode.Locked;
-        Cursor.visible = false;
-
-        // → spawn 3 mock damageable cubes if none exist in scene
-        if (FindFirstObjectByType<MockDamageable>() == null)
-        {
-            for (int i = 0; i < 3; i++)
-            {
-                var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                go.name = $"MockDamageable_{i}";
-                go.transform.position = new Vector3(-2 + i * 2, 1, 5);
-                go.AddComponent<MockDamageable>();
-            }
-        }
-
-        Debug.Log("[DamageTest] Ready. M = hit IDamageable. Aim at cubes.");
-    }
-
-    /// <summary> M key: raycast from camera, find IDamageable on hit, call TakeDamage. </summary>
-    private void Update()
-    {
-        if (Input.GetKeyDown(KeyCode.M))
-        {
-            if (Physics.Raycast(cam.transform.position, cam.transform.forward, out RaycastHit hit, _range))
-            {
-                IDamageable damageable = hit.collider.GetComponent<IDamageable>();
-                if (damageable != null)
-                {
-                    damageable.TakeDamage(_damage, hit.point);
-                    Debug.Log($"[DamageTest] Hit {hit.collider.name} for {_damage} damage at {hit.point}");
-                }
-                else
-                {
-                    Debug.Log($"[DamageTest] Hit {hit.collider.name} — not IDamageable");
-                }
-            }
-            else
-            {
-                Debug.Log("[DamageTest] Raycast missed");
-            }
-        }
-    }
-    #endregion
-}
-
-// ═══════════════════════════════════════════════════════════════
-// MockDamageable — minimal IDamageable impl for testing
-// ═══════════════════════════════════════════════════════════════
-
-/// <summary>
-/// Mock implementation of IDamageable for vertical slice testing. A simple cube that
-/// loses health when TakeDamage is called and destroys itself at zero. No ore, no mining,
-/// no Phase C. Proves the interface contract works in isolation.
-/// </summary>
-[AddComponentMenu("MineMGL/Tests/MockDamageable")]
-public class MockDamageable : MonoBehaviour, IDamageable
-{
-    float health = 100f;
-
-    /// <summary> Reduces health by damage. Logs remaining health. Destroys GO at zero. </summary>
-    public void TakeDamage(float damage, Vector3 position)
-    {
-        health -= damage;
-        Debug.Log($"[MockDamageable] {name} took {damage} damage, health: {health}");
-        if (health <= 0f)
-        {
-            Debug.Log($"[MockDamageable] {name} DESTROYED");
-            Object.Destroy(gameObject);
-        }
-    }
-}
-
-<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/DamageSystem/DamageTest.md ==== -->
-# DamageSystem — Vertical Slice Test
-
-## What This Tests
-
-IDamageable interface in isolation: a mock damageable cube takes damage from ToolPickaxe raycast, loses health, and destroys itself at zero. **No OreNode, no OrePiece, no Phase C needed.** Proves the interface works standalone.
-
-## Prerequisites
-
-| Script | Why |
-|--------|-----|
-| `IDamageable.cs` | Interface under test |
-| `DamageSystemTest.cs` | Mock implementation + test driver |
-| `ToolPickaxe.cs` | Caller (optional — can also test via direct call) |
-
-## NOT Required
-
-- OreNode, OrePiece, OrePiecePoolManager, OreManager (all Phase C)
-- InventorySystem, ShopSystem, EconomySystem
-- ParticleManager (ToolPickaxe fires event but no subscriber needed)
-
-## How To Test
-
-| Key | What It Does | What You Should See |
-|-----|-------------|-------------------|
-| M | Raycast from camera, call TakeDamage(10) on hit IDamageable | Console: `MockDamageable took 10 damage, health: 90` |
-| M (×10) | Health reaches 0 | Console: `MockDamageable DESTROYED`, cube disappears |
-
-## Checklist
-
-- [ ] M hits mock cube → health decreases
-- [ ] Console logs each hit with remaining health
-- [ ] At health ≤ 0 → cube destroyed, console confirms
-- [ ] Miss (no IDamageable) → no error
-- [ ] Works with ZERO Phase C scripts in the project
-
-<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/DamageSystem/Dependency.md ==== -->
-# DamageSystem — L0 ✅ Truly Portable
-
-| Property | Value |
-|----------|-------|
-| Phase | B |
-| Level | **L0** |
-| Scripts | IDamageable |
-| Owns Interface | `IDamageable` |
-| External _-Systems/ Deps | **NONE** |
-
-## FREE Requirements
-
-| Requirement | From | Why |
-|-------------|------|-----|
-| UnityEngine (Vector3) | Unity | TakeDamage signature |
-
-## Internal File Dependency Graph
-
-```
-  ┌── DamageSystem/ ──────────────────────────────
-  │
-  │  INTERNAL
-  │  (single file, 7 lines)
-  │
-  ├── BOUNDARY ───────────────────────────────────
-  │
-  │  ◆ IDamageable ◆ (defined here)
-  │    void TakeDamage(float damage, Vector3 position)
-  │
-  ├── EXTERNAL ───────────────────────────────────
-  │
-  │  CALLERS:
-  │  ToolPickaxe (ToolSystem) raycasts → GetComponent<IDamageable>() → TakeDamage
-  │
-  │  IMPLEMENTED BY:
-  │  ◆ IDamageable ◆ ──▶ OreNode (MiningSystem, Phase C)
-  │                  ──▶ DamageableOrePiece (OreSystem, Phase C)
-  │
-  └───────────────────────────────────────────────
-```
-
-## Future Phase Modifications
-
-**NONE.** Single interface, never changes.
-
-**Verdict: PERMANENTLY COMPLETE.**
-
-## Checklist
-
-- [x] Zero _-Systems/ imports
-- [x] Smallest system (1 interface, 7 lines)
-- [x] Generic — any object can take damage
-
-<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/DamageSystem/IDamageable.cs ==== -->
-// deps: none — generic interface, zero game-specific dependency
-
-using UnityEngine;
-
-/// <summary>
-/// Any object that can take damage at a world position. OreNode (Phase C) implements this
-/// to lose health when the pickaxe hits it. DamageableOrePiece (Phase C) implements this to break
-/// into cluster pieces when hit hard enough by collision. ToolPickaxe calls TakeDamage
-/// on whatever IDamageable the raycast hits.
-///
-/// Lives in DamageSystem (Phase B) because the caller (ToolPickaxe) is Phase B.
-/// Implementors are Phase C+ — they import this interface (FREE, shared infra).
-///
-/// Who implements me: OreNode (Phase C), DamageableOrePiece (Phase C), future destructibles.
-/// Who calls me: ToolPickaxe (Phase B) via raycast → GetComponent&lt;IDamageable&gt;().
-/// </summary>
-public interface IDamageable
-{
-    void TakeDamage(float damage, Vector3 position);
-}
-
 <!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/HighlightSystem/Dependency.md ==== -->
 # HighlightSystem — L0 ✅ Truly Portable
 
@@ -23566,1256 +23632,6 @@ public class RigidbodyDraggerController : MonoBehaviour
 	}
 }
 
-<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/ToolSystem/Bridge/ItemEquipBridge.cs ==== -->
-using UnityEngine;
-
-/// <summary>
-/// Bridges inventory equip events to items that need player context (camera, viewmodel container, magnet pos).
-/// This is the ONLY script that connects PlayerSystem to InventorySystem/ToolSystem.
-/// Place on the Player GO alongside PlayerMovement. Wire the 3 transforms in inspector.
-///
-/// Without this script: tools can't raycast from camera, can't parent ViewModel, can't position magnet.
-/// With this script: items receive SetOwnerContext(cam, container, magnetPos) on equip.
-///
-/// Lives in ToolSystem (not PlayerSystem) because it references IInventoryItem — PlayerSystem stays portable.
-/// </summary>
-[AddComponentMenu("MineMGL/Bridge/ItemEquipBridge")]
-public class ItemEquipBridge : MonoBehaviour
-{
-	[SerializeField] Camera _cam;
-	[SerializeField] Transform _viewModelContainer;
-	[SerializeField] Transform _magnetToolPos;
-
-	void Start()
-	{
-		// purpose: send player context to equipped item so it can raycast + parent ViewModel
-		GameEvents.OnItemEquipped += (item) => item.SetOwnerContext(_cam, _viewModelContainer, _magnetToolPos);
-	}
-}
-
-<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/ToolSystem/Dependency.md ==== -->
-# ToolSystem — Dependency Map
-
-> **L8 ✅ Portable** — 8 interface deps, 2 owned interfaces, zero concrete cross-phase imports.
-> Copy this folder + 8 interface files (~55 lines) → compiles in any Unity project.
-
----
-
-## What I Am
-
-Every equippable tool in the game. One base class (`BaseHeldTool`) handles the shared lifecycle
-(pickup, equip, drop, input routing, ViewModel/WorldModel swap). Subclasses override `PrimaryFire`,
-`SecondaryFire`, `Reload`, `QButtonPressed` for their specific action.
-
-**The original source** had tools directly importing concrete classes from later phases (ToolPickaxe → OrePiece,
-ToolHammer → BuildingObject). We replaced every concrete import with an **interface call**
-(`GetComponent<ICrushable>()`, `GetComponent<IHammerTarget>()`, etc.). If the implementing phase
-isn't typed yet, `GetComponent` returns null → that code path is skipped → tool still works with
-reduced functionality.
-
----
-
-## File Layout
-
-```
-ToolSystem/
-├── ToolBase.cs                  → BaseHeldTool: framework, implements IInventoryItem + IHighlightable + IInteractable
-├── IMagnetGrabbable.cs          → OWNED interface: what magnet needs from a grabbable object
-├── IScannable.cs                → OWNED interface: what scanner needs for display name
-├── Bridge/
-│   └── ItemEquipBridge.cs       → subscribes OnItemEquipped → SetOwnerContext(cam, container, magnetPos)
-├── ToolBaseSub/
-│   ├── ToolPickaxe.cs           → swing → ICrushable.TryCrush + IDamageable.TakeDamage + Rigidbody.AddForce
-│   ├── ToolHardHat.cs           → extends ToolPickaxe (empty — different SavableObjectID/prefab)
-│   ├── ToolMagnet.cs            → pull → IMagnetGrabbable for filter + holder tracking
-│   ├── ToolHammer.cs            → raycast → IHammerTarget.OnHammerPrimary / OnHammerSecondary
-│   ├── ToolMiningHat.cs         → toggle light on equip/unequip
-│   ├── ToolSupportsWrench.cs    → raycast → ISupportToggleable.SetSupportsEnabled
-│   ├── ToolResourceScanner.cs   → raycast → IScannable.GetScanDisplayName
-│   ├── ToolBuilder.cs           → stub (Phase D replaces with ghost + placement logic)
-│   └── ToolCastingMold.cs       → swing → IMoldReceiver.InsertMold
-├── Dependency.md                → this file
-└── ToolTest.md                  → vertical slice test
-```
-
----
-
-## Internal File Dependency Graph
-
-```
-  ┌── ToolSystem/ ──────────────────────────────────────────────────
-  │
-  │  INTERNAL
-  │  BaseHeldTool (ToolBase.cs)
-  │    extends BaseSellableItem (FREE)
-  │    implements IInventoryItem + IHighlightable + IInteractable
-  │    OnEquipped → fires RaiseItemEquipped(this)
-  │    HandleActiveInput → routes LMB/RMB/R/Q to subclass
-  │    DropItem → show WorldModel, apply velocity, fire RaiseItemDropped
-  │    SetOwnerContext(cam, container, magnetPos) — decouples from player
-  │         │ extends
-  │  ToolBaseSub/
-  │    ├── ToolPickaxe ──── GetComponent<ICrushable>() + GetComponent<IDamageable>()
-  │    │     └── ToolHardHat (empty subclass, different SavableObjectID)
-  │    ├── ToolMagnet ───── GetComponent<IMagnetGrabbable>() for filter + holder
-  │    ├── ToolHammer ───── GetComponentInParent<IHammerTarget>()
-  │    ├── ToolMiningHat ── toggle light (pure Phase B, no interfaces)
-  │    ├── ToolSupportsWrench ─ GetComponentInParent<ISupportToggleable>()
-  │    ├── ToolResourceScanner ─ GetComponentInParent<IScannable>()
-  │    ├── ToolBuilder ──── stub (Phase D replaces)
-  │    └── ToolCastingMold ── GetComponent<IMoldReceiver>()
-  │         │
-  │  Bridge/ItemEquipBridge
-  │    sits on Player GO, subscribes OnItemEquipped
-  │    calls item.SetOwnerContext(cam, container, magnetPos)
-  │    connects ToolSystem ↔ PlayerSystem at runtime
-  │
-  ├── BOUNDARY ─────────────────────────────────────────────────────
-  │
-  │  OWNED INTERFACES (live in this folder):
-  │    ◆ IMagnetGrabbable ◆ → OrePiece (C) implements
-  │    ◆ IScannable ◆ → OreNode(C), OrePiece(C), BuildingObject(D), etc. implement
-  │
-  │  IMPORTED INTERFACES (implements or calls GetComponent<>):
-  │    ◆ IInteractable ◆  ←── InteractionSystem (A)  │ BaseHeldTool implements
-  │    ◆ IInventoryItem ◆ ←── InventorySystem (B)    │ BaseHeldTool implements
-  │    ◆ IHighlightable ◆ ←── HighlightSystem (B)    │ BaseHeldTool implements
-  │    ◆ IDamageable ◆    ←── DamageSystem (B)       │ ToolPickaxe calls
-  │    ◆ ICrushable ◆     ←── MiningSystem (C)       │ ToolPickaxe calls
-  │    ◆ IHammerTarget ◆  ←── BuildingSystem (D)     │ ToolHammer calls
-  │    ◆ ISupportToggleable ◆ ←── BuildingSystem (D) │ ToolSupportsWrench calls
-  │    ◆ IMoldReceiver ◆  ←── ProcessingSystem (E)   │ ToolCastingMold calls
-  │
-  ├── EXTERNAL ─────────────────────────────────────────────────────
-  │
-  │  OUT: → OnToolPickupRequested(IInventoryItem) ── InventoryOrchestrator
-  │  OUT: → OnItemEquipped(IInventoryItem) ── PlayerGrab, HighlightSystem
-  │  OUT: → OnItemDropped(IInventoryItem) ── HighlightSystem
-  │  OUT: → OnPickaxeHit(pos, normal, isDamageable) ── ParticleManager (C)
-  │  IN:  ← OnItemEquipped(IInventoryItem) ── ItemEquipBridge → SetOwnerContext
-  │
-  └─────────────────────────────────────────────────────────────────
-```
-
----
-
-## Interfaces — What I Own vs What I Import
-
-### I own (live in this folder, other systems implement)
-
-| Interface | Methods | Who implements | When they need me |
-|-----------|---------|---------------|-------------------|
-| **IMagnetGrabbable** | `SetMagnetHolder(holder)`, `ClearMagnetHolder()`, `IsInBasket()`, `IsOnConveyor()` | OrePiece (Phase C) | Magnet filter + SellerMachine detach |
-| **IScannable** | `GetScanDisplayName()` | OreNode (C), OrePiece (C), SellerMachine (C), BuildingObject (D), BuildingCrate (D), BuildingPlacementNode (D), ComputerTerminal (A) | Scanner HUD text |
-
-### I import (interface files from other systems, 4-15 lines each)
-
-| Interface | Owner system | My script that uses it | How |
-|-----------|-------------|----------------------|-----|
-| `IInteractable` | InteractionSystem (A) | BaseHeldTool | **implements** — shows "Take"/"Destroy" in interaction wheel |
-| `IInventoryItem` | InventorySystem (B) | BaseHeldTool | **implements** — stored in hotbar/inventory slots |
-| `IHighlightable` | HighlightSystem (B) | BaseHeldTool | **implements** — outlined by ObjectHighlighterManager on hover |
-| `IDamageable` | DamageSystem (B) | ToolPickaxe | **calls** `GetComponent<IDamageable>().TakeDamage()` |
-| `ICrushable` | MiningSystem (C) | ToolPickaxe | **calls** `GetComponent<ICrushable>().TryCrush()` |
-| `IHammerTarget` | BuildingSystem (D) | ToolHammer | **calls** `GetComponentInParent<IHammerTarget>().OnHammerPrimary()` |
-| `ISupportToggleable` | BuildingSystem (D) | ToolSupportsWrench | **calls** `GetComponentInParent<ISupportToggleable>().SetSupportsEnabled()` |
-| `IMoldReceiver` | ProcessingSystem (E) | ToolCastingMold | **calls** `GetComponent<IMoldReceiver>().InsertMold()` |
-
----
-
-## FREE Infra (doesn't count toward level)
-
-| What | From | Used for |
-|------|------|---------|
-| `GameEvents` | phase-All 0-Core/ | `RaiseToolPickupRequested`, `RaiseItemEquipped`, `RaisePickaxeHit` |
-| `GlobalEnumsB` | phase-b 2-Data/Enums/ | `InteractionType`, `AnimParamType`, `MagnetToolSelectionMode`, `SavableObjectID` |
-| `BasePhysicsObject → BaseSellableItem` | phase-b 3-MonoBehaviours/Physics/ | Inheritance chain (conveyor velocity + sell value) |
-| `UtilsPhaseB` | phase-b 4-Utils/ | `IgnoreAllCollisions`, `SimpleExplosion` |
-| `SPACE_UTIL / INPUT.K` | user utilities | `InstantDown`, `colorTag` |
-
----
-
-## Graceful Degradation
-
-Every `GetComponent<IXxx>()` returns null when the implementing phase isn't present.
-The tool compiles, runs, and the interface code path simply doesn't execute.
-
-| Missing phase | Affected tool | What happens |
-|--------------|--------------|-------------|
-| No Phase C (no ICrushable) | ToolPickaxe | Skips crush. Still does IDamageable + AddForce. ✅ |
-| No Phase C (no IDamageable) | ToolPickaxe | Swings into air — nothing to damage. ⚠️ expected |
-| No Phase C (no IMagnetGrabbable) | ToolMagnet | Grabs everything. No filter, no holder. ✅ works |
-| No Phase D (no IHammerTarget) | ToolHammer | Raycast finds nothing. ⚠️ expected |
-| No Phase D (no ISupportToggleable) | ToolSupportsWrench | Raycast finds nothing. ⚠️ expected |
-| No Phase D+ (no IScannable impls) | ToolResourceScanner | Shows "Unknown". ✅ works |
-| No Phase E (no IMoldReceiver) | ToolCastingMold | Acts as generic whack tool. ✅ works |
-
----
-
-## Events
-
-| Direction | Event | Type | Purpose |
-|-----------|-------|------|---------|
-| **OUT** | `OnToolPickupRequested` | `Action<IInventoryItem>` | BaseHeldTool.Interact("Take") → InventoryOrchestrator picks up |
-| **OUT** | `OnItemEquipped` | `Action<IInventoryItem>` | BaseHeldTool.OnEquipped → ItemEquipBridge sends context |
-| **OUT** | `OnPickaxeHit` | `Action<Vector3, Vector3, bool>` | ToolPickaxe hit → ParticleManager subscribes (Phase C) |
-| **IN** | `OnItemEquipped` | `Action<IInventoryItem>` | ItemEquipBridge subscribes → calls SetOwnerContext |
-
----
-
-## vs Original Source
-
-| Original | Our approach | Why |
-|----------|-------------|-----|
-| `ToolPickaxe` imports `OrePiece` directly | Uses `ICrushable` interface | Decoupled — compiles without Phase C |
-| `ToolMagnet` reads `OrePiece.CurrentMagnetTool` | Uses `IMagnetGrabbable.SetMagnetHolder()` | Decoupled — filter modes degrade gracefully |
-| `ToolHammer` calls `BuildingObject.TryTakeOrPack()` | Uses `IHammerTarget.OnHammerPrimary()` | Decoupled — compiles without Phase D |
-| `ToolResourceScanner` checks 8 concrete types | Uses single `IScannable.GetScanDisplayName()` | Decoupled — each phase adds implementations |
-| `ToolCastingMold` imports `CastingFurnaceMoldArea` | Uses `IMoldReceiver.InsertMold()` | Decoupled — compiles without Phase E |
-| `BaseHeldTool` uses `FindObjectOfType<PlayerInventory>()` | Fires `GameEvents.RaiseToolPickupRequested` | No FindObjectOfType |
-| `BaseHeldTool.Owner = PlayerController` | Uses `SetOwnerContext(cam, container, magnetPos)` | Tool doesn't know PlayerController exists |
-| `ParticleManager.CreateParticle()` direct call | Fires `GameEvents.RaisePickaxeHit` | ParticleManager subscribes in Phase C |
-
-**100% of original functionality is preserved.** The interface boundary is invisible at runtime —
-`GetComponent<ICrushable>()` on an OrePiece returns the OrePiece (which implements ICrushable).
-The tool calls `TryCrush()` and it works exactly like the original `OrePiece.TryConvertToCrushed()`.
-
-<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/ToolSystem/IMagnetGrabbable.cs ==== -->
-/// <summary>
-/// Any object that the magnet tool can track for filtering and detach callbacks.
-/// OrePiece implements this in Phase C. Without an implementation, ToolMagnet still
-/// grabs Rigidbodies normally — it just can't filter by basket/conveyor state or
-/// set a "currently held by magnet" ref on the object.
-///
-/// ToolSystem OWNS this interface. Other systems implement it.
-/// Implementors: OrePiece (Phase C).
-/// Callers: ToolMagnet (Phase B).
-/// </summary>
-public interface IMagnetGrabbable
-{
-    /// <summary> Magnet tells the object "I'm holding you now." 
-    /// OrePiece stores this so SellerMachine can call DetachBody before selling. </summary>
-    void SetMagnetHolder(UnityEngine.MonoBehaviour holder);
-
-    /// <summary> Magnet releases the object — clear the holder ref. </summary>
-    void ClearMagnetHolder();
-
-    /// <summary> Is this object currently inside a filter basket? (Phase E SorterFilterBasket)
-    /// Magnet uses this for "Resources not in baskets" filter mode. </summary>
-    bool IsInBasket();
-
-    /// <summary> Is this object currently on any conveyor belt?
-    /// Magnet uses this for "Resources not on conveyors" filter mode. </summary>
-    bool IsOnConveyor();
-}
-
-<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/ToolSystem/IScannable.cs ==== -->
-/// <summary>
-/// Any world object that the resource scanner tool can display a name for.
-/// Each phase adds implementations: OreNode returns "Iron Ore Node", BuildingObject
-/// returns "Conveyor Belt", OrePiece returns "Polished Gold Ingot", etc.
-/// Without implementations, scanner shows "Unknown" for unrecognized objects.
-///
-/// ToolSystem OWNS this interface. Other systems implement it.
-/// Implementors: OreNode (C), OrePiece (C), SellerMachine (C), BuildingObject (D),
-///   BuildingCrate (D), BuildingPlacementNode (D), ComputerTerminal (A).
-/// Callers: ToolResourceScanner (Phase B).
-/// </summary>
-public interface IScannable
-{
-    /// <summary> Returns the display name to show on the scanner HUD text.
-    /// Example: "Iron Ore Node", "Polished Gold Ingot", "Conveyor Belt". </summary>
-    string GetScanDisplayName();
-}
-
-<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/ToolSystem/ToolBase.cs ==== -->
-using System;
-using System.Linq;
-using System.Collections;
-using System.Collections.Generic;
-using HighlightPlus;
-
-using UnityEngine;
-using UnityEngine.InputSystem;
-using UnityEngine.UI;
-using TMPro;
-
-using SPACE_UTIL;
-
-/// <summary>
-/// I'm the base class every equippable tool inherits from (ToolPickaxe, ToolMagnet, etc.).
-/// I handle the common lifecycle: when picked up via "Take" interaction, I fire RaiseToolPickupRequested
-/// so InventoryOrchestrator adds me to a hotbar slot. When equipped, my ViewModel shows in front of
-/// the camera (parented to Owner.ViewModelContainer). When dropped (G key), I unparent, show my
-/// WorldModel, and fly forward with velocity. Subclasses override PrimaryFire, SecondaryFire, etc.
-/// Owner (PlayerMovement) is set by PlayerGrab via OnToolEquipped event — I never set it myself.
-/// I implement IInteractable (for interaction wheel), IInventoryItem (inventory slot), and ISaveLoadableObject (stub for Phase G).
-///
-/// Who uses me: InventoryOrchestrator (equip/drop/switch), PlayerGrab (sets Owner via event).
-/// Events I fire: RaiseToolPickupRequested (on "Take" interaction).
-/// </summary>
-[AddComponentMenu("MineMGL/Tools/BaseHeldTool")]
-public class BaseHeldTool : BaseSellableItem, IInteractable, ISaveLoadableObject, IHighlightable, IInventoryItem
-{
-	#region Inspector Fields
-	[SerializeField] SavableObjectID _savableObjectID;
-	[SerializeField] string _name = "test";
-	[TextArea] [SerializeField] string _description = "description";
-	[SerializeField] Sprite _programmerIcon;
-	[SerializeField] Sprite _inventoryIcon;
-	[SerializeField] int _quantity = 1;
-	[SerializeField] int _maxAmount = 1;
-	[SerializeField] bool _equipWhenPickedUp;
-	[SerializeField] bool _shouldUseInteractionWheel = true;
-	[SerializeField] protected GameObject _worldModel;
-	[SerializeField] protected GameObject _viewModel;
-	[SerializeField] protected Animator _viewModelAnimator;
-	[SerializeField] List<SO_InteractionOption> _interactions;
-	[Header("Highlight")]
-	[SerializeField] HighlightProfile _highlightProfile;
-	#endregion
-
-	#region private API
-	protected Camera ownerCam;
-	protected Transform ownerViewModelContainer;
-	protected Transform ownerMagnetToolPos;
-	#endregion
-
-	#region public API — IInventoryItem
-	public string GetName() => _name;
-	public string GetDescription() => _description;
-	public int GetQty() => _quantity;
-	public void SetQty(int val) => _quantity = val;
-	public void AddQty(int delta) => _quantity += delta;
-	public int GetMaxAmount() => _maxAmount;
-	public bool GetShouldEquipWhenPickedUp() => _equipWhenPickedUp;
-	public Sprite GetIcon() => _inventoryIcon ?? _programmerIcon;
-	public GameObject GetGameObject() => gameObject;
-	/// <summary> drop one from stack — ToolBuilder overrides to instantiate a BuildingCrate.
-	/// Base implementation does nothing (most tools don't stack). </summary>
-	public virtual void DropOneFromStack(Camera cam) { }
-	/// <summary> receives camera + viewmodel container + magnet pos from PlayerGrab via IInventoryItem.
-	/// Tool never knows PlayerMovement exists — only stores the transforms it needs. </summary>
-	public void SetOwnerContext(Camera cam, Transform viewModelContainer, Transform magnetToolPos)
-	{
-		ownerCam = cam;
-		ownerViewModelContainer = viewModelContainer;
-		ownerMagnetToolPos = magnetToolPos;
-	}
-	/// <summary> called when inventory equips me — fires OnItemEquipped so ItemEquipBridge sends context,
-	/// then re-parents to ViewModelContainer (OnEnable ran before context arrived). </summary>
-	public virtual void OnEquipped()
-	{
-		GameEvents.RaiseItemEquipped(this);
-		// → OnEnable already fired with null container — now context is set, re-parent
-		if (ownerViewModelContainer != null)
-		{
-			HideWorldModel();
-			HideViewModel(hide: false);
-			transform.position = ownerViewModelContainer.position;
-			transform.rotation = ownerViewModelContainer.rotation;
-			transform.parent = ownerViewModelContainer;
-		}
-	}
-	/// <summary> label for the info panel equip button — overridden by ToolBuilder to "Build" </summary>
-	public virtual string GetEquipButtonLabel() => "Equip";
-	/// <summary> per-frame input routing when I'm the active item — routes LMB/RMB/R/Q to virtual methods </summary>
-	public virtual void HandleActiveInput()
-	{
-		if (INPUT.K.InstantDown(KeyCode.Mouse0)) PrimaryFire();
-		if (Input.GetMouseButton(0)) PrimaryFireHeld();
-		if (INPUT.K.InstantDown(KeyCode.Mouse1)) SecondaryFire();
-		if (Input.GetMouseButton(1)) SecondaryFireHeld();
-		if (INPUT.K.InstantDown(KeyCode.R)) Reload();
-		if (INPUT.K.InstantDown(KeyCode.Q)) QButtonPressed();
-	}
-	#endregion
-
-	#region public API — tool actions (virtual)
-	/// <summary> single click fire </summary>
-	public virtual void PrimaryFire()
-	{
-		if (_viewModelAnimator != null) _viewModelAnimator.Play(AnimParamType.attack1.ToString(), -1, 0f);
-	}
-	/// <summary> held fire (continuous) </summary>
-	public virtual void PrimaryFireHeld() { }
-	/// <summary> single right click </summary>
-	public virtual void SecondaryFire() { }
-	/// <summary> held right click </summary>
-	public virtual void SecondaryFireHeld() { }
-	/// <summary> R key </summary>
-	public virtual void Reload() { }
-	/// <summary> Q key </summary>
-	public virtual void QButtonPressed() { }
-	#endregion
-
-	#region public API — equip / drop
-	/// <summary> drop this tool from inventory to world </summary>
-	public virtual void DropItem()
-	{
-		gameObject.SetActive(true);
-		HideWorldModel(hide: false);
-		HideViewModel();
-		Rigidbody rb = GetComponentInChildren<Rigidbody>();
-		if (rb != null && ownerCam != null)
-		{
-			transform.parent = null;
-			rb.isKinematic = false;
-			rb.transform.position = ownerCam.transform.position + ownerCam.transform.forward * 0.5f;
-			rb.linearVelocity = ownerCam.transform.forward * 5f;
-			rb.rotation = ownerCam.transform.rotation;
-		}
-		ownerCam = null;
-		ownerViewModelContainer = null;
-		ownerMagnetToolPos = null;
-	}
-	/// <summary> show/hide view model </summary>
-	protected virtual void HideViewModel(bool hide = true) => _viewModel?.SetActive(!hide);
-	/// <summary> show/hide world model </summary>
-	protected virtual void HideWorldModel(bool hide = true) => _worldModel?.SetActive(!hide);
-	#endregion
-
-	#region extra
-	// nice-to-have: Equip/UnEquip — called by InventoryOrchestrator during SwitchTool transitions
-	/// <summary> called when tool becomes active — hides world, shows view </summary>
-	public virtual void Equip() { HideWorldModel(); HideViewModel(hide: false); }
-	/// <summary> called when tool is deactivated — hides view </summary>
-	public virtual void UnEquip() { HideViewModel(); }
-	#endregion
-
-
-	#region public API — IInteractable
-	public bool ShouldUseInteractionWheel() => _shouldUseInteractionWheel;
-	public List<SO_InteractionOption> GetOptions() => _interactions;
-	public string GetObjectName() => _name;
-	public virtual void Interact(SO_InteractionOption selectedOption)
-	{
-		if (selectedOption.interactionType == InteractionType.Take)
-		{
-			// purpose: InventoryOrchestrator adds this tool to hotbar
-			GameEvents.RaiseToolPickupRequested(this);
-		}
-		else if (selectedOption.interactionType == InteractionType.Destroy)
-		{
-			Destroy(gameObject);
-		}
-	}
-	#endregion
-
-	#region public API — IHighlightable
-	/// <summary> Returns the tool's highlight profile (cyan). All tools use the same profile. </summary>
-	public virtual HighlightProfile GetHighlightProfile() => _highlightProfile;
-	#endregion
-
-	#region public API — ISaveLoadableObject (stub)
-	public bool HasBeenSaved { get; set; }
-	public bool ShouldBeSaved() => true;
-	public SavableObjectID GetSavableObjectID() => _savableObjectID;
-	public Vector3 GetPosition() => _worldModel != null ? _worldModel.transform.position : transform.position;
-	public Vector3 GetRotation() => _worldModel != null ? _worldModel.transform.rotation.eulerAngles : transform.rotation.eulerAngles;
-	public virtual void LoadFromSave(string json) { /* Phase G */ }
-	public virtual string GetCustomSaveData() => "{}"; /* Phase G */
-	#endregion
-
-	#region Unity Life Cycle
-	protected override void OnEnable()
-	{
-		base.OnEnable();
-		if (ownerViewModelContainer == null)
-		{
-			HideViewModel();
-			HideWorldModel(hide: false);
-			return;
-		}
-		HideWorldModel();
-		HideViewModel(hide: false);
-		if (transform.parent == null || transform.parent != ownerViewModelContainer)
-		{
-			transform.position = ownerViewModelContainer.position;
-			transform.rotation = ownerViewModelContainer.rotation;
-			transform.parent = ownerViewModelContainer;
-		}
-	}
-	#endregion
-}
-
-<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/ToolSystem/ToolBaseSub/ToolBuilder.cs ==== -->
-using UnityEngine;
-
-/// <summary> Phase B skeleton — Reload rotates, Q cycles. Phase D completes PrimaryFire + Update. </summary>
-[AddComponentMenu("MineMGL/Tools/ToolBuilder")]
-public class ToolBuilder : BaseHeldTool
-{
-	[SerializeField] float _useRange = 3f;
-	int currentPrefabIndex;
-	Quaternion currentRotation = Quaternion.identity;
-
-	public override string GetEquipButtonLabel() => "Build";
-	public override void PrimaryFire() { /* Phase D: full placement */ }
-	public override void Reload()
-	{
-		currentRotation *= Quaternion.Euler(0f, 90f, 0f);
-	}
-	public override void QButtonPressed() { currentPrefabIndex++; }
-	public override void DropItem() { base.DropItem(); /* Phase D: spawn BuildingCrate */ }
-	protected override void OnDisable() { base.OnDisable(); /* Phase D: cleanup ghost */ }
-}
-
-<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/ToolSystem/ToolBaseSub/ToolCastingMold.cs ==== -->
-using System.Collections;
-using UnityEngine;
-
-// deps: IMoldReceiver (ProcessingSystem — interface only)
-// ZERO concrete imports from Phase E. CastingFurnaceMoldArea implements IMoldReceiver.
-
-/// <summary>
-/// Swing pickaxe-style → delayed raycast → if hit IMoldReceiver, inserts this mold type and
-/// destroys self. If no IMoldReceiver hit, tries Rigidbody AddForce (generic whack).
-/// CastingMoldType passed as int to the interface — Phase E casts back to enum.
-/// Without Phase E: IMoldReceiver never found → acts as a generic whack tool.
-///
-/// Who uses me: InventoryOrchestrator (equip via HandleActiveInput).
-/// </summary>
-[AddComponentMenu("MineMGL/Tools/ToolCastingMold")]
-public class ToolCastingMold : BaseHeldTool
-{
-	[SerializeField] int _castingMoldType;
-	[SerializeField] float _useRange = 3f;
-	[SerializeField] float _attackCooldown = 1f;
-	[SerializeField] LayerMask _moldAreaLayer;
-	[SerializeField] LayerMask _hitLayers;
-
-	float lastAttackTime = -1f;
-
-	/// <summary> Plays swing animation, starts delayed raycast. </summary>
-	void SwingPickaxe()
-	{
-		if (ownerCam == null) return;
-		if (_viewModelAnimator != null) _viewModelAnimator.Play(AnimParamType.attack1.ToString(), -1, 0f);
-		// Phase H: play swing sound
-		StartCoroutine(PerformAttack(0.2f));
-		lastAttackTime = Time.time;
-	}
-
-	/// <summary> Delayed raycast: first checks IMoldReceiver (insert mold + destroy self),
-	/// then checks Rigidbody (generic whack). </summary>
-	IEnumerator PerformAttack(float delaySeconds)
-	{
-		yield return new WaitForSeconds(delaySeconds);
-		if (ownerCam == null) yield break;
-		// → check for IMoldReceiver (CastingFurnaceMoldArea implements in Phase E)
-		if (Physics.Raycast(ownerCam.transform.position, ownerCam.transform.forward, out RaycastHit moldHit, _useRange, _moldAreaLayer, QueryTriggerInteraction.Collide))
-		{
-			IMoldReceiver receiver = moldHit.collider.GetComponent<IMoldReceiver>();
-			if (receiver != null)
-			{
-				receiver.InsertMold(_castingMoldType);
-				Destroy(gameObject);
-				yield break;
-			}
-		}
-		// → generic whack: push Rigidbody
-		if (Physics.Raycast(ownerCam.transform.position, ownerCam.transform.forward, out RaycastHit hit, _useRange, _hitLayers))
-		{
-			Rigidbody rb = hit.collider.GetComponent<Rigidbody>();
-			if (rb != null)
-			{
-				rb.AddForceAtPosition(ownerCam.transform.forward * 5f, hit.point, ForceMode.Impulse);
-				// Phase H: play hit sound + generic particle
-				GameEvents.RaisePickaxeHit(hit.point, hit.normal, false);
-			}
-		}
-	}
-
-	public override void PrimaryFire()
-	{
-		if (Time.time - lastAttackTime >= _attackCooldown) SwingPickaxe();
-	}
-}
-
-<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/ToolSystem/ToolBaseSub/ToolHammer.cs ==== -->
-using UnityEngine;
-
-// deps: IHammerTarget (BuildingSystem — interface only)
-// ZERO concrete imports from Phase D. BuildingObject/BuildingCrate implement IHammerTarget.
-
-/// <summary>
-/// LMB raycasts → IHammerTarget.OnHammerPrimary() (BuildingObject: TryTakeOrPack, BuildingCrate: TryAddToInventory).
-/// RMB raycasts → IHammerTarget.OnHammerSecondary() (BuildingObject: Pack).
-/// Without IHammerTarget implementations (no Phase D): raycasts find nothing → does nothing. Compiles fine.
-///
-/// Who uses me: InventoryOrchestrator (equip via HandleActiveInput).
-/// </summary>
-[AddComponentMenu("MineMGL/Tools/ToolHammer")]
-public class ToolHammer : BaseHeldTool
-{
-	[SerializeField] float _useRange = 3f;
-
-	/// <summary> LMB: raycast → IHammerTarget.OnHammerPrimary (take building or pickup crate). </summary>
-	public override void PrimaryFire()
-	{
-		if (ownerCam == null) return;
-		if (!Physics.Raycast(ownerCam.transform.position, ownerCam.transform.forward, out RaycastHit hit, _useRange)) return;
-		// → find IHammerTarget (BuildingObject or BuildingCrate implements in Phase D)
-		hit.collider.GetComponentInParent<IHammerTarget>()?.OnHammerPrimary();
-	}
-
-	/// <summary> RMB: raycast → IHammerTarget.OnHammerSecondary (force-pack building). </summary>
-	public override void SecondaryFire()
-	{
-		if (ownerCam == null) return;
-		if (!Physics.Raycast(ownerCam.transform.position, ownerCam.transform.forward, out RaycastHit hit, _useRange)) return;
-		hit.collider.GetComponentInParent<IHammerTarget>()?.OnHammerSecondary();
-	}
-}
-
-<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/ToolSystem/ToolBaseSub/ToolHardHat.cs ==== -->
-/// <summary> Empty subclass of ToolPickaxe — different prefab, same logic. </summary>
-[AddComponentMenu("MineMGL/Tools/ToolHardHat")]
-public class ToolHardHat : ToolPickaxe { }
-
-<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/ToolSystem/ToolBaseSub/ToolMagnet.cs ==== -->
-using System;
-using System.Collections.Generic;
-using UnityEngine;
-using TMPro;
-
-using SPACE_UTIL;
-
-// deps: IMagnetGrabbable (owned — ToolSystem), UtilsPhaseB
-// ZERO concrete imports from Phase C/D/E. OrePiece filter via IMagnetGrabbable interface.
-
-/// <summary>
-/// Hold RMB → OverlapSphere → SpringJoint per nearby Rigidbody → they fly toward me.
-/// LMB launches all forward. R drops gently. Q cycles selection mode.
-///
-/// Filter modes use IMagnetGrabbable (OrePiece implements in Phase C):
-///   - Everything: grab all Rigidbodies
-///   - ResourcesNotInFilter: skip objects where IMagnetGrabbable.IsInBasket() is true
-///   - ResourcesNotOnConveyors: skip objects where IMagnetGrabbable.IsOnConveyor() is true
-///
-/// On grab: calls IMagnetGrabbable.SetMagnetHolder(this) so SellerMachine can DetachBody before selling.
-/// On release: calls IMagnetGrabbable.ClearMagnetHolder().
-/// Without IMagnetGrabbable implementation: grabs everything, no filter, no holder tracking. Still works.
-///
-/// Who uses me: InventoryOrchestrator (equip via HandleActiveInput).
-/// Events I fire: none.
-/// </summary>
-[AddComponentMenu("MineMGL/Tools/ToolMagnet")]
-public class ToolMagnet : BaseHeldTool
-{
-	#region Inspector Fields
-	[SerializeField] float _pullRadius = 2f;
-	[SerializeField] float _pushForce = 3f;
-	[SerializeField] float _dropForce = 1f;
-	[SerializeField] Transform _pullOrigin;
-	[SerializeField] LayerMask _grabbableLayer;
-	[SerializeField] TMP_Text _selectionModeText;
-	#endregion
-
-	#region Private State
-	struct DroppedBodyInfo { public Rigidbody Rb; public float Timer; }
-	MagnetToolSelectionMode selectionMode;
-	List<Rigidbody> heldBodies = new List<Rigidbody>();
-	List<SpringJoint> joints = new List<SpringJoint>();
-	List<GameObject> anchors = new List<GameObject>();
-	bool wantsToMagnet;
-	Vector3 pullTargetVelocity, lastPlayerPos, playerVelocity;
-	readonly List<DroppedBodyInfo> droppedBodies = new List<DroppedBodyInfo>();
-	#endregion
-
-	#region Grab
-	/// <summary> OverlapSphere → for each nearby Rigidbody: filter check via IMagnetGrabbable,
-	/// create SpringJoint anchor, set magnet holder ref, increase drag. </summary>
-	void GrabNearbyObjects()
-	{
-		Collider[] cols = Physics.OverlapSphere(_pullOrigin.position, _pullRadius, _grabbableLayer);
-		foreach (var col in cols)
-		{
-			if (col.CompareTag("MarkedForDestruction")) continue;
-			Rigidbody rb = col.attachedRigidbody;
-			if (rb == null || heldBodies.Contains(rb)) continue;
-			// → filter via IMagnetGrabbable (OrePiece implements in Phase C)
-			// Without implementation: grabbable is null → filter modes skip (grab everything)
-			IMagnetGrabbable grabbable = rb.GetComponentInParent<IMagnetGrabbable>();
-			if (selectionMode == MagnetToolSelectionMode.ResourcesNotInFilter
-				|| selectionMode == MagnetToolSelectionMode.ResourcesNotOnConveyors)
-			{
-				if (grabbable == null) continue; // non-ore object, skip in filter mode
-				if (grabbable.IsInBasket()) continue; // in a basket, skip
-				if (selectionMode == MagnetToolSelectionMode.ResourcesNotOnConveyors && grabbable.IsOnConveyor()) continue;
-			}
-			// → create anchor + SpringJoint
-			GameObject anchor = new GameObject("MagnetAnchor");
-			anchor.transform.position = _pullOrigin.position;
-			anchor.transform.parent = _pullOrigin;
-			anchor.AddComponent<Rigidbody>().isKinematic = true;
-			SpringJoint sj = anchor.AddComponent<SpringJoint>();
-			sj.connectedBody = rb;
-			sj.autoConfigureConnectedAnchor = false;
-			sj.connectedAnchor = rb.transform.InverseTransformPoint(col.transform.position);
-			sj.spring = 100f; sj.damper = 25f; sj.maxDistance = 0.01f;
-			sj.breakForce = 120f; sj.breakTorque = 20f;
-			rb.linearDamping = 3f; rb.angularDamping = 1.5f;
-			rb.interpolation = RigidbodyInterpolation.Interpolate;
-			if (ownerCam != null) UtilsPhaseB.IgnoreAllCollisions(rb.gameObject, ownerCam.transform.root.gameObject, true);
-			// → remove from dropped cooldown list
-			droppedBodies.RemoveAll(d => d.Rb == rb);
-			heldBodies.Add(rb); joints.Add(sj); anchors.Add(anchor);
-			// → tell the object "I'm holding you" via interface
-			grabbable?.SetMagnetHolder(this);
-		}
-		wantsToMagnet = false;
-	}
-	#endregion
-
-	#region Drop
-	/// <summary> Destroys all joints/anchors, launches held bodies forward, restores drag,
-	/// clears magnet holder ref via IMagnetGrabbable. </summary>
-	void DropObjects(float force)
-	{
-		for (int i = 0; i < joints.Count; i++)
-			if (joints[i] != null) Destroy(joints[i].gameObject);
-		joints.Clear(); anchors.Clear();
-		foreach (var rb in heldBodies)
-		{
-			if (rb == null) continue;
-			if (ownerCam != null) rb.AddForce(ownerCam.transform.forward * force, ForceMode.Impulse);
-			rb.linearDamping = BasePhysicsObject.STANDARD_LINEAR_DAMPING;
-			rb.angularDamping = BasePhysicsObject.STANDARD_ANGULAR_DAMPING;
-			if (ownerCam != null) UtilsPhaseB.IgnoreAllCollisions(rb.gameObject, ownerCam.transform.root.gameObject, false);
-			droppedBodies.Add(new DroppedBodyInfo { Rb = rb, Timer = 3f });
-			// → clear magnet holder ref via interface
-			rb.GetComponentInParent<IMagnetGrabbable>()?.ClearMagnetHolder();
-		}
-		heldBodies.Clear();
-	}
-
-	/// <summary> External call — SellerMachine/other systems call this to force-release a specific body
-	/// from the magnet before selling/destroying it. </summary>
-	public void DetachBody(Rigidbody rb)
-	{
-		if (rb == null) return;
-		int idx = heldBodies.IndexOf(rb);
-		if (idx < 0) return;
-		if (idx < joints.Count && joints[idx] != null) Destroy(joints[idx].gameObject);
-		if (idx < anchors.Count && anchors[idx] != null) Destroy(anchors[idx]);
-		joints.RemoveAt(idx); anchors.RemoveAt(idx); heldBodies.RemoveAt(idx);
-		rb.linearDamping = BasePhysicsObject.STANDARD_LINEAR_DAMPING;
-		rb.angularDamping = BasePhysicsObject.STANDARD_ANGULAR_DAMPING;
-		if (ownerCam != null) UtilsPhaseB.IgnoreAllCollisions(rb.gameObject, ownerCam.transform.root.gameObject, false);
-		droppedBodies.Add(new DroppedBodyInfo { Rb = rb, Timer = 3f });
-		rb.GetComponentInParent<IMagnetGrabbable>()?.ClearMagnetHolder();
-	}
-	#endregion
-
-	#region Cleanup
-	/// <summary> Removes broken joints (destroyed objects) and restores drag on orphaned bodies. </summary>
-	void CleanupBrokenJoints()
-	{
-		for (int i = joints.Count - 1; i >= 0; i--)
-		{
-			if (joints[i] == null || joints[i].connectedBody == null)
-			{
-				if (i < anchors.Count && anchors[i] != null) Destroy(anchors[i]);
-				if (i < heldBodies.Count)
-				{
-					Rigidbody rb = heldBodies[i];
-					if (rb != null) { rb.linearDamping = BasePhysicsObject.STANDARD_LINEAR_DAMPING; rb.angularDamping = BasePhysicsObject.STANDARD_ANGULAR_DAMPING; }
-					heldBodies.RemoveAt(i);
-				}
-				joints.RemoveAt(i); anchors.RemoveAt(i);
-			}
-		}
-	}
-
-	/// <summary> Counts down dropped body cooldown timers, restores interpolation when expired. </summary>
-	void CleanupDroppedBodies()
-	{
-		for (int i = droppedBodies.Count - 1; i >= 0; i--)
-		{
-			var info = droppedBodies[i];
-			if (info.Rb == null) { droppedBodies.RemoveAt(i); continue; }
-			info.Timer -= Time.fixedDeltaTime;
-			if (info.Timer <= 0f) { info.Rb.interpolation = RigidbodyInterpolation.None; droppedBodies.RemoveAt(i); }
-			else droppedBodies[i] = info;
-		}
-	}
-	#endregion
-
-	#region Selection Mode
-	void CycleSelectionMode()
-	{
-		var modes = (MagnetToolSelectionMode[])Enum.GetValues(typeof(MagnetToolSelectionMode));
-		int next = (Array.IndexOf(modes, selectionMode) + 1) % modes.Length;
-		selectionMode = modes[next];
-		if (_selectionModeText != null) _selectionModeText.text = selectionMode.ToString();
-	}
-	#endregion
-
-	#region Overrides
-	public override void SecondaryFireHeld() => wantsToMagnet = true;
-	public override void PrimaryFire() => DropObjects(_pushForce);
-	public override void Reload() => DropObjects(_dropForce);
-	public override void QButtonPressed() => CycleSelectionMode();
-	public override void DropItem() { DropObjects(_dropForce); base.DropItem(); }
-	#endregion
-
-	#region Unity Lifecycle
-	protected override void OnEnable() { base.OnEnable(); if (_selectionModeText != null) _selectionModeText.text = selectionMode.ToString(); }
-	protected override void OnDisable() { base.OnDisable(); DropObjects(_dropForce); }
-
-	/// <summary> Each physics frame: smooths pull origin toward player magnet position,
-	/// cleans broken joints + expired drop cooldowns, grabs if RMB held. </summary>
-	private void FixedUpdate()
-	{
-		if (ownerCam == null) return;
-		Vector3 pos = ownerCam.transform.root.position;
-		playerVelocity = (pos - lastPlayerPos) / Time.fixedDeltaTime;
-		lastPlayerPos = pos;
-		Vector3 target = ownerMagnetToolPos.position + playerVelocity * Time.fixedDeltaTime * 10f;
-		_pullOrigin.position = Vector3.SmoothDamp(_pullOrigin.position, target, ref pullTargetVelocity, 0.03f, 10f, Time.fixedDeltaTime);
-		CleanupBrokenJoints(); CleanupDroppedBodies();
-		if (wantsToMagnet) GrabNearbyObjects();
-	}
-	#endregion
-}
-
-<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/ToolSystem/ToolBaseSub/ToolMiningHat.cs ==== -->
-using UnityEngine;
-
-/// <summary> LMB toggles light on/off. Interaction wheel "Toggle" does the same. </summary>
-[AddComponentMenu("MineMGL/Tools/ToolMiningHat")]
-public class ToolMiningHat : BaseHeldTool
-{
-	[SerializeField] GameObject _worldModelLight;
-	[SerializeField] GameObject _viewModelLight;
-	bool isOn;
-
-	void ToggleLight(bool enable)
-	{
-		isOn = enable;
-		_worldModelLight.SetActive(isOn);
-		_viewModelLight.SetActive(isOn);
-	}
-
-	public override void PrimaryFire() => ToggleLight(!isOn);
-	public override void Interact(SO_InteractionOption selectedOption)
-	{
-		if (selectedOption.interactionType == InteractionType.Toggle) ToggleLight(!isOn);
-		else base.Interact(selectedOption);
-	}
-	protected override void OnEnable() { base.OnEnable(); ToggleLight(isOn); }
-	protected override void OnDisable() { base.OnDisable(); ToggleLight(isOn); }
-}
-
-<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/ToolSystem/ToolBaseSub/ToolPickaxe.cs ==== -->
-using System.Collections;
-using UnityEngine;
-
-// deps: IDamageable (DamageSystem), ICrushable (MiningSystem — interface only)
-// ZERO concrete imports from Phase C/D/E. All cross-phase via interfaces.
-
-/// <summary>
-/// Hold left-click → swing animation → 0.2s delay → raycast from camera.
-/// If _canBreakOreIntoCrushed: checks ICrushable → TryCrush (Phase C OrePiece implements).
-/// Then checks IDamageable → TakeDamage (Phase C OreNode/DamageableOrePiece implements).
-/// Then checks Rigidbody → AddForce (pushes loose objects).
-/// Fires RaisePickaxeHit GameEvent for particles (ParticleManager subscribes in Phase C).
-///
-/// Who uses me: InventoryOrchestrator (equip via HandleActiveInput).
-/// Events I fire: RaisePickaxeHit (ParticleManager subscribes for particles).
-/// </summary>
-[AddComponentMenu("MineMGL/Tools/ToolPickaxe")]
-public class ToolPickaxe : BaseHeldTool
-{
-	#region Inspector Fields
-	[SerializeField] float _useRange = 2f;
-	[SerializeField] float _damage = 10f;
-	[SerializeField] float _attackCooldown = 1f;
-	[SerializeField] LayerMask _hitLayers;
-	[SerializeField] bool _canBreakOreIntoCrushed;
-	#endregion
-
-	float lastAttackTime = -1f;
-
-	/// <summary> Plays swing animation and starts delayed raycast coroutine. </summary>
-	void SwingPickaxe()
-	{
-		if (ownerCam == null) return;
-		// → play swing animation
-		if (_viewModelAnimator != null) _viewModelAnimator.Play(AnimParamType.attack1.ToString(), -1, 0f);
-		// Phase H: play swing sound
-		StartCoroutine(PerformAttack(0.2f));
-		lastAttackTime = Time.time;
-	}
-
-	/// <summary> Waits delaySeconds, then raycasts from camera. Checks ICrushable (ore crush),
-	/// then IDamageable (ore node damage), then Rigidbody (physics push). All cross-phase
-	/// types accessed via interface — zero concrete imports. </summary>
-	IEnumerator PerformAttack(float delaySeconds)
-	{
-		yield return new WaitForSeconds(delaySeconds);
-		if (!gameObject.activeInHierarchy || ownerCam == null) yield break;
-		if (!Physics.Raycast(ownerCam.transform.position, ownerCam.transform.forward, out RaycastHit hit, _useRange, _hitLayers))
-			yield break;
-
-		// → ICrushable: if this pickaxe can break ore into crushed pieces, try that first
-		// OrePiece implements ICrushable in Phase C. Without Phase C, GetComponent returns null → skipped.
-		if (_canBreakOreIntoCrushed)
-		{
-			ICrushable crushable = hit.collider.GetComponent<ICrushable>();
-			if (crushable != null && crushable.CanCrush() && crushable.TryCrush())
-			{
-				// purpose: ParticleManager (Phase C) creates hit particle — subscribes to this event
-				GameEvents.RaisePickaxeHit(hit.point, hit.normal, true);
-				yield return new WaitForFixedUpdate();
-				// → small physics explosion at crush point (pure physics, no Phase C dep)
-				UtilsPhaseB.SimpleExplosion(hit.point, 0.5f, 2f, 0.5f);
-				yield break;
-			}
-		}
-
-		// → IDamageable: deal damage (OreNode, DamageableOrePiece implement in Phase C)
-		// Without Phase C, GetComponent returns null → skipped.
-		IDamageable damageable = hit.collider.GetComponent<IDamageable>();
-		if (damageable != null)
-		{
-			damageable.TakeDamage(_damage, hit.point);
-			// purpose: ParticleManager creates ore hit particle at impact point
-			GameEvents.RaisePickaxeHit(hit.point, hit.normal, true);
-		}
-		else
-		{
-			// → non-damageable hit: generic impact particle
-			// Phase H: play world hit sound
-			GameEvents.RaisePickaxeHit(hit.point, hit.normal, false);
-		}
-
-		// → apply physics force to rigidbody (pushes loose objects)
-		Rigidbody hitRb = hit.collider.GetComponent<Rigidbody>();
-		if (hitRb != null)
-		{
-			hitRb.AddForceAtPosition(ownerCam.transform.forward * 5f, hit.point, ForceMode.Impulse);
-			PhysicsSoundPlayer soundPlayer = hitRb.GetComponent<PhysicsSoundPlayer>();
-			if (soundPlayer != null) soundPlayer.PlayImpactSound();
-		}
-	}
-
-	public override void PrimaryFire() { }
-	public override void PrimaryFireHeld()
-	{
-		if (Time.time - lastAttackTime >= _attackCooldown) SwingPickaxe();
-	}
-}
-
-<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/ToolSystem/ToolBaseSub/ToolResourceScanner.cs ==== -->
-using UnityEngine;
-using TMPro;
-
-/// <summary>
-/// Continuously raycasts from camera and displays the IScannable.GetScanDisplayName() of whatever
-/// the player is looking at. Each phase adds implementations:
-///   Phase A: ComputerTerminal → "Computer Terminal"
-///   Phase B: BaseHeldTool → tool name
-///   Phase C: OreNode → "Iron Ore Node", OrePiece → "Polished Gold Ingot", SellerMachine → "Deposit Hopper"
-///   Phase D: BuildingObject → "Conveyor Belt", BuildingCrate → "Conveyor Belt", BuildingPlacementNode → "Iron Auto-Miner Node"
-/// Without IScannable: shows "Unknown" for everything. Still compiles and runs.
-/// </summary>
-[AddComponentMenu("MineMGL/Tools/ToolResourceScanner")]
-public class ToolResourceScanner : BaseHeldTool
-{
-	[SerializeField] float _useRange = 3f;
-	[SerializeField] TMP_Text _thingNameText;
-
-	/// <summary> Each frame: raycast from camera, find IScannable on hit, display name on HUD text. </summary>
-	void Update()
-	{
-		if (ownerCam == null) return;
-		string text = "No Target";
-		if (Physics.Raycast(ownerCam.transform.position, ownerCam.transform.forward, out RaycastHit hit, _useRange))
-		{
-			// → IScannable: each phase adds implementations (OreNode, OrePiece, BuildingObject, etc.)
-			IScannable scannable = hit.collider.GetComponentInParent<IScannable>();
-			if (scannable != null)
-				text = scannable.GetScanDisplayName();
-			else if (!hit.collider.gameObject.isStatic)
-				text = "Unknown";
-		}
-		if (_thingNameText != null) _thingNameText.text = text;
-	}
-
-	public override void PrimaryFire() { }
-}
-
-<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/ToolSystem/ToolBaseSub/ToolSupportsWrench.cs ==== -->
-using UnityEngine;
-
-// deps: ISupportToggleable (BuildingSystem — interface only)
-// ZERO concrete imports from Phase D. BuildingObject implements ISupportToggleable.
-
-/// <summary>
-/// LMB raycasts → ISupportToggleable.SetSupportsEnabled(false) (disables scaffolding legs).
-/// RMB raycasts → ISupportToggleable.SetSupportsEnabled(true) (enables scaffolding legs).
-/// Without ISupportToggleable implementations (no Phase D): does nothing. Compiles fine.
-/// </summary>
-[AddComponentMenu("MineMGL/Tools/ToolSupportsWrench")]
-public class ToolSupportsWrench : BaseHeldTool
-{
-	[SerializeField] float _useRange = 3f;
-
-	/// <summary> LMB: disable supports on looked-at building. </summary>
-	public override void PrimaryFire()
-	{
-		if (ownerCam == null) return;
-		if (!Physics.Raycast(ownerCam.transform.position, ownerCam.transform.forward, out var hit, _useRange)) return;
-		hit.collider.GetComponentInParent<ISupportToggleable>()?.SetSupportsEnabled(false);
-	}
-
-	/// <summary> RMB: enable supports on looked-at building. </summary>
-	public override void SecondaryFire()
-	{
-		if (ownerCam == null) return;
-		if (!Physics.Raycast(ownerCam.transform.position, ownerCam.transform.forward, out var hit, _useRange)) return;
-		hit.collider.GetComponentInParent<ISupportToggleable>()?.SetSupportsEnabled(true);
-	}
-}
-
-<!-- ==== FILE: learn/phase-b(New)/Scripts/_-Systems/ToolSystem/ToolTest.md ==== -->
-# Tool System — Manual Test
-
-> Verifies: tool pickup, equip/unequip, swing/magnet/hammer/hat/wrench/scanner/builder actions, drop to world.
-> All files in `_-Systems/ToolSystem/` — ToolBase.cs (BaseHeldTool) + Tools.cs (all subclasses).
-> Depends on: `_-Systems/InventorySystem/` for slot management + `IInventoryItem` interface.
-
----
-
-## What This System Does (Plain English)
-
-Tools are physical objects in the world (cubes/models on the floor). Walk up to one, press E → it goes into
-your inventory hotbar. Press 1-5 to select → the tool's ViewModel (first-person hand model) appears in front
-of your camera. Each tool has different actions:
-
-- **Pickaxe:** Hold LMB → swing animation → delayed raycast → damages OreNodes, pushes physics objects
-- **Magnet:** Hold RMB → pulls nearby Grabbable objects via SpringJoints. LMB launches, R drops, Q cycles mode
-- **Hammer:** LMB/RMB raycasts → Phase D takes/packs buildings (currently stubs)
-- **MiningHat:** LMB toggles light on/off (world + view model lights)
-- **Wrench:** LMB/RMB → Phase D enables/disables building scaffolding (stubs)
-- **ResourceScanner:** Passive — shows name of whatever you look at on a TMP_Text
-- **Builder:** Phase D placement tool — Reload rotates, Q cycles models (stubs)
-
-**BaseHeldTool implements `IInventoryItem`** — the inventory system doesn't know about tools at all.
-It just calls `OnEquipped()`, `HandleActiveInput()`, `GetEquipButtonLabel()` on whatever IInventoryItem
-is in the active slot. Tools implement these to fire `RaiseToolEquipped` and route LMB/RMB/R/Q.
-
----
-
-## Prerequisites
-
-- `_-Systems/InventorySystem/` fully set up (see InventoryTest.md)
-- `_-Systems/ToolSystem/ToolBase.cs` + `Tools.cs` compiled
-- Player GO with: `PlayerMovement`, `PlayerCamera`, `PlayerGrab` (subscribes to OnToolEquipped → sets owner)
-- Camera on Player (tools raycast from `owner.PlayerCam`)
-
-### ⚠️ CRITICAL — Owner Chain
-
-> Tools access the camera via `owner.PlayerCam`. `owner` is set by `PlayerGrab` subscribing to
-> `GameEvents.OnToolEquipped += (tool) => tool.SetOwner(_movement)`. If PlayerGrab doesn't exist
-> in the scene, **no tool action works** — all raycasts fail silently because `owner == null`.
->
-> **Verify:** PlayerGrab component exists on Player GO, with `_movement` wired to PlayerMovement.
-
-### ⚠️ CRITICAL — WorldModel / ViewModel Hierarchy
-
-> Each tool prefab needs this exact child hierarchy:
-> ```
-> ToolPickaxe (root — has ToolPickaxe component)
-> ├── WorldModel (active when on ground)
-> │   - Rigidbody, Collider, tag "Grabbable", layer "Interact"
-> │   └── mesh (MeshFilter + MeshRenderer)
-> └── ViewModel (active when equipped — parented to camera's ViewModelContainer)
->     - Animator (optional, for swing animation)
->     └── mesh (MeshFilter + MeshRenderer, NO collider)
-> ```
->
-> **If WorldModel has no Rigidbody:** tool won't fall to ground when dropped.
-> **If WorldModel has no Collider + tag Grabbable:** PlayerGrab can't grab it, FresnelHighlighter won't outline it.
-> **If ViewModel has a Collider:** it blocks the player's raycast → tools hit themselves.
-
-### ⚠️ CRITICAL — Tool Scene Instances
-
-> Tool GOs must exist as **instances in the scene Hierarchy** (not just prefabs in Project).
-> Drag tool prefab from Project → Hierarchy to create an instance. Place on floor near player spawn.
-> The inventory test fires pickup events on these **scene instances**.
-
----
-
-## Setup Guide
-
-### Step 1 — Player (if not already set up)
-
-1. Player GO at origin with: `CharacterController`, `PlayerMovement`, `PlayerCamera`, `PlayerGrab`
-2. Camera child at y=1.6
-3. `ViewModelContainer` empty child of Camera — tools parent here when equipped
-4. `PlayerGrab._movement` → PlayerMovement component
-
-### Step 2 — Tool Prefabs (create, save as prefab, place in scene)
-
-Create 4 tool prefabs with the WorldModel/ViewModel hierarchy above:
-
-| Prefab | Component | Special Fields |
-|--------|-----------|---------------|
-| ToolPickaxe | `ToolPickaxe` | `_useRange=2`, `_damage=10`, `_attackCooldown=1`, `_hitLayers=Default+Interact` |
-| ToolMagnet | `ToolMagnet` | `_pullRadius=2`, `_pullOrigin=child Transform`, `_grabbableLayer=Interact` |
-| ToolHammer | `ToolHammer` | `_useRange=3` |
-| ToolMiningHat | `ToolMiningHat` | `_worldModelLight=Point Light child`, `_viewModelLight=Spot Light child` |
-
-**On each BaseHeldTool component (inspector):**
-- `_name` = "Pickaxe" / "Magnet" / etc.
-- `_inventoryIcon` = any Sprite (for hotbar display)
-- `_equipWhenPickedUp` = ✅ true
-- `_worldModel` = WorldModel child GO
-- `_viewModel` = ViewModel child GO
-- `_viewModelAnimator` = Animator on ViewModel (optional, for swing)
-
-### Step 3 — Place Tool Instances in Scene
-
-> **Drag each prefab from Project → Hierarchy** to create scene instances.
-
-| Tool | Position | Notes |
-|------|----------|-------|
-| ToolPickaxe_01 | (-3, 0.2, 3) | On floor, WorldModel visible |
-| ToolMagnet_01 | (-1, 0.2, 3) | On floor |
-| ToolHammer_01 | (1, 0.2, 3) | On floor |
-| ToolMiningHat_01 | (3, 0.2, 3) | On floor, lights OFF by default |
-
-### Step 4 — Grabbable Cubes (for magnet + pickaxe testing)
-
-- 5 cubes with `Rigidbody`, tag `Grabbable`, layer `Interact`
-- Place near player spawn at various positions
-
-### Step 5 — Inventory System (must be set up first)
-
-Follow `_-Systems/InventorySystem/InventoryTest.md` Steps 1-9 for Canvas + HotbarPanel + InventoryOrchestrator.
-
----
-
-## How It Works (System Flow)
-
-**Tool pickup:** Player walks to ToolPickaxe_01 on floor → presses E → `BaseHeldTool.Interact(Take)` fires
-`GameEvents.RaiseToolPickupRequested(this)` (as `IInventoryItem`). InventoryOrchestrator receives → duplicate
-guard passes → `TryAdd(item)` puts it in first empty slot → `item.GetGameObject().SetActive(false)` hides the
-WorldModel from the world. If `GetShouldEquipWhenPickedUp()` → `SwitchToSlot(idx)` → `item.GetGameObject().SetActive(true)`
-→ `BaseHeldTool.OnEnable` runs → parents ViewModel to `owner.ViewModelContainer` → `item.OnEquipped()` fires
-`GameEvents.RaiseToolEquipped(this)` → **PlayerGrab receives** → `tool.SetOwner(_movement)` → now the tool has
-access to `owner.PlayerCam` for all raycasts.
-
-**Per-frame input:** `InventoryOrchestrator.Update()` calls `dataService.GetActiveItem()?.HandleActiveInput()`.
-BaseHeldTool.HandleActiveInput() routes: LMB→PrimaryFire, hold LMB→PrimaryFireHeld, RMB→SecondaryFire,
-hold RMB→SecondaryFireHeld, R→Reload, Q→QButtonPressed. Each tool overrides what it needs.
-
-**Pickaxe swing:** `PrimaryFireHeld` called every frame while LMB held → checks cooldown → `SwingPickaxe()`
-plays animation → starts coroutine `PerformAttack(0.2f)` → waits 0.2s → raycasts from `owner.PlayerCam`
-→ if hit IDamageable: TakeDamage. If hit Rigidbody: AddForce. If hit PhysicsSoundPlayer: PlayImpactSound.
-
-**Magnet pull:** `SecondaryFireHeld` sets `wantsToMagnet = true` → next `FixedUpdate` → `GrabNearbyObjects()`
-→ OverlapSphere → for each Grabbable Rigidbody: creates anchor GO with kinematic Rb + SpringJoint connected
-to target → sets damping high → ignores collision with player → target flies toward pull origin.
-`PrimaryFire` → `DropObjects(_pushForce)` → destroys joints, applies forward force. SpringJoint break →
-`CleanupBrokenJoints()` auto-releases.
-
-**Tool drop:** Press G → `InventoryOrchestrator` calls `HandleDropActiveItem()` → `item.DropItem()` →
-`BaseHeldTool.DropItem()` shows WorldModel, hides ViewModel, unparents, applies forward velocity from camera
-→ `owner = null` → `dataService.Remove(item)` → slot empties.
-
----
-
-## Tests
-
-### 1. Pickup + Equip
-
-**DO:** Walk to ToolPickaxe_01 → press E
-**EXPECT:**
-- Pickaxe disappears from world
-- Icon in hotbar slot 0 (blue = equipped)
-- ViewModel visible in front of camera
-- Console: `Picked up: Pickaxe`
-
-**Behind the scenes:** `RaiseToolPickupRequested` → `HandleItemPickup` → `TryAdd` → `SetActive(false)` → `SwitchToSlot` → `SetActive(true)` → `OnEnable` parents to ViewModelContainer → `OnEquipped` → `RaiseToolEquipped` → PlayerGrab sets owner.
-
-### 2. Pickaxe Swing
-
-**DO:** With Pickaxe equipped → hold LMB → aim at a cube
-**EXPECT:**
-- Swing animation plays (if Animator wired)
-- 0.2s delay → cube gets pushed by AddForce
-- Cooldown prevents spam (1s default)
-
-**If nothing happens:** Check `owner != null` (PlayerGrab must exist). Check `_hitLayers` includes the cube's layer.
-
-### 3. Magnet Pull
-
-**DO:** Pick up Magnet → hold RMB near cubes
-**EXPECT:**
-- Cubes fly toward you via SpringJoints
-- Visible spring-like bouncing
-- LMB → cubes launch forward
-- R → cubes drop gently
-
-**If cubes don't fly:** Check `_pullOrigin` is assigned (child Transform on ToolMagnet). Check `_grabbableLayer` includes cubes' layer.
-
-### 4. Mining Hat Light
-
-**DO:** Pick up MiningHat → LMB
-**EXPECT:**
-- Light toggles on (both WorldModel + ViewModel lights)
-- LMB again → off
-
-**If light doesn't toggle:** Check `_worldModelLight` and `_viewModelLight` are assigned to the Light child GOs.
-
-### 5. Tool Drop
-
-**DO:** With any tool equipped → press G
-**EXPECT:**
-- Tool reappears in world with forward velocity from camera
-- Hotbar slot empties
-- Tool can be picked up again
-
-### 6. Switch Between Tools
-
-**DO:** Pick up 3+ tools → press 1, 2, 3
-**EXPECT:**
-- Each key equips that slot's tool (ViewModel swaps)
-- Previous tool's ViewModel hides
-- Blue highlight moves to active slot
-
-### 7. Toggle Equip/Unequip
-
-**DO:** Press 1 (equipped) → press 1 again
-**EXPECT:**
-- Tool unequips → ViewModel hides → "empty hands"
-- Press 1 again → re-equips
-
----
-
-## Summary Checklist
-
-- [ ] Tool pickup: disappears from world, icon in slot, ViewModel in camera
-- [ ] Duplicate pickup blocked
-- [ ] Pickaxe: hold LMB → swing → delayed raycast → pushes cubes
-- [ ] Magnet: hold RMB → cubes fly toward player. LMB launches. R drops.
-- [ ] MiningHat: LMB toggles both lights
-- [ ] Hammer: LMB/RMB raycast (Phase D stubs — no visible effect yet)
-- [ ] Wrench: LMB/RMB raycast (Phase D stubs)
-- [ ] ResourceScanner: shows target name on ViewModel TMP_Text
-- [ ] Builder: Reload rotates, Q cycles (Phase D stubs)
-- [ ] Drop (G): tool falls to world with velocity, slot empties
-- [ ] Switch (1-5): ViewModel swaps between tools
-- [ ] Toggle: same key twice = equip/unequip
-- [ ] Scroll: cycles occupied slots, skips empty
-- [ ] owner.PlayerCam accessible (PlayerGrab sets via OnToolEquipped)
-- [ ] Zero console errors
-
 <!-- ==== FILE: learn/phase-b(New)/prototype/Proto_Damage.cs ==== -->
 using System.Collections;
 using System.Collections.Generic;
@@ -27133,6 +25949,1561 @@ public class Proto_ToolSystem : MonoBehaviour
             y += 20;
         }
     }
+}
+
+<!-- ==== FILE: learn/phase-b-1/FLOW.md ==== -->
+# Phase B-1 — Data Flow & Event Architecture
+
+## Portability Diagram
+
+```
+═══════════════════════════════════════════════════════════════════════════
+  FREE — these DO NOT count as dependencies (shared infra, always available)
+═══════════════════════════════════════════════════════════════════════════
+  GameEvents (partial)    — RaiseToolPickupRequested, RaiseItemEquipped, RaisePickaxeHit
+  Singleton<T>            — (no direct singleton reads in tools)
+  GlobalEnumsB            — InteractionType, AnimParamType, MagnetToolSelectionMode, SavableObjectID
+  BasePhysicsObject chain — BaseSellableItem → BaseHeldTool inheritance
+  UtilsPhaseB             — IgnoreAllCollisions, SimpleExplosion
+  SPACE_UTIL / INPUT.K    — user utility extensions
+
+  → Using ANY of these = still L0. They're project infrastructure.
+═══════════════════════════════════════════════════════════════════════════
+
+
+═══════════════════════════════════════════════════════════════════════════
+  L5 INTERFACE-ONLY — portable (copy folder + 5 interface files)
+═══════════════════════════════════════════════════════════════════════════
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │  ToolSystem/                                L5 ✅ PORTABLE │
+  │                                                             │
+  │  OWNS 7 interfaces (caller-defines pattern):                │
+  │    IDamageable, ICrushable, IMagnetGrabbable, IScannable,   │
+  │    IHammerTarget, ISupportToggleable, IMoldReceiver          │
+  │                                                             │
+  │  IMPORTS 5 interfaces (BaseHeldTool implements):            │
+  │    IInteractable (A), IInventoryItem (B), IHighlightable(B)│
+  │    ISaveLoadableObject (G stub), IIconItem (B)              │
+  │                                                             │
+  │  Concrete _-Systems/ deps: ZERO                             │
+  │                                                             │
+  │  Communicates via: GameEvents                               │
+  │    fires → OnToolPickupRequested, OnItemEquipped            │
+  │    fires → OnPickaxeHit (ParticleManager subscribes)        │
+  │    subscribes ← OnItemEquipped (ItemEquipBridge)            │
+  │                                                             │
+  │  Copy test: ✅ drop folder + 5 interface files → compiles   │
+  └─────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════
+  PHASE B-1 PORTABILITY SCORECARD
+═══════════════════════════════════════════════════════════════════════════
+
+  System       │ Level │ External Deps                      │ Portable?
+  ─────────────┼───────┼────────────────────────────────────┼──────────
+  ToolSystem   │  L5   │ IInteract+IInvItem+IHighlight      │ ✅ YES
+               │       │ +ISaveLoad+IIconItem (all interface)│
+               │       │ Owns: 7 interfaces                  │
+
+  Portable: 1/1 system
+  Concrete deps: ZERO
+```
+
+---
+
+## Data Flows
+
+### Tool Pickup
+
+Player walks to tool on ground → presses E → InteractionWheel (Phase A) calls `BaseHeldTool.Interact(take)` → `GameEvents.RaiseToolPickupRequested(this as IInventoryItem)`.
+
+**InventoryOrchestrator** (Phase B) subscribes → duplicate guard → `dataService.TryAdd(item)` → `item.GetGameObject().SetActive(false)` — tool disappears from world. If `equipWhenPickedUp` → `SwitchToSlot(idx)`.
+
+### Equip / Switch
+
+InventoryOrchestrator calls `item.OnEquipped()` → BaseHeldTool fires `GameEvents.RaiseItemEquipped(this)` → **ItemEquipBridge** subscribes → calls `item.SetOwnerContext(cam, viewModelContainer, magnetPos)` → tool now has camera for raycasting. BaseHeldTool re-parents to ViewModelContainer.
+
+### Tool Actions (Per-Frame)
+
+InventoryOrchestrator.Update → `activeItem.HandleActiveInput()` → routes LMB/RMB/R/Q to virtual methods. Each subclass does its thing via interface calls (`GetComponent<ICrushable>()`, `GetComponent<IHammerTarget>()`, etc.).
+
+### Drop
+
+Press G → `item.DropItem()` → shows WorldModel, hides ViewModel, unparents, `rb.linearVelocity = forward * 5` → clears ownerCam.
+
+### Pickaxe Hit → Particle (cross-phase via GameEvent)
+
+ToolPickaxe hits something → fires `GameEvents.RaisePickaxeHit(point, normal, isDamageable)`. **ParticleManager** (Phase C) subscribes → creates ore hit particle or generic impact particle. Without Phase C → event has 0 subscribers → nothing happens → no error.
+
+---
+
+## Event Registry
+
+| Event | Type | Fired By | Subscribed By |
+|-------|------|----------|---------------|
+| `OnToolPickupRequested` | `Action<IInventoryItem>` | BaseHeldTool.Interact("Take") | InventoryOrchestrator (B) |
+| `OnItemEquipped` | `Action<IInventoryItem>` | BaseHeldTool.OnEquipped | ItemEquipBridge (B-1), PlayerGrab (B), HighlightSystem (B) |
+| `OnPickaxeHit` | `Action<Vector3, Vector3, bool>` | ToolPickaxe.PerformAttack | ParticleManager (C) |
+
+<!-- ==== FILE: learn/phase-b-1/GUIDE.md ==== -->
+# Phase B-1 — Tool System
+
+## What It Looks Like When Running
+
+Walk up to a tool on the ground (pickaxe, magnet, hammer, etc.). Press E → interaction wheel shows "Take". Tool goes into your hotbar. Press 1-9 to switch. Active tool shows as a ViewModel in front of the camera.
+
+Each tool does something different on LMB/RMB:
+- **Pickaxe**: swing → delayed raycast → damages IDamageable objects, crushes ICrushable ore
+- **Magnet**: hold RMB → nearby Rigidbodies fly toward you via SpringJoint. LMB launches. R drops. Q cycles filter mode
+- **Hammer**: LMB → IHammerTarget.OnHammerPrimary (take building). RMB → OnHammerSecondary (pack)
+- **Mining Hat**: LMB → toggle light on/off
+- **Supports Wrench**: LMB disables scaffolding, RMB enables
+- **Resource Scanner**: continuously shows the IScannable name of whatever you look at
+- **Builder**: ghost preview + grid snap + place via IBuildingToolContext (complete — Phase D provides bridge)
+- **Casting Mold**: swing → IMoldReceiver.InsertMold (Phase E furnace)
+- **Drill Bit**: attaches to RapidAutoMiner via IDrillBitHost, has durability + mesh swap
+
+Press G to drop. Tool unparents from camera, shows WorldModel, flies forward with velocity.
+
+---
+
+## Folder Structure
+
+```
+phase-b-1/Scripts/
+├── 0-Core/
+│   └── GameEvents.cs                    (partial: OnPickaxeHit)
+└── _-Systems/
+    └── ToolSystem/
+        ├── ToolBase.cs                  → BaseHeldTool: framework
+        ├── Interface/                   → 7 owned interfaces
+        │   ├── IDamageable.cs
+        │   ├── ICrushable.cs
+        │   ├── IMagnetGrabbable.cs
+        │   ├── IScannable.cs
+        │   ├── IHammerTarget.cs
+        │   ├── ISupportToggleable.cs
+        │   └── IMoldReceiver.cs
+        ├── ToolBaseSub/
+        │   ├── ToolPickaxe.cs
+        │   ├── ToolHardHat.cs
+        │   ├── ToolMagnet.cs
+        │   ├── ToolHammer.cs
+        │   ├── ToolMiningHat.cs
+        │   ├── ToolSupportsWrench.cs
+        │   ├── ToolResourceScanner.cs
+        │   ├── ToolBuilder.cs           (stub — Phase D replaces)
+        │   └── ToolCastingMold.cs
+        ├── Bridge/
+        │   └── ItemEquipBridge.cs
+        └── Dependency.md
+```
+
+---
+
+## Script Purpose
+
+```
+BaseHeldTool           → "I'm the base class — pickup, equip, drop, input routing"
+ToolPickaxe            → "I swing and delayed-raycast → ICrushable + IDamageable"
+ToolHardHat            → "I'm a ToolPickaxe with a different SavableObjectID"
+ToolMagnet             → "I pull Rigidbodies via SpringJoint, filter via IMagnetGrabbable"
+ToolHammer             → "I raycast → IHammerTarget for take/pack buildings"
+ToolMiningHat          → "I toggle a light on equip/unequip"
+ToolSupportsWrench     → "I raycast → ISupportToggleable for scaffolding toggle"
+ToolResourceScanner    → "I raycast → IScannable for display name on HUD"
+ToolBuilder            → "I show ghost + place buildings via IBuildingToolContext"
+RapidAutoMinerDrillBit → "I attach to a drill host, track durability, swap meshes"
+ToolCastingMold        → "I swing → IMoldReceiver for furnace mold insertion"
+ItemEquipBridge        → "I subscribe OnItemEquipped → call SetOwnerContext on item"
+```
+
+---
+
+## Hand-Typing Order
+
+### Group 1 — Interfaces (compile immediately, zero deps)
+1. `IDamageable.cs` → `ICrushable.cs` → `IMagnetGrabbable.cs` → `IScannable.cs`
+2. `IHammerTarget.cs` → `ISupportToggleable.cs` → `IMoldReceiver.cs`
+
+**Stop & compile** ✅
+
+### Group 2 — Base + Tools (compile with Phase B shared infra)
+3. `ToolBase.cs` (BaseHeldTool)
+4. `ToolMiningHat.cs` (simplest tool — light toggle)
+5. `ToolPickaxe.cs` → `ToolHardHat.cs`
+6. `ToolMagnet.cs`
+7. `ToolHammer.cs` → `ToolSupportsWrench.cs`
+8. `ToolResourceScanner.cs` → `ToolCastingMold.cs`
+9. `ToolBuilder.cs` (complete — uses IBuildingToolContext)
+10. `RapidAutoMinerDrillBit.cs`
+10. `Bridge/ItemEquipBridge.cs`
+11. `0-Core/GameEvents.cs` (partial: OnPickaxeHit)
+
+**Stop & test with ToolActionTest** ✅
+
+---
+
+## Key Architectural Principle
+
+**Caller-defines pattern.** ToolSystem owns ALL 7 interfaces it calls. Other phases just `implement` them. This means:
+
+- Copy ToolSystem folder → you get EVERY interface your tools need
+- No dependency on any other `_-Systems/` folder's interface files
+- Each tool does `GetComponent<IXxx>()` — returns null if implementing phase isn't typed → code path skips
+
+**Zero concrete cross-phase imports.** The only non-interface, non-FREE references are:
+- `IInteractable` (InteractionSystem A) — BaseHeldTool implements
+- `IInventoryItem` (InventorySystem B) — BaseHeldTool implements
+- `IHighlightable` (HighlightSystem B) — BaseHeldTool implements
+- `GameEvents` — FREE infra
+- `BaseSellableItem` — FREE infra (inheritance chain)
+
+---
+
+## Modifications to Earlier Phases
+
+### 1. `phase-b/Scripts/_-Systems/DamageSystem/` — **DELETED**
+
+IDamageable moved into ToolSystem/Interface/. DamageSystem was 7 lines — not a real system. The interface now lives with its caller (ToolPickaxe).
+
+### 2. `phase-b/Scripts/4-Utils/UtilsPhaseB.cs` — **ADD** SimpleExplosion
+
+```csharp
+// ← ADD: ToolPickaxe uses this for crush physics explosion. Pure physics, no Phase C dep.
+public static void SimpleExplosion(Vector3 center, float radius, float force, float upward)
+{
+    foreach (var col in Physics.OverlapSphere(center, radius))
+    {
+        Rigidbody rb = col.attachedRigidbody;
+        if (rb != null) rb.AddExplosionForce(force, center, radius, upward, ForceMode.Impulse);
+    }
+}
+```
+
+---
+
+## Source vs Phase Diff
+
+| Original | Our approach |
+|----------|-------------|
+| ToolPickaxe imports `OrePiece` | `GetComponent<ICrushable>()` |
+| ToolMagnet reads `OrePiece.CurrentMagnetTool` | `IMagnetGrabbable.SetMagnetHolder()` |
+| ToolHammer calls `BuildingObject.TryTakeOrPack()` | `IHammerTarget.OnHammerPrimary()` |
+| ToolResourceScanner checks 8 concrete types | `IScannable.GetScanDisplayName()` |
+| ToolCastingMold imports `CastingFurnaceMoldArea` | `IMoldReceiver.InsertMold(int)` |
+| BaseHeldTool.Owner = `PlayerController` | `SetOwnerContext(cam, container, magnetPos)` |
+| `FindObjectOfType<PlayerInventory>` | `GameEvents.RaiseToolPickupRequested` |
+| `ParticleManager.CreateParticle()` | `GameEvents.RaisePickaxeHit` |
+
+---
+
+## Systems & Testability
+
+| System | Scripts | Decoupling |
+|--------|---------|-----------|
+| **ToolSystem** | 12 code + 7 interfaces | Caller-defines all interfaces. GameEvents for cross-system. Bridge for player context. |
+
+**1 system, 19 files, zero concrete cross-phase imports.**
+
+<!-- ==== FILE: learn/phase-b-1/Scripts/0-Core/GameEvents.cs ==== -->
+using System;
+using UnityEngine;
+
+/// <summary>
+/// Phase B-1 partial — pickaxe hit event for particle decoupling.
+/// ToolPickaxe fires RaisePickaxeHit. ParticleManager subscribes in Phase C.
+/// </summary>
+public static partial class GameEvents
+{
+	// when pickaxe hits something (ore node, ore piece, or generic surface) >>
+	public static event Action<Vector3, Vector3, bool> OnPickaxeHit;
+	public static void RaisePickaxeHit(Vector3 hitPoint, Vector3 hitNormal, bool isDamageable)
+	{
+		LogSubscribersCount(nameof(OnPickaxeHit), OnPickaxeHit);
+		OnPickaxeHit?.Invoke(hitPoint, hitNormal, isDamageable);
+	}
+	// << when pickaxe hits something
+}
+
+<!-- ==== FILE: learn/phase-b-1/Scripts/_-Systems/ToolSystem/Bridge/ItemEquipBridge.cs ==== -->
+using UnityEngine;
+
+// deps: IInventoryItem (InventorySystem — interface only), GameEvents (FREE)
+
+/// <summary>
+/// Bridges inventory equip events to items that need player context.
+/// Sits on Player GO alongside PlayerMovement. Subscribes to OnItemEquipped →
+/// calls item.SetOwnerContext(cam, container, magnetPos).
+///
+/// This is the ONLY script that connects PlayerSystem to ToolSystem.
+/// Lives in ToolSystem (not PlayerSystem) because it references IInventoryItem.
+/// </summary>
+[AddComponentMenu("MineMGL/Bridge/ItemEquipBridge")]
+public class ItemEquipBridge : MonoBehaviour
+{
+	[SerializeField] Camera _cam;
+	[SerializeField] Transform _viewModelContainer;
+	[SerializeField] Transform _magnetToolPos;
+
+	void Start()
+	{
+		// purpose: send player context to equipped item so it can raycast + parent ViewModel
+		GameEvents.OnItemEquipped += (item) => item.SetOwnerContext(_cam, _viewModelContainer, _magnetToolPos);
+	}
+}
+
+<!-- ==== FILE: learn/phase-b-1/Scripts/_-Systems/ToolSystem/Dependency.md ==== -->
+# ToolSystem — Dependency Map
+
+> **L5 ✅ Portable** — 5 interface deps (IInteractable, IInventoryItem, IHighlightable, ISaveLoadableObject, IIconItem),
+> **9 owned interfaces**, zero concrete cross-phase imports.
+> Copy this folder + 5 interface files → compiles in any Unity project.
+> **Every tool is complete code (not stubs).** Future phases only provide bridge implementations.
+
+---
+
+## What I Am
+
+Every equippable tool in the game. One base class (`BaseHeldTool`) handles the shared lifecycle
+(pickup, equip, drop, input routing, ViewModel/WorldModel swap). 9 subclasses override
+PrimaryFire/SecondaryFire/Reload/QButtonPressed for their specific action.
+
+**Caller-defines pattern:** ToolSystem owns ALL interfaces it calls (`IDamageable`, `ICrushable`,
+`IHammerTarget`, `ISupportToggleable`, `IMoldReceiver`, `IMagnetGrabbable`, `IScannable`).
+Other phases implement them on their objects. Tools do `GetComponent<IXxx>()` — returns null
+if the phase isn't typed → code path skips → tool still compiles and runs.
+
+---
+
+## File Layout
+
+```
+ToolSystem/
+├── ToolBase.cs                  → BaseHeldTool: framework
+├── Interface/                   → ALL 11 owned interfaces
+│   ├── IDamageable.cs           → TakeDamage(float, Vector3)
+│   ├── ICrushable.cs            → CanCrush(), TryCrush()
+│   ├── IMagnetGrabbable.cs      → SetMagnetHolder, ClearMagnetHolder, IsInBasket, IsOnConveyor
+│   ├── IScannable.cs            → GetScanDisplayName()
+│   ├── IHammerTarget.cs         → OnHammerPrimary(), OnHammerSecondary()
+│   ├── ISupportToggleable.cs    → SetSupportsEnabled(bool)
+│   ├── IMoldReceiver.cs         → InsertMold(int)
+│   ├── IBuildingToolContext.cs   → ghost, place, rotate, cleanup, dropAsCrate (15 methods)
+│   ├── IDrillBitHost.cs         → GetDrillSpeed, AttachDrillBit, DetachDrillBit, GetIsOn
+│   └── IIconItem.cs             → GetIcon()
+├── ToolBaseSub/
+│   ├── ToolPickaxe.cs           → ICrushable + IDamageable
+│   ├── ToolHardHat.cs           → extends ToolPickaxe (empty)
+│   ├── ToolMagnet.cs            → IMagnetGrabbable
+│   ├── ToolHammer.cs            → IHammerTarget
+│   ├── ToolMiningHat.cs         → light toggle (pure, no interfaces)
+│   ├── ToolSupportsWrench.cs    → ISupportToggleable
+│   ├── ToolResourceScanner.cs   → IScannable
+│   ├── ToolBuilder.cs           → IBuildingToolContext (complete — no stub)
+│   ├── ToolCastingMold.cs       → IMoldReceiver
+│   └── RapidAutoMinerDrillBit.cs → IDrillBitHost + durability + mesh swap
+├── Bridge/
+│   └── ItemEquipBridge.cs       → OnItemEquipped → SetOwnerContext
+└── Dependency.md                → this file
+```
+
+---
+
+## Internal File Dependency Graph
+
+```
+  ┌── ToolSystem/ ──────────────────────────────────────────────────
+  │
+  │  INTERNAL
+  │  BaseHeldTool (ToolBase.cs)
+  │    extends BaseSellableItem (FREE)
+  │    implements IInventoryItem + IHighlightable + IInteractable
+  │    OnEquipped → fires RaiseItemEquipped(this)
+  │    HandleActiveInput → routes LMB/RMB/R/Q to subclass
+  │    DropItem → show WorldModel, apply velocity
+  │    SetOwnerContext(cam, container, magnetPos) — decouples from player
+  │         │ extends
+  │  ToolBaseSub/
+  │    ├── ToolPickaxe ──── GetComponent<ICrushable>() + GetComponent<IDamageable>()
+  │    │     └── ToolHardHat (empty subclass)
+  │    ├── ToolMagnet ───── GetComponent<IMagnetGrabbable>()
+  │    ├── ToolHammer ───── GetComponentInParent<IHammerTarget>()
+  │    ├── ToolMiningHat ── toggle light (no interfaces)
+  │    ├── ToolSupportsWrench ── GetComponentInParent<ISupportToggleable>()
+  │    ├── ToolResourceScanner ── GetComponentInParent<IScannable>()
+  │    ├── ToolBuilder ──── IBuildingToolContext (complete, not stub)
+  │    ├── ToolCastingMold ── GetComponent<IMoldReceiver>()
+  │    └── RapidAutoMinerDrillBit ── IDrillBitHost + durability + mesh swap
+  │         │
+  │  Bridge/ItemEquipBridge
+  │    sits on Player GO, subscribes OnItemEquipped
+  │    calls item.SetOwnerContext(cam, container, magnetPos)
+  │
+  ├── BOUNDARY ─────────────────────────────────────────────────────
+  │
+  │  OWNED INTERFACES (9 — live in Interface/ subfolder):
+  │    ◆ IDamageable ◆           → OreNode(C), DamageableOrePiece(C)
+  │    ◆ ICrushable ◆            → OrePiece(C)
+  │    ◆ IMagnetGrabbable ◆      → OrePiece(C)
+  │    ◆ IScannable ◆            → OreNode(C), OrePiece(C), BuildingObject(D), etc.
+  │    ◆ IHammerTarget ◆         → BuildingObject(D), BuildingCrate(D)
+  │    ◆ ISupportToggleable ◆    → BuildingObject(D)
+  │    ◆ IMoldReceiver ◆         → CastingFurnaceMoldArea(E)
+  │    ◆ IBuildingToolContext ◆   → BuildingToolBridge(D)
+  │    ◆ IDrillBitHost ◆         → RapidAutoMiner(E)
+  │
+  │  IMPORTED INTERFACES (5 — BaseHeldTool implements these):
+  │    ◆ IInteractable ◆      ←── InteractionSystem (A)
+  │    ◆ IInventoryItem ◆     ←── InventorySystem (B)
+  │    ◆ IHighlightable ◆     ←── HighlightSystem (B)
+  │    ◆ ISaveLoadableObject ◆ ←── Phase G stub
+  │    ◆ IIconItem ◆          ←── Phase B (display contract)
+  │
+  ├── EXTERNAL ─────────────────────────────────────────────────────
+  │
+  │  OUT: → OnToolPickupRequested(IInventoryItem) ── InventoryOrchestrator
+  │  OUT: → OnItemEquipped(IInventoryItem) ── PlayerGrab, HighlightSystem
+  │  OUT: → OnPickaxeHit(pos, normal, isDamageable) ── ParticleManager(C)
+  │  IN:  ← OnItemEquipped(IInventoryItem) ── ItemEquipBridge → SetOwnerContext
+  │
+  └─────────────────────────────────────────────────────────────────
+```
+
+---
+
+## FREE Infra (doesn't count toward level)
+
+| What | From | Used for |
+|------|------|---------|
+| GameEvents | phase-All 0-Core/ | RaiseToolPickupRequested, RaiseItemEquipped, RaisePickaxeHit |
+| GlobalEnumsB | phase-b 2-Data/Enums/ | InteractionType, AnimParamType, MagnetToolSelectionMode, SavableObjectID |
+| BasePhysicsObject → BaseSellableItem | phase-b 3-MonoBehaviours/Physics/ | Inheritance chain |
+| UtilsPhaseB | phase-b 4-Utils/ | IgnoreAllCollisions, SimpleExplosion |
+| SPACE_UTIL / INPUT.K | user utilities | InstantDown, colorTag |
+
+---
+
+## Graceful Degradation
+
+| Missing phase | Affected tool | What happens |
+|--------------|--------------|-------------|
+| No Phase C (no ICrushable) | ToolPickaxe | Skips crush. Still does IDamageable + AddForce. ✅ |
+| No Phase C (no IDamageable) | ToolPickaxe | Swings into air. ⚠️ expected |
+| No Phase C (no IMagnetGrabbable) | ToolMagnet | Grabs everything. No filter, no holder. ✅ |
+| No Phase D (no IHammerTarget) | ToolHammer | Raycast finds nothing. ⚠️ expected |
+| No Phase D (no ISupportToggleable) | ToolSupportsWrench | Raycast finds nothing. ⚠️ expected |
+| No Phase D+ (no IScannable impls) | ToolResourceScanner | Shows "Unknown". ✅ |
+| No Phase E (no IMoldReceiver) | ToolCastingMold | Generic whack tool. ✅ |
+
+---
+
+## vs Original Source
+
+| Original | Our approach | Why |
+|----------|-------------|-----|
+| ToolPickaxe imports `OrePiece` directly | `GetComponent<ICrushable>()` | Zero concrete import |
+| ToolMagnet reads `OrePiece.CurrentMagnetTool` | `IMagnetGrabbable.SetMagnetHolder()` | Zero concrete import |
+| ToolHammer calls `BuildingObject.TryTakeOrPack()` | `IHammerTarget.OnHammerPrimary()` | Zero concrete import |
+| ToolResourceScanner checks 8 concrete types | `IScannable.GetScanDisplayName()` | One interface replaces all |
+| ToolCastingMold imports `CastingFurnaceMoldArea` | `IMoldReceiver.InsertMold(int)` | Zero concrete import |
+| BaseHeldTool.Owner = `PlayerController` | `SetOwnerContext(cam, container, magnetPos)` | Tool doesn't know player |
+| BaseHeldTool uses `FindObjectOfType<PlayerInventory>` | `GameEvents.RaiseToolPickupRequested` | No FindObjectOfType |
+| ParticleManager.CreateParticle() direct | `GameEvents.RaisePickaxeHit` | ParticleManager subscribes |
+
+**100% original functionality preserved.** Interface boundary invisible at runtime.
+
+<!-- ==== FILE: learn/phase-b-1/Scripts/_-Systems/ToolSystem/Interface/IBuildingToolContext.cs ==== -->
+using UnityEngine;
+
+/// <summary>
+/// Provides building placement context to ToolBuilder without importing BuildingManager.
+/// Phase D creates BuildingToolBridge (implements this) and pushes it to ToolBuilder
+/// via GameEvents.OnItemEquipped → SetBuildingContext(this). Same pattern as ItemEquipBridge.
+///
+/// ToolSystem OWNS this interface (caller-defines pattern).
+/// Implementors: BuildingToolBridge (Phase D).
+/// Callers: ToolBuilder (Phase B-1).
+/// </summary>
+public interface IBuildingToolContext
+{
+    void UpdateGhost(Vector3 aimPoint, Quaternion rotation, int prefabIndex);
+    bool CanPlace();
+    void Place();
+    void Rotate(bool isSnapped);
+    void Mirror();
+    void Cleanup();
+    void DropAsCrate(Vector3 position, Quaternion rotation, int quantity);
+    void ShowNodes(bool show, int prefabIndex);
+    bool GetIsSnapped();
+    Sprite GetIcon();
+    string GetName();
+    string GetDescription();
+    int GetMaxStackSize();
+    int GetPrefabCount();
+    string GetQButtonLabel();
+}
+
+<!-- ==== FILE: learn/phase-b-1/Scripts/_-Systems/ToolSystem/Interface/ICrushable.cs ==== -->
+/// <summary>
+/// Any object that can be crushed by a special pickaxe. ToolPickaxe checks CanCrush()
+/// then calls TryCrush() which converts the object into a smaller variant.
+/// OrePiece implements this in Phase C — checks CrushedPrefab + PieceType internally.
+///
+/// ToolSystem OWNS this interface (caller-defines pattern).
+/// Implementors: OrePiece (Phase C).
+/// Callers: ToolPickaxe (Phase B-1).
+/// </summary>
+public interface ICrushable
+{
+    bool CanCrush();
+    bool TryCrush();
+}
+
+<!-- ==== FILE: learn/phase-b-1/Scripts/_-Systems/ToolSystem/Interface/IDamageable.cs ==== -->
+using UnityEngine;
+
+/// <summary>
+/// Any object that can take damage at a world position. ToolPickaxe calls TakeDamage
+/// on whatever the raycast hits. OreNode implements this to lose health and break.
+/// DamageableOrePiece implements this to split into cluster pieces on collision.
+///
+/// ToolSystem OWNS this interface (caller-defines pattern).
+/// Implementors: OreNode (Phase C), DamageableOrePiece (Phase C).
+/// Callers: ToolPickaxe (Phase B-1).
+/// </summary>
+public interface IDamageable
+{
+    void TakeDamage(float damage, Vector3 position);
+}
+
+<!-- ==== FILE: learn/phase-b-1/Scripts/_-Systems/ToolSystem/Interface/IDrillBitHost.cs ==== -->
+/// <summary>
+/// Provides drill speed + attach/detach for RapidAutoMinerDrillBit without importing RapidAutoMiner.
+/// Phase E's RapidAutoMiner implements this. Drill bit is pushed the host ref when physically
+/// inserted into the machine (via interaction or save load).
+///
+/// ToolSystem OWNS this interface (caller-defines pattern).
+/// Implementors: RapidAutoMiner (Phase E).
+/// Callers: RapidAutoMinerDrillBit (Phase B-1).
+/// </summary>
+public interface IDrillBitHost
+{
+    float GetDrillSpeed();
+    void AttachDrillBit(UnityEngine.MonoBehaviour drillBit);
+    void DetachDrillBit();
+    bool GetIsOn();
+}
+
+<!-- ==== FILE: learn/phase-b-1/Scripts/_-Systems/ToolSystem/Interface/IHammerTarget.cs ==== -->
+/// <summary>
+/// Any object the hammer tool can interact with. Primary = take/pickup, Secondary = pack.
+/// BuildingObject implements: Primary → TryTakeOrPack, Secondary → Pack.
+/// BuildingCrate implements: Primary → TryAddToInventory, Secondary → nothing.
+///
+/// ToolSystem OWNS this interface (caller-defines pattern).
+/// Implementors: BuildingObject (Phase D), BuildingCrate (Phase D).
+/// Callers: ToolHammer (Phase B-1).
+/// </summary>
+public interface IHammerTarget
+{
+    void OnHammerPrimary();
+    void OnHammerSecondary();
+}
+
+<!-- ==== FILE: learn/phase-b-1/Scripts/_-Systems/ToolSystem/Interface/IMagnetGrabbable.cs ==== -->
+/// <summary>
+/// Any object that the magnet tool can track for filtering and detach callbacks.
+/// ToolMagnet calls SetMagnetHolder when grabbing, ClearMagnetHolder when releasing.
+/// Filter modes check IsInBasket/IsOnConveyor to skip objects in baskets or on belts.
+/// Without implementation: magnet grabs everything, no filter, no holder tracking.
+///
+/// ToolSystem OWNS this interface (caller-defines pattern).
+/// Implementors: OrePiece (Phase C).
+/// Callers: ToolMagnet (Phase B-1).
+/// </summary>
+public interface IMagnetGrabbable
+{
+    void SetMagnetHolder(UnityEngine.MonoBehaviour holder);
+    void ClearMagnetHolder();
+    bool IsInBasket();
+    bool IsOnConveyor();
+}
+
+<!-- ==== FILE: learn/phase-b-1/Scripts/_-Systems/ToolSystem/Interface/IMoldReceiver.cs ==== -->
+/// <summary>
+/// Any object that can receive a casting mold from ToolCastingMold.
+/// CastingFurnaceMoldArea implements: inserts the mold type into the furnace slot.
+/// Mold type passed as int — Phase E casts back to CastingMoldType enum.
+///
+/// ToolSystem OWNS this interface (caller-defines pattern).
+/// Implementors: CastingFurnaceMoldArea (Phase E).
+/// Callers: ToolCastingMold (Phase B-1).
+/// </summary>
+public interface IMoldReceiver
+{
+    void InsertMold(int moldType);
+}
+
+<!-- ==== FILE: learn/phase-b-1/Scripts/_-Systems/ToolSystem/Interface/IScannable.cs ==== -->
+/// <summary>
+/// Any world object that the resource scanner can display a name for.
+/// Each phase adds implementations on its objects. Without implementations,
+/// scanner shows "Unknown" for everything — still compiles and runs.
+///
+/// ToolSystem OWNS this interface (caller-defines pattern).
+/// Implementors: OreNode(C), OrePiece(C), SellerMachine(C), BuildingObject(D),
+///   BuildingCrate(D), BuildingPlacementNode(D), ComputerTerminal(A).
+/// Callers: ToolResourceScanner (Phase B-1).
+/// </summary>
+public interface IScannable
+{
+    string GetScanDisplayName();
+}
+
+<!-- ==== FILE: learn/phase-b-1/Scripts/_-Systems/ToolSystem/Interface/ISupportToggleable.cs ==== -->
+/// <summary>
+/// Any building that has scaffolding supports that can be toggled on/off.
+/// BuildingObject implements: enables/disables ModularBuildingSupports children.
+///
+/// ToolSystem OWNS this interface (caller-defines pattern).
+/// Implementors: BuildingObject (Phase D).
+/// Callers: ToolSupportsWrench (Phase B-1).
+/// </summary>
+public interface ISupportToggleable
+{
+    void SetSupportsEnabled(bool enabled);
+}
+
+<!-- ==== FILE: learn/phase-b-1/Scripts/_-Systems/ToolSystem/ToolBase.cs ==== -->
+using System.Collections;
+using System.Collections.Generic;
+using HighlightPlus;
+using UnityEngine;
+using SPACE_UTIL;
+
+// deps: IInteractable (InteractionSystem A), IInventoryItem (InventorySystem B),
+//       IHighlightable (HighlightSystem B), ISaveLoadableObject (Phase G stub)
+// FREE: GameEvents, GlobalEnumsB, BaseSellableItem, SPACE_UTIL, INPUT.K
+// ZERO concrete imports from any _-Systems/ folder.
+
+/// <summary>
+/// I'm the base class every equippable tool inherits from (ToolPickaxe, ToolMagnet, etc.).
+/// I handle the shared lifecycle: pickup via "Take" fires RaiseToolPickupRequested so
+/// InventoryOrchestrator adds me to a hotbar slot. When equipped, my ViewModel shows in front
+/// of the camera (parented to ownerViewModelContainer). When dropped (G key), I unparent, show
+/// WorldModel, and fly forward with velocity. Subclasses override PrimaryFire, SecondaryFire, etc.
+///
+/// I implement IInteractable (interaction wheel), IInventoryItem (inventory slot),
+/// IHighlightable (outline on hover), ISaveLoadableObject (Phase G stub).
+/// I never reference PlayerMovement — I receive camera + transforms via SetOwnerContext
+/// which is called by ItemEquipBridge (Bridge/) subscribing to OnItemEquipped.
+///
+/// Who uses me: InventoryOrchestrator (equip/drop/switch), ItemEquipBridge (SetOwnerContext).
+/// Events I fire: RaiseToolPickupRequested (on "Take"), RaiseItemEquipped (on equip).
+/// </summary>
+[AddComponentMenu("MineMGL/Tools/BaseHeldTool")]
+public class BaseHeldTool : BaseSellableItem, IInteractable, ISaveLoadableObject, IHighlightable, IInventoryItem
+{
+	#region Inspector Fields
+	[SerializeField] SavableObjectID _savableObjectID;
+	[SerializeField] string _name = "test";
+	[TextArea] [SerializeField] string _description = "description";
+	[SerializeField] Sprite _programmerIcon;
+	[SerializeField] Sprite _inventoryIcon;
+	[SerializeField] int _quantity = 1;
+	[SerializeField] int _maxAmount = 1;
+	[SerializeField] bool _equipWhenPickedUp;
+	[SerializeField] bool _shouldUseInteractionWheel = true;
+	[SerializeField] protected GameObject _worldModel;
+	[SerializeField] protected GameObject _viewModel;
+	[SerializeField] protected Animator _viewModelAnimator;
+	[SerializeField] List<SO_InteractionOption> _interactions;
+	[Header("Highlight")]
+	[SerializeField] HighlightProfile _highlightProfile;
+	#endregion
+
+	#region Protected State — subclasses use ownerCam for raycast
+	protected Camera ownerCam;
+	protected Transform ownerViewModelContainer;
+	protected Transform ownerMagnetToolPos;
+	#endregion
+
+	#region Protected Write — ToolBuilder.Setup() needs these
+	protected string toolName { set => _name = value; }
+	protected string toolDescription { set => _description = value; }
+	protected int toolMaxAmount { set => _maxAmount = value; }
+	#endregion
+
+	#region IInventoryItem
+	public string GetName() => _name;
+	public string GetDescription() => _description;
+	public virtual int GetQty() => _quantity;
+	public virtual void SetQty(int val) => _quantity = val;
+	public virtual void AddQty(int delta) => _quantity += delta;
+	public virtual int GetMaxAmount() => _maxAmount;
+	public bool GetShouldEquipWhenPickedUp() => _equipWhenPickedUp;
+	public virtual Sprite GetIcon() => _inventoryIcon ?? _programmerIcon;
+	public GameObject GetGameObject() => gameObject;
+	/// <summary> Drop one from stack — ToolBuilder overrides to instantiate BuildingCrate. </summary>
+	public virtual void DropOneFromStack(Camera cam) { }
+	/// <summary> Receives camera + viewmodel container + magnet pos from ItemEquipBridge.
+	/// Tool never knows PlayerMovement exists — only stores the transforms it needs. </summary>
+	public void SetOwnerContext(Camera cam, Transform viewModelContainer, Transform magnetToolPos)
+	{
+		// → store refs for raycasting + parenting
+		ownerCam = cam;
+		ownerViewModelContainer = viewModelContainer;
+		ownerMagnetToolPos = magnetToolPos;
+	}
+	/// <summary> Called when inventory equips me — fires OnItemEquipped so ItemEquipBridge sends
+	/// context, then re-parents to ViewModelContainer. </summary>
+	public virtual void OnEquipped()
+	{
+		// purpose: ItemEquipBridge subscribes → calls SetOwnerContext with player transforms
+		GameEvents.RaiseItemEquipped(this);
+		// → re-parent to ViewModelContainer (OnEnable ran before context arrived)
+		if (ownerViewModelContainer != null)
+		{
+			HideWorldModel();
+			HideViewModel(hide: false);
+			transform.position = ownerViewModelContainer.position;
+			transform.rotation = ownerViewModelContainer.rotation;
+			transform.parent = ownerViewModelContainer;
+		}
+	}
+	/// <summary> Label for the info panel equip button — ToolBuilder overrides to "Build". </summary>
+	public virtual string GetEquipButtonLabel() => "Equip";
+	/// <summary> Returns keybind help text shown on HUD. Phase H overrides with KeybindManager. </summary>
+	public virtual string GetControlsText() => "Drop - G";
+	/// <summary> Per-frame input routing when I'm the active item. </summary>
+	public virtual void HandleActiveInput()
+	{
+		// → route input to virtual methods — subclasses override what they need
+		if (INPUT.K.InstantDown(KeyCode.Mouse0)) PrimaryFire();
+		if (Input.GetMouseButton(0)) PrimaryFireHeld();
+		if (INPUT.K.InstantDown(KeyCode.Mouse1)) SecondaryFire();
+		if (Input.GetMouseButton(1)) SecondaryFireHeld();
+		if (INPUT.K.InstantDown(KeyCode.R)) Reload();
+		if (INPUT.K.InstantDown(KeyCode.Q)) QButtonPressed();
+	}
+	#endregion
+
+	#region Tool Actions — virtual, subclasses override
+	public virtual void PrimaryFire()
+	{
+		if (_viewModelAnimator != null) _viewModelAnimator.Play(AnimParamType.attack1.ToString(), -1, 0f);
+	}
+	public virtual void PrimaryFireHeld() { }
+	public virtual void SecondaryFire() { }
+	public virtual void SecondaryFireHeld() { }
+	public virtual void Reload() { }
+	public virtual void QButtonPressed() { }
+	#endregion
+
+	#region Equip / Drop
+	/// <summary> Drop this tool from inventory to world — unparent, show WorldModel, apply velocity. </summary>
+	public virtual void DropItem()
+	{
+		// → show in world
+		gameObject.SetActive(true);
+		HideWorldModel(hide: false);
+		HideViewModel();
+		// → launch forward from camera
+		Rigidbody rb = GetComponentInChildren<Rigidbody>();
+		if (rb != null && ownerCam != null)
+		{
+			transform.parent = null;
+			rb.isKinematic = false;
+			rb.transform.position = ownerCam.transform.position + ownerCam.transform.forward * 0.5f;
+			rb.linearVelocity = ownerCam.transform.forward * 5f;
+			rb.rotation = ownerCam.transform.rotation;
+		}
+		// → clear owner refs
+		ownerCam = null;
+		ownerViewModelContainer = null;
+		ownerMagnetToolPos = null;
+	}
+	/// <summary> Called when tool becomes active — hides world, shows view. </summary>
+	public virtual void Equip() { HideWorldModel(); HideViewModel(hide: false); }
+	/// <summary> Called when tool is deactivated — hides view. </summary>
+	public virtual void UnEquip() { HideViewModel(); }
+	protected virtual void HideViewModel(bool hide = true) => _viewModel?.SetActive(!hide);
+	protected virtual void HideWorldModel(bool hide = true) => _worldModel?.SetActive(!hide);
+	#endregion
+
+	#region IInteractable
+	public bool ShouldUseInteractionWheel() => _shouldUseInteractionWheel;
+	public List<SO_InteractionOption> GetOptions() => _interactions;
+	public string GetObjectName() => _name;
+	public virtual void Interact(SO_InteractionOption selectedOption)
+	{
+		if (selectedOption.interactionType == InteractionType.take)
+		{
+			// purpose: InventoryOrchestrator adds this tool to hotbar
+			GameEvents.RaiseToolPickupRequested(this);
+		}
+		else if (selectedOption.interactionType == InteractionType.destroy)
+		{
+			Destroy(gameObject);
+		}
+	}
+	#endregion
+
+	#region IHighlightable
+	public virtual HighlightProfile GetHighlightProfile() => _highlightProfile;
+	#endregion
+
+	#region ISaveLoadableObject (Phase G stub)
+	public bool HasBeenSaved { get; set; }
+	public bool ShouldBeSaved() => true;
+	public SavableObjectID GetSavableObjectID() => _savableObjectID;
+	public Vector3 GetPosition() => _worldModel != null ? _worldModel.transform.position : transform.position;
+	public Vector3 GetRotation() => _worldModel != null ? _worldModel.transform.rotation.eulerAngles : transform.rotation.eulerAngles;
+	public virtual void LoadFromSave(string json) { /* Phase G */ }
+	public virtual string GetCustomSaveData() => "{}";
+	protected IEnumerator WaitThenAddToInventory(int index = -1)
+	{
+		yield return new WaitForFixedUpdate();
+		if (gameObject != null) GameEvents.RaiseToolPickupRequested(this);
+	}
+	#endregion
+
+	#region Unity Lifecycle
+	/// <summary> On enable: if no owner context yet, show WorldModel (on ground). If owned, parent to ViewModelContainer. </summary>
+	protected override void OnEnable()
+	{
+		base.OnEnable();
+		if (ownerViewModelContainer == null)
+		{
+			// → no owner = on ground, show world model
+			HideViewModel();
+			HideWorldModel(hide: false);
+			return;
+		}
+		// → owned = equip visual
+		HideWorldModel();
+		HideViewModel(hide: false);
+		if (transform.parent == null || transform.parent != ownerViewModelContainer)
+		{
+			transform.position = ownerViewModelContainer.position;
+			transform.rotation = ownerViewModelContainer.rotation;
+			transform.parent = ownerViewModelContainer;
+		}
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-b-1/Scripts/_-Systems/ToolSystem/ToolBaseSub/RapidAutoMinerDrillBit.cs ==== -->
+using System.Collections;
+using UnityEngine;
+
+// deps: IDrillBitHost (owned) — ZERO concrete phase imports
+// Phase E's RapidAutoMiner implements IDrillBitHost.
+// Without Phase E: host is null → drill does nothing. Compiles fine.
+
+/// <summary>
+/// I'm a drill bit tool that attaches to a RapidAutoMiner via IDrillBitHost.
+/// I have durability (MaxDrillTimeSeconds) — as I drill, _currentDrillTimeSeconds increases.
+/// DrillSpeedByDurabilityCurve maps wear % to drill speed multiplier.
+/// I swap between 3 meshes: New (fresh), Used (worn), Broken (depleted).
+/// Sell value changes based on durability state.
+///
+/// SetDrillBitHost is called when physically inserted into the machine (Phase E interaction).
+/// Without Phase E: host stays null → tool is just a pickaxe-style whack tool.
+///
+/// Who uses me: InventoryOrchestrator (HandleActiveInput), Phase E RapidAutoMiner (SetDrillBitHost).
+/// </summary>
+[AddComponentMenu("MineMGL/Tools/RapidAutoMinerDrillBit")]
+public class RapidAutoMinerDrillBit : BaseHeldTool
+{
+	#region Inspector Fields
+	[Header("DrillBit")]
+	[SerializeField] float _maxDrillTimeSeconds = 60f;
+	[SerializeField] bool _lastsForever;
+	[SerializeField] AnimationCurve _drillSpeedByDurabilityCurve;
+	[SerializeField] float _newSellPrice;
+	[SerializeField] float _brokenSellPrice;
+	[SerializeField] Mesh _newMesh;
+	[SerializeField] Mesh _usedMesh;
+	[SerializeField] Mesh _brokenMesh;
+	[SerializeField] MeshFilter _worldModelDrillBit;
+	[SerializeField] MeshFilter _viewModelDrillBit;
+	[SerializeField] float _useRange = 2f;
+	[SerializeField] float _attackCooldown = 1f;
+	[SerializeField] LayerMask _hitLayers;
+	#endregion
+
+	#region Private State
+	float currentDrillTimeSeconds;
+	float lastAttackTime = -1f;
+	IDrillBitHost host;
+	#endregion
+
+	#region Public API
+	/// <summary> Phase E sets this when drill bit is inserted into RapidAutoMiner. </summary>
+	public void SetDrillBitHost(IDrillBitHost h) => host = h;
+	public IDrillBitHost GetDrillBitHost() => host;
+	public float GetDurabilityPercent() => _lastsForever ? 1f : Mathf.Clamp01(1f - currentDrillTimeSeconds / _maxDrillTimeSeconds);
+	public float GetDrillSpeedMultiplier() => _drillSpeedByDurabilityCurve.Evaluate(GetDurabilityPercent());
+	public bool GetIsBroken() => !_lastsForever && currentDrillTimeSeconds >= _maxDrillTimeSeconds;
+	#endregion
+
+	#region Sell Value
+	public override float GetSellValue()
+	{
+		// → new = full price, broken = broken price, in between = lerp
+		return Mathf.Lerp(_brokenSellPrice, _newSellPrice, GetDurabilityPercent());
+	}
+	#endregion
+
+	#region Mesh Swap
+	/// <summary> Swaps world + view model meshes based on durability state. </summary>
+	void UpdateMeshForDurability()
+	{
+		Mesh target;
+		float pct = GetDurabilityPercent();
+		if (pct > 0.5f) target = _newMesh;
+		else if (pct > 0f) target = _usedMesh;
+		else target = _brokenMesh;
+		if (_worldModelDrillBit != null) _worldModelDrillBit.mesh = target;
+		if (_viewModelDrillBit != null) _viewModelDrillBit.mesh = target;
+	}
+	#endregion
+
+	#region Drill
+	/// <summary> When attached to host: accumulates drill time, updates mesh. </summary>
+	void Update()
+	{
+		if (host == null || !host.GetIsOn()) return;
+		if (_lastsForever) return;
+		// → accumulate drill time
+		currentDrillTimeSeconds += Time.deltaTime;
+		// → update mesh when crossing thresholds
+		UpdateMeshForDurability();
+		// → break if depleted
+		if (GetIsBroken()) { host.DetachDrillBit(); host = null; }
+	}
+	#endregion
+
+	#region Swing (when not attached — acts as whack tool)
+	void SwingPickaxe()
+	{
+		if (ownerCam == null) return;
+		if (_viewModelAnimator != null) _viewModelAnimator.Play(AnimParamType.attack1.ToString(), -1, 0f);
+		StartCoroutine(PerformAttack(0.2f));
+		lastAttackTime = Time.time;
+	}
+
+	IEnumerator PerformAttack(float delaySeconds)
+	{
+		yield return new WaitForSeconds(delaySeconds);
+		if (ownerCam == null) yield break;
+		if (!Physics.Raycast(ownerCam.transform.position, ownerCam.transform.forward, out RaycastHit hit, _useRange, _hitLayers))
+			yield break;
+		// → IDamageable
+		IDamageable damageable = hit.collider.GetComponent<IDamageable>();
+		if (damageable != null)
+		{
+			damageable.TakeDamage(10f, hit.point);
+			GameEvents.RaisePickaxeHit(hit.point, hit.normal, true);
+		}
+		else
+		{
+			GameEvents.RaisePickaxeHit(hit.point, hit.normal, false);
+		}
+		// → physics push
+		Rigidbody rb = hit.collider.GetComponent<Rigidbody>();
+		if (rb != null) rb.AddForceAtPosition(ownerCam.transform.forward * 5f, hit.point, ForceMode.Impulse);
+	}
+
+	public override void PrimaryFire()
+	{
+		if (Time.time - lastAttackTime >= _attackCooldown) SwingPickaxe();
+	}
+	#endregion
+
+	#region Save (Phase G stubs)
+	public override void LoadFromSave(string json) { /* Phase G: restore durability + host ref */ }
+	public override string GetCustomSaveData() => "{}";
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-b-1/Scripts/_-Systems/ToolSystem/ToolBaseSub/ToolBuilder.cs ==== -->
+using UnityEngine;
+
+// deps: IBuildingToolContext (owned) — ZERO concrete phase imports
+// Phase D provides BuildingToolBridge that implements IBuildingToolContext.
+// Without Phase D: buildCtx is null → all building operations are no-ops. Tool compiles.
+
+/// <summary>
+/// I show a ghost preview and place buildings via IBuildingToolContext. Every frame while equipped,
+/// I raycast from camera, call buildCtx.UpdateGhost to position the ghost, and show placement nodes.
+/// LMB → buildCtx.CanPlace + Place. R → rotate 90° (or mirror if snapped). Q → cycle variant.
+/// G → buildCtx.DropAsCrate. OnDisable → buildCtx.Cleanup.
+///
+/// SetBuildingContext is called by Phase D's BuildingToolBridge on equip (same pattern as ItemEquipBridge).
+/// Without Phase D: buildCtx stays null → tool does nothing → compiles fine.
+///
+/// Who uses me: InventoryOrchestrator (HandleActiveInput), BuildingToolBridge (SetBuildingContext).
+/// </summary>
+[AddComponentMenu("MineMGL/Tools/ToolBuilder")]
+public class ToolBuilder : BaseHeldTool
+{
+	[SerializeField] float _useRange = 3f;
+
+	int currentPrefabIndex;
+	int quantity = 1;
+	Quaternion currentRotation = Quaternion.identity;
+	IBuildingToolContext buildCtx;
+
+	/// <summary> Phase D's BuildingToolBridge calls this on equip to push building context. </summary>
+	public void SetBuildingContext(IBuildingToolContext ctx) => buildCtx = ctx;
+	public IBuildingToolContext GetBuildingContext() => buildCtx;
+
+	/// <summary> Configures from building context — name, description, max stack. </summary>
+	public void Setup()
+	{
+		if (buildCtx != null)
+		{
+			toolName = buildCtx.GetName();
+			toolDescription = buildCtx.GetDescription();
+			currentPrefabIndex = 0;
+			toolMaxAmount = buildCtx.GetMaxStackSize();
+		}
+	}
+
+	public override string GetEquipButtonLabel() => "Build";
+	public override Sprite GetIcon() => buildCtx?.GetIcon();
+	public override int GetQty() => quantity;
+	public override void SetQty(int val) => quantity = val;
+	public override void AddQty(int delta) => quantity += delta;
+	public override int GetMaxAmount() => buildCtx != null ? buildCtx.GetMaxStackSize() : 1;
+
+	public override string GetControlsText()
+	{
+		string text = "Drop - G\nPlace Building - LMB\nRotate - R";
+		if (buildCtx != null && buildCtx.GetPrefabCount() > 1)
+			text += $"\n{buildCtx.GetQButtonLabel()} - Q";
+		return text;
+	}
+
+	/// <summary> Every frame: raycast → buildCtx.UpdateGhost → show placement nodes. </summary>
+	public override void HandleActiveInput()
+	{
+		base.HandleActiveInput();
+		if (ownerCam == null || buildCtx == null) return;
+		// → get build position from camera raycast
+		Vector3 aim = GetBuildPosition();
+		buildCtx.UpdateGhost(aim, currentRotation, currentPrefabIndex);
+		buildCtx.ShowNodes(true, currentPrefabIndex);
+	}
+
+	/// <summary> R: rotate 90°. If snapped → mirror instead. </summary>
+	public override void Reload()
+	{
+		if (buildCtx != null && buildCtx.GetIsSnapped()) { Mirror(); return; }
+		currentRotation *= Quaternion.Euler(0f, 90f, 0f);
+	}
+
+	/// <summary> Q: cycle between prefab variants (normal ↔ mirrored). </summary>
+	public override void QButtonPressed()
+	{
+		if (buildCtx == null) return;
+		currentPrefabIndex++;
+		if (currentPrefabIndex >= buildCtx.GetPrefabCount()) currentPrefabIndex = 0;
+		buildCtx.Cleanup();
+	}
+
+	void Mirror()
+	{
+		if (buildCtx != null && buildCtx.GetPrefabCount() > 1)
+		{
+			currentPrefabIndex = (currentPrefabIndex == 1) ? 0 : 1;
+			buildCtx.Cleanup();
+		}
+	}
+
+	/// <summary> LMB: if can place → place → quantity-- → destroy self at 0. </summary>
+	public override void PrimaryFire()
+	{
+		if (buildCtx == null || !buildCtx.CanPlace()) return;
+		buildCtx.Place();
+		quantity--;
+		if (quantity <= 0) Destroy(gameObject);
+	}
+
+	/// <summary> Drop: spawn crate via buildCtx, destroy self. </summary>
+	public override void DropItem()
+	{
+		if (buildCtx != null && ownerCam != null)
+			buildCtx.DropAsCrate(ownerCam.transform.position + ownerCam.transform.forward * 0.5f, ownerCam.transform.rotation, quantity);
+		quantity = 0;
+		// purpose: InventoryOrchestrator removes this from slot
+		GameEvents.RaiseItemDropped(this);
+		Destroy(gameObject);
+	}
+
+	/// <summary> Cleanup ghost + hide nodes on unequip. </summary>
+	protected override void OnDisable()
+	{
+		base.OnDisable();
+		buildCtx?.Cleanup();
+		buildCtx?.ShowNodes(false, 0);
+	}
+
+	Vector3 GetBuildPosition()
+	{
+		if (Physics.Raycast(ownerCam.transform.position, ownerCam.transform.forward, out RaycastHit hit, _useRange))
+			return hit.point;
+		return ownerCam.transform.position + ownerCam.transform.forward * _useRange;
+	}
+
+	void Start() => Setup();
+}
+
+<!-- ==== FILE: learn/phase-b-1/Scripts/_-Systems/ToolSystem/ToolBaseSub/ToolCastingMold.cs ==== -->
+using System.Collections;
+using UnityEngine;
+
+// deps: IMoldReceiver (owned) — ZERO concrete phase imports
+
+/// <summary>
+/// Swing → delayed raycast → IMoldReceiver.InsertMold (insert mold into furnace slot).
+/// Without IMoldReceiver: acts as generic whack tool (push Rigidbody). Compiles fine.
+/// </summary>
+[AddComponentMenu("MineMGL/Tools/ToolCastingMold")]
+public class ToolCastingMold : BaseHeldTool
+{
+	[SerializeField] int _castingMoldType;
+	[SerializeField] float _useRange = 3f;
+	[SerializeField] float _attackCooldown = 1f;
+	[SerializeField] LayerMask _moldAreaLayer;
+	[SerializeField] LayerMask _hitLayers;
+
+	float lastAttackTime = -1f;
+
+	void SwingPickaxe()
+	{
+		if (ownerCam == null) return;
+		if (_viewModelAnimator != null) _viewModelAnimator.Play(AnimParamType.attack1.ToString(), -1, 0f);
+		StartCoroutine(PerformAttack(0.2f));
+		lastAttackTime = Time.time;
+	}
+
+	IEnumerator PerformAttack(float delaySeconds)
+	{
+		yield return new WaitForSeconds(delaySeconds);
+		if (ownerCam == null) yield break;
+		// → IMoldReceiver: insert mold into furnace
+		if (Physics.Raycast(ownerCam.transform.position, ownerCam.transform.forward, out RaycastHit moldHit, _useRange, _moldAreaLayer, QueryTriggerInteraction.Collide))
+		{
+			IMoldReceiver receiver = moldHit.collider.GetComponent<IMoldReceiver>();
+			if (receiver != null) { receiver.InsertMold(_castingMoldType); Destroy(gameObject); yield break; }
+		}
+		// → generic whack: push Rigidbody
+		if (Physics.Raycast(ownerCam.transform.position, ownerCam.transform.forward, out RaycastHit hit, _useRange, _hitLayers))
+		{
+			Rigidbody rb = hit.collider.GetComponent<Rigidbody>();
+			if (rb != null)
+			{
+				rb.AddForceAtPosition(ownerCam.transform.forward * 5f, hit.point, ForceMode.Impulse);
+				GameEvents.RaisePickaxeHit(hit.point, hit.normal, false);
+			}
+		}
+	}
+
+	public override void PrimaryFire()
+	{
+		if (Time.time - lastAttackTime >= _attackCooldown) SwingPickaxe();
+	}
+}
+
+<!-- ==== FILE: learn/phase-b-1/Scripts/_-Systems/ToolSystem/ToolBaseSub/ToolHammer.cs ==== -->
+using UnityEngine;
+
+// deps: IHammerTarget (owned) — ZERO concrete phase imports
+
+/// <summary>
+/// LMB raycasts → IHammerTarget.OnHammerPrimary (take building or pickup crate).
+/// RMB raycasts → IHammerTarget.OnHammerSecondary (force-pack building).
+/// Without IHammerTarget implementations: raycasts find nothing. Compiles fine.
+/// </summary>
+[AddComponentMenu("MineMGL/Tools/ToolHammer")]
+public class ToolHammer : BaseHeldTool
+{
+	[SerializeField] float _useRange = 3f;
+
+	public override void PrimaryFire()
+	{
+		if (ownerCam == null) return;
+		if (!Physics.Raycast(ownerCam.transform.position, ownerCam.transform.forward, out RaycastHit hit, _useRange)) return;
+		hit.collider.GetComponentInParent<IHammerTarget>()?.OnHammerPrimary();
+	}
+	public override void SecondaryFire()
+	{
+		if (ownerCam == null) return;
+		if (!Physics.Raycast(ownerCam.transform.position, ownerCam.transform.forward, out RaycastHit hit, _useRange)) return;
+		hit.collider.GetComponentInParent<IHammerTarget>()?.OnHammerSecondary();
+	}
+}
+
+<!-- ==== FILE: learn/phase-b-1/Scripts/_-Systems/ToolSystem/ToolBaseSub/ToolHardHat.cs ==== -->
+/// <summary> Empty subclass of ToolPickaxe — different SavableObjectID and prefab, same logic. </summary>
+[AddComponentMenu("MineMGL/Tools/ToolHardHat")]
+public class ToolHardHat : ToolPickaxe { }
+
+<!-- ==== FILE: learn/phase-b-1/Scripts/_-Systems/ToolSystem/ToolBaseSub/ToolMagnet.cs ==== -->
+using System;
+using System.Collections.Generic;
+using UnityEngine;
+using TMPro;
+using SPACE_UTIL;
+
+// deps: IMagnetGrabbable (owned) — ZERO concrete phase imports
+
+/// <summary>
+/// Hold RMB → OverlapSphere → SpringJoint per nearby Rigidbody → they fly toward me.
+/// LMB launches all forward. R drops gently. Q cycles selection mode.
+/// Filter modes use IMagnetGrabbable: skip objects in baskets or on conveyors.
+/// On grab: SetMagnetHolder(this). On release: ClearMagnetHolder().
+/// Without IMagnetGrabbable impl: grabs everything, no filter, no holder. Still works.
+/// </summary>
+[AddComponentMenu("MineMGL/Tools/ToolMagnet")]
+public class ToolMagnet : BaseHeldTool
+{
+	#region Inspector Fields
+	[SerializeField] float _pullRadius = 2f;
+	[SerializeField] float _pushForce = 3f;
+	[SerializeField] float _dropForce = 1f;
+	[SerializeField] Transform _pullOrigin;
+	[SerializeField] LayerMask _grabbableLayer;
+	[SerializeField] TMP_Text _selectionModeText;
+	#endregion
+
+	#region Private State
+	struct DroppedBodyInfo { public Rigidbody Rb; public float Timer; }
+	MagnetToolSelectionMode selectionMode;
+	List<Rigidbody> heldBodies = new List<Rigidbody>();
+	List<SpringJoint> joints = new List<SpringJoint>();
+	List<GameObject> anchors = new List<GameObject>();
+	bool wantsToMagnet;
+	Vector3 pullTargetVelocity, lastPlayerPos, playerVelocity;
+	readonly List<DroppedBodyInfo> droppedBodies = new List<DroppedBodyInfo>();
+	#endregion
+
+	#region Grab
+	/// <summary> OverlapSphere → filter via IMagnetGrabbable → SpringJoint per body → SetMagnetHolder. </summary>
+	void GrabNearbyObjects()
+	{
+		Collider[] cols = Physics.OverlapSphere(_pullOrigin.position, _pullRadius, _grabbableLayer);
+		foreach (var col in cols)
+		{
+			if (col.CompareTag("MarkedForDestruction")) continue;
+			Rigidbody rb = col.attachedRigidbody;
+			if (rb == null || heldBodies.Contains(rb)) continue;
+			// → filter via IMagnetGrabbable (OrePiece implements in Phase C)
+			IMagnetGrabbable grabbable = rb.GetComponentInParent<IMagnetGrabbable>();
+			if (selectionMode == MagnetToolSelectionMode.ResourcesNotInFilter
+				|| selectionMode == MagnetToolSelectionMode.ResourcesNotOnConveyors)
+			{
+				if (grabbable == null) continue;
+				if (grabbable.IsInBasket()) continue;
+				if (selectionMode == MagnetToolSelectionMode.ResourcesNotOnConveyors && grabbable.IsOnConveyor()) continue;
+			}
+			// → create anchor + SpringJoint
+			GameObject anchor = new GameObject("MagnetAnchor");
+			anchor.transform.position = _pullOrigin.position;
+			anchor.transform.parent = _pullOrigin;
+			anchor.AddComponent<Rigidbody>().isKinematic = true;
+			SpringJoint sj = anchor.AddComponent<SpringJoint>();
+			sj.connectedBody = rb; sj.autoConfigureConnectedAnchor = false;
+			sj.connectedAnchor = rb.transform.InverseTransformPoint(col.transform.position);
+			sj.spring = 100f; sj.damper = 25f; sj.maxDistance = 0.01f;
+			sj.breakForce = 120f; sj.breakTorque = 20f;
+			rb.linearDamping = 3f; rb.angularDamping = 1.5f;
+			rb.interpolation = RigidbodyInterpolation.Interpolate;
+			if (ownerCam != null) UtilsPhaseB.IgnoreAllCollisions(rb.gameObject, ownerCam.transform.root.gameObject, true);
+			droppedBodies.RemoveAll(d => d.Rb == rb);
+			heldBodies.Add(rb); joints.Add(sj); anchors.Add(anchor);
+			grabbable?.SetMagnetHolder(this);
+		}
+		wantsToMagnet = false;
+	}
+	#endregion
+
+	#region Drop
+	/// <summary> Destroys joints, launches bodies forward, restores drag, ClearMagnetHolder. </summary>
+	void DropObjects(float force)
+	{
+		for (int i = 0; i < joints.Count; i++)
+			if (joints[i] != null) Destroy(joints[i].gameObject);
+		joints.Clear(); anchors.Clear();
+		foreach (var rb in heldBodies)
+		{
+			if (rb == null) continue;
+			if (ownerCam != null) rb.AddForce(ownerCam.transform.forward * force, ForceMode.Impulse);
+			rb.linearDamping = BasePhysicsObject.STANDARD_LINEAR_DAMPING;
+			rb.angularDamping = BasePhysicsObject.STANDARD_ANGULAR_DAMPING;
+			if (ownerCam != null) UtilsPhaseB.IgnoreAllCollisions(rb.gameObject, ownerCam.transform.root.gameObject, false);
+			droppedBodies.Add(new DroppedBodyInfo { Rb = rb, Timer = 3f });
+			rb.GetComponentInParent<IMagnetGrabbable>()?.ClearMagnetHolder();
+		}
+		heldBodies.Clear();
+	}
+
+	/// <summary> External: SellerMachine calls this to force-release a specific body before selling. </summary>
+	public void DetachBody(Rigidbody rb)
+	{
+		if (rb == null) return;
+		int idx = heldBodies.IndexOf(rb);
+		if (idx < 0) return;
+		if (idx < joints.Count && joints[idx] != null) Destroy(joints[idx].gameObject);
+		if (idx < anchors.Count && anchors[idx] != null) Destroy(anchors[idx]);
+		joints.RemoveAt(idx); anchors.RemoveAt(idx); heldBodies.RemoveAt(idx);
+		rb.linearDamping = BasePhysicsObject.STANDARD_LINEAR_DAMPING;
+		rb.angularDamping = BasePhysicsObject.STANDARD_ANGULAR_DAMPING;
+		if (ownerCam != null) UtilsPhaseB.IgnoreAllCollisions(rb.gameObject, ownerCam.transform.root.gameObject, false);
+		droppedBodies.Add(new DroppedBodyInfo { Rb = rb, Timer = 3f });
+		rb.GetComponentInParent<IMagnetGrabbable>()?.ClearMagnetHolder();
+	}
+	#endregion
+
+	#region Cleanup
+	void CleanupBrokenJoints()
+	{
+		for (int i = joints.Count - 1; i >= 0; i--)
+		{
+			if (joints[i] == null || joints[i].connectedBody == null)
+			{
+				if (i < anchors.Count && anchors[i] != null) Destroy(anchors[i]);
+				if (i < heldBodies.Count)
+				{
+					Rigidbody rb = heldBodies[i];
+					if (rb != null) { rb.linearDamping = BasePhysicsObject.STANDARD_LINEAR_DAMPING; rb.angularDamping = BasePhysicsObject.STANDARD_ANGULAR_DAMPING; }
+					heldBodies.RemoveAt(i);
+				}
+				joints.RemoveAt(i); anchors.RemoveAt(i);
+			}
+		}
+	}
+	void CleanupDroppedBodies()
+	{
+		for (int i = droppedBodies.Count - 1; i >= 0; i--)
+		{
+			var info = droppedBodies[i];
+			if (info.Rb == null) { droppedBodies.RemoveAt(i); continue; }
+			info.Timer -= Time.fixedDeltaTime;
+			if (info.Timer <= 0f) { info.Rb.interpolation = RigidbodyInterpolation.None; droppedBodies.RemoveAt(i); }
+			else droppedBodies[i] = info;
+		}
+	}
+	void CycleSelectionMode()
+	{
+		var modes = (MagnetToolSelectionMode[])Enum.GetValues(typeof(MagnetToolSelectionMode));
+		int next = (Array.IndexOf(modes, selectionMode) + 1) % modes.Length;
+		selectionMode = modes[next];
+		if (_selectionModeText != null) _selectionModeText.text = selectionMode.ToString();
+	}
+	#endregion
+
+	#region Overrides
+	public override void SecondaryFireHeld() => wantsToMagnet = true;
+	public override void PrimaryFire() => DropObjects(_pushForce);
+	public override void Reload() => DropObjects(_dropForce);
+	public override void QButtonPressed() => CycleSelectionMode();
+	public override void DropItem() { DropObjects(_dropForce); base.DropItem(); }
+	#endregion
+
+	#region Unity Lifecycle
+	protected override void OnEnable() { base.OnEnable(); if (_selectionModeText != null) _selectionModeText.text = selectionMode.ToString(); }
+	protected override void OnDisable() { base.OnDisable(); DropObjects(_dropForce); }
+	private void FixedUpdate()
+	{
+		if (ownerCam == null) return;
+		Vector3 pos = ownerCam.transform.root.position;
+		playerVelocity = (pos - lastPlayerPos) / Time.fixedDeltaTime;
+		lastPlayerPos = pos;
+		Vector3 target = ownerMagnetToolPos.position + playerVelocity * Time.fixedDeltaTime * 10f;
+		_pullOrigin.position = Vector3.SmoothDamp(_pullOrigin.position, target, ref pullTargetVelocity, 0.03f, 10f, Time.fixedDeltaTime);
+		CleanupBrokenJoints(); CleanupDroppedBodies();
+		if (wantsToMagnet) GrabNearbyObjects();
+	}
+	#endregion
+}
+
+<!-- ==== FILE: learn/phase-b-1/Scripts/_-Systems/ToolSystem/ToolBaseSub/ToolMiningHat.cs ==== -->
+using UnityEngine;
+
+// deps: NONE — pure Phase B, no cross-phase interface needed
+
+/// <summary>
+/// LMB toggles light. OnEnable/OnDisable sync light state.
+/// Calls ownerCam.transform.root to find player for ToggleMiningLightFromTool (Phase B PlayerMovement).
+/// </summary>
+[AddComponentMenu("MineMGL/Tools/ToolMiningHat")]
+public class ToolMiningHat : BaseHeldTool
+{
+	[SerializeField] bool _isOn;
+	[SerializeField] GameObject _worldModelLight;
+	[SerializeField] GameObject _viewModelLight;
+
+	public override void PrimaryFire() => ToggleLight(!_isOn);
+
+	void ToggleLight(bool enable)
+	{
+		_isOn = enable;
+		if (_worldModelLight != null) _worldModelLight.SetActive(_isOn);
+		if (_viewModelLight != null) _viewModelLight.SetActive(_isOn);
+		// Phase H: play toggle sound
+	}
+
+	protected override void OnEnable() { base.OnEnable(); ToggleLight(_isOn); }
+	protected override void OnDisable() { base.OnDisable(); ToggleLight(_isOn); }
+}
+
+<!-- ==== FILE: learn/phase-b-1/Scripts/_-Systems/ToolSystem/ToolBaseSub/ToolPickaxe.cs ==== -->
+using System.Collections;
+using UnityEngine;
+
+// deps: IDamageable (owned), ICrushable (owned) — ZERO concrete phase imports
+
+/// <summary>
+/// Hold left-click → swing animation → 0.2s delay → raycast from camera.
+/// Checks ICrushable first (ore→crushed), then IDamageable (ore node health),
+/// then Rigidbody (physics push). All via interface — no OrePiece import.
+/// Fires RaisePickaxeHit for particles (ParticleManager subscribes in Phase C).
+/// </summary>
+[AddComponentMenu("MineMGL/Tools/ToolPickaxe")]
+public class ToolPickaxe : BaseHeldTool
+{
+	[SerializeField] float _useRange = 2f;
+	[SerializeField] float _damage = 10f;
+	[SerializeField] float _attackCooldown = 1f;
+	[SerializeField] LayerMask _hitLayers;
+	[SerializeField] bool _canBreakOreIntoCrushed;
+
+	float lastAttackTime = -1f;
+
+	void SwingPickaxe()
+	{
+		if (ownerCam == null) return;
+		if (_viewModelAnimator != null) _viewModelAnimator.Play(AnimParamType.attack1.ToString(), -1, 0f);
+		StartCoroutine(PerformAttack(0.2f));
+		lastAttackTime = Time.time;
+	}
+
+	/// <summary> Delayed raycast: ICrushable → IDamageable → Rigidbody. All via interface. </summary>
+	IEnumerator PerformAttack(float delaySeconds)
+	{
+		yield return new WaitForSeconds(delaySeconds);
+		if (!gameObject.activeInHierarchy || ownerCam == null) yield break;
+		if (!Physics.Raycast(ownerCam.transform.position, ownerCam.transform.forward, out RaycastHit hit, _useRange, _hitLayers))
+			yield break;
+		// → ICrushable: special pickaxe converts ore to crushed variant
+		if (_canBreakOreIntoCrushed)
+		{
+			ICrushable crushable = hit.collider.GetComponent<ICrushable>();
+			if (crushable != null && crushable.CanCrush() && crushable.TryCrush())
+			{
+				// purpose: ParticleManager subscribes → creates hit particle
+				GameEvents.RaisePickaxeHit(hit.point, hit.normal, true);
+				yield return new WaitForFixedUpdate();
+				UtilsPhaseB.SimpleExplosion(hit.point, 0.5f, 2f, 0.5f);
+				yield break;
+			}
+		}
+		// → IDamageable: deal damage to ore node / damageable ore piece
+		IDamageable damageable = hit.collider.GetComponent<IDamageable>();
+		if (damageable != null)
+		{
+			damageable.TakeDamage(_damage, hit.point);
+			// purpose: ParticleManager subscribes → creates ore hit particle
+			GameEvents.RaisePickaxeHit(hit.point, hit.normal, true);
+		}
+		else
+		{
+			// purpose: ParticleManager subscribes → creates generic hit particle
+			GameEvents.RaisePickaxeHit(hit.point, hit.normal, false);
+		}
+		// → Rigidbody: physics push
+		Rigidbody hitRb = hit.collider.GetComponent<Rigidbody>();
+		if (hitRb != null)
+		{
+			hitRb.AddForceAtPosition(ownerCam.transform.forward * 5f, hit.point, ForceMode.Impulse);
+			PhysicsSoundPlayer soundPlayer = hitRb.GetComponent<PhysicsSoundPlayer>();
+			if (soundPlayer != null) soundPlayer.PlayImpactSound();
+		}
+	}
+
+	public override void PrimaryFire() { }
+	public override void PrimaryFireHeld()
+	{
+		if (Time.time - lastAttackTime >= _attackCooldown) SwingPickaxe();
+	}
+}
+
+<!-- ==== FILE: learn/phase-b-1/Scripts/_-Systems/ToolSystem/ToolBaseSub/ToolResourceScanner.cs ==== -->
+using TMPro;
+using UnityEngine;
+
+// deps: IScannable (owned) — ZERO concrete phase imports
+
+/// <summary>
+/// Continuously raycasts from camera → IScannable.GetScanDisplayName() on whatever hit.
+/// Each phase adds implementations. Without IScannable: shows "Unknown". Still compiles.
+/// </summary>
+[AddComponentMenu("MineMGL/Tools/ToolResourceScanner")]
+public class ToolResourceScanner : BaseHeldTool
+{
+	[SerializeField] float _useRange = 3f;
+	[SerializeField] TMP_Text _thingNameText;
+
+	void Update()
+	{
+		if (ownerCam == null) return;
+		string text = "No Target";
+		if (Physics.Raycast(ownerCam.transform.position, ownerCam.transform.forward, out RaycastHit hit, _useRange))
+		{
+			// → IScannable: each phase adds implementations
+			IScannable scannable = hit.collider.GetComponentInParent<IScannable>();
+			if (scannable != null) text = scannable.GetScanDisplayName();
+			else if (!hit.collider.gameObject.isStatic) text = "Unknown";
+		}
+		if (_thingNameText != null) _thingNameText.text = text;
+	}
+	public override void PrimaryFire() { }
+}
+
+<!-- ==== FILE: learn/phase-b-1/Scripts/_-Systems/ToolSystem/ToolBaseSub/ToolSupportsWrench.cs ==== -->
+using UnityEngine;
+
+// deps: ISupportToggleable (owned) — ZERO concrete phase imports
+
+/// <summary>
+/// LMB raycasts → ISupportToggleable.SetSupportsEnabled(false).
+/// RMB raycasts → ISupportToggleable.SetSupportsEnabled(true).
+/// Without ISupportToggleable implementations: does nothing. Compiles fine.
+/// </summary>
+[AddComponentMenu("MineMGL/Tools/ToolSupportsWrench")]
+public class ToolSupportsWrench : BaseHeldTool
+{
+	[SerializeField] float _useRange = 3f;
+
+	public override void PrimaryFire()
+	{
+		if (ownerCam == null) return;
+		if (!Physics.Raycast(ownerCam.transform.position, ownerCam.transform.forward, out var hit, _useRange)) return;
+		hit.collider.GetComponentInParent<ISupportToggleable>()?.SetSupportsEnabled(false);
+	}
+	public override void SecondaryFire()
+	{
+		if (ownerCam == null) return;
+		if (!Physics.Raycast(ownerCam.transform.position, ownerCam.transform.forward, out var hit, _useRange)) return;
+		hit.collider.GetComponentInParent<ISupportToggleable>()?.SetSupportsEnabled(true);
+	}
 }
 
 <!-- ==== FILE: learn/phase-c(New)/FLOW.md ==== -->
