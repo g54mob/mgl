@@ -1557,10 +1557,73 @@ Scripts/phase-X/
 
 - **Systems communicate ONLY via interfaces and GameEvents.** No direct class imports between systems. If System A needs to call System B, they share an interface (e.g. `IInventoryItem`) or fire a GameEvent.
 - **GameEvents use interfaces, not concrete classes.** All inventory events use `Action<IInventoryItem>`, never `Action<BaseHeldTool>`. This means GameEvents.cs has zero imports from any system.
-- **IHighlightable.GetHighlightProfile() takes no parameters.** The highlight system doesn't know about inventory, tools, or any game concept. Each object decides its own profile internally. This makes HighlightSystem reusable in ANY Unity project.
-- **IInventoryItem.SetOwnerContext(Camera, Transform, Transform)** provides player context to equipped items without the item knowing PlayerMovement exists. Tool stores Camera + Transforms, not a concrete PlayerMovement ref.
-- **Bridge scripts** connect systems that need runtime context. `ItemEquipBridge` sits on the Player GO and subscribes to `OnItemEquipped` → calls `item.SetOwnerContext(cam, container, magnetPos)`. The bridge lives in the game-specific system (ToolSystem), NOT in the portable system (PlayerSystem).
-- **Portable systems own their interfaces AND are fully isolated.** When you copy a system folder to another project, EVERYTHING it needs is inside. The ONLY allowed external dependencies for a portable system are: `GameEvents`, `UIManager`, `SPACE_UTIL`, `INPUT.K`, `GlobalEnumsX`, dependencies/files with in that system. If a system imports ANY class from another `_-Systems/` folder, it's NOT portable — mark it game-specific. Interfaces the system defines (`IShopMoney`, `IInteractable`, `IInventoryItem`, `IHighlightable`, `IDamageable`, `ISaveLoadable*`) live inside their owning system. Other systems import the interface — not the other way around.
+- **Portable systems own their interfaces AND are fully isolated.** When you copy a system folder to another project, EVERYTHING it needs is inside. The ONLY allowed external dependencies for a portable system are: `GameEvents`, `UIManager`, `SPACE_UTIL`, `INPUT.K`, `GlobalEnumsX`, dependencies/files within that system. If a system imports ANY class from another `_-Systems/` folder, it's NOT portable — mark it game-specific.
+
+### Observable System Shapes (Reference)
+
+> Every system in the project falls into one or more of these 5 shapes.
+> Most systems are **hybrids** — e.g. InventorySystem is both a Spider (defines IInventoryItem)
+> AND a Listener (subscribes to OnToolPickupRequested). Use these as a reference when designing
+> new systems — pick the shape(s) that match your system's role.
+
+| Shape | What it does | Portable? | Example |
+|-------|-------------|-----------|---------|
+| 🕷️ **Spider** | Sits alone, extends interface "legs" outward. DEFINES interfaces, RECEIVES implementations. Never reaches out. | ✅ Always | ShopUISystem (IShopMoney, IShopItemProvider), InventorySystem (IInventoryItem), HighlightSystem (IHighlightable), InteractionSystem (IInteractable), SaveSystem (ISaveLoadable*) |
+| 🔍 **Hunter** | Reaches OUT to the world via `GetComponent<IXxx>()`. DEFINES interfaces it needs, actively scans for implementors. | ✅ Always | ToolSystem (9 owned interfaces — each tool raycasts to find objects that implement them) |
+| 🔌 **Adapter** | IMPLEMENTS interfaces defined by Spiders or Hunters. Plugs into other systems' sockets. | ✅ If interface-only deps | BuildingSystem (implements 7 interfaces), OreSystem (implements 4), EconomySystem (implements IShopMoney), ConveyorSystem (implements IInteractable) |
+| 📡 **Broadcaster / Listener** | Fires or subscribes to GameEvents. No interfaces needed. Pure event-driven. | ✅ Always | MiningSystem (fires 5 events), QuestSystem (listens to 3+), SoundSystem (listens), PlayerSystem (listens) |
+| 🌍 **Infrastructure** | Used by EVERY system. Doesn't count as dependency. | N/A | GameEvents, UIManager, Singleton\<T\>, GlobalEnums, SaveSystem (borderline) |
+
+**Key: Spider vs Hunter** — both own interfaces, but the direction is opposite.
+Spider passively receives (MoneyBridge PUSHES IShopMoney into ShopUI).
+Hunter actively scans (`GetComponent<ICrushable>()` every frame to find ore).
+
+**Hybrids are normal** — most systems combine shapes:
+- InventorySystem = 🕷️ Spider (IInventoryItem) + 📡 Listener (OnToolPickupRequested)
+- BuildingSystem = 🔌 Adapter (×7 interfaces) + 📡 Broadcaster (OnBuildingPlaced)
+- OreSystem = 🔌 Adapter (4 ToolSystem interfaces) + 📡 Broadcaster (OnOreSold)
+- EconomySystem = 🔌 Adapter (IShopMoney) + 📡 Broadcaster (OnMoneyChanged)
+
+**Game-specific systems** (❌ Concrete) have unavoidable direct class imports:
+AutoMiner → must call OrePiecePoolManager, Seller → must read OrePiece, Pause → must call SavingLoadingMgr.
+These are game-specific by PURPOSE, not by design flaw.
+
+### Cross-System Communication Patterns
+
+**4 connection mechanisms, ordered by preference:**
+
+**1. GameEvents (fire-and-forget, zero coupling)**
+- System A fires `GameEvents.RaiseX()`. System B subscribes. Neither knows the other exists.
+- Used by: 📡 Broadcasters + Listeners, and as secondary pattern on almost every system.
+- Example: `RaiseToolPickupRequested(IInventoryItem)` — BaseHeldTool fires, InventoryOrchestrator subscribes.
+
+**2. Interface / DIP (caller-defines abstraction)**
+- The system that NEEDS something defines the interface. The system that PROVIDES implements it.
+- Used by: 🕷️ Spiders (define + receive) and 🔍 Hunters (define + scan). 🔌 Adapters implement.
+- Example: ShopUISystem owns `IShopItemProvider` → SO_BuildingInventoryDefinition (D) implements.
+- Example: ToolSystem owns `IDamageable` → OreNode (C) implements. ToolPickaxe: `GetComponent<IDamageable>()`.
+
+**3. Bridge (runtime context push)**
+- A MonoBehaviour subscribes to a GameEvent and pushes runtime context from one system into another.
+- Used by: systems that need references (camera, transforms) that can't be passed via static events.
+- Example: `ItemEquipBridge` → `item.SetOwnerContext(cam, container, magnetPos)`.
+- Example: `MoneyBridge` → passes IShopMoney on Start. `BuildingToolBridge` → pushes IBuildingToolContext.
+
+**4. [SerializeField] (same-GO / parent-child only)**
+- Direct inspector reference. Intra-system only. NEVER across `_-Systems/` folders.
+- Used by: Orchestrator → Field_, SubManager → DataService.
+
+**Anti-patterns (NEVER use):**
+- ❌ `FindObjectOfType<ConcreteClass>()` — use GameEvents or [SerializeField]
+- ❌ `Singleton<ConcreteFromOtherSystem>.Ins.DoSomething()` — use interface or GameEvent
+- ❌ Direct class import across `_-Systems/` folders — use interface (DIP pattern)
+- ❌ Concrete class in GameEvent signatures — use `Action<IInventoryItem>` not `Action<BaseHeldTool>`
+
+### Specific Interface Design Rules
+
+- **IHighlightable.GetHighlightProfile() takes no parameters.** Object decides its own profile internally.
+- **IInventoryItem.SetOwnerContext(Camera, Transform, Transform)** — tool gets camera + transforms without knowing PlayerMovement.
+- **IShopItemProvider** — uses `UnityEngine.Object` field + runtime cast to accept ANY SO that implements it.
 - **[AddComponentMenu("MineMGL/Category/ClassName")]** on every MonoBehaviour.
 - **Unity 6000.3 rule: filename MUST match classname** for any MonoBehaviour added via inspector. Unity's Add Component search only indexes classes whose name matches the `.cs` filename. MonoBehaviours added via code (`AddComponent<T>()`) don't need this.
 
@@ -2849,8 +2912,10 @@ Phase I:
 
 > **Current target: phase-d with new _-Systems/ architecture.**
 > Phase B introduced independent systems with interfaces + GameEvents.
-> this architecture existed — they must be regenerated to use _-Systems/, IInventoryItem, IHighlightable,
-> ItemEquipBridge, and the filename==classname rule. Update this line when moving to the next phase.
+> Phase B-1 introduced the **caller-defines** pattern: ToolSystem owns ALL 9 interfaces it calls
+> (IDamageable, ICrushable, IMagnetGrabbable, IScannable, IHammerTarget, ISupportToggleable,
+> IMoldReceiver, IBuildingToolContext, IDrillBitHost). Zero concrete imports. Future phases
+> provide bridge implementations — never modify ToolSystem files. Update this line when moving to the next phase.
 
 ---
 
@@ -3031,7 +3096,15 @@ For each phase, the agent must produce:
 - **One sentence per script.** If it doesn't fit, split it.
 - **Hybrid folder structure.** Complex multi-file systems (3+ tightly coupled files) → `_-Systems/FeatureName/` with code files + Test.md. Non-MB classes can share a file; inspector-added MBs need own file (filename==classname). Shared infra stays layer-based (`0-Core/`, `2-Data/Enums/`, `4-Utils/`). See GOAL.md folder structure.
 - **System independence.** Systems communicate ONLY via interfaces + GameEvents. No direct class imports between systems. GameEvents use `Action<IInventoryItem>` (interface), never `Action<BaseHeldTool>` (concrete). Bridge scripts (e.g. `ItemEquipBridge`) connect systems and live on the non-portable side.
-- **Interface-isolation for cross-phase tools.** ToolSystem lives entirely in Phase B. Tools that interact with future-phase objects (ToolPickaxe→ore, ToolHammer→buildings) use interfaces (`ICrushable`, `IHammerTarget`, `ISupportToggleable`, `IMoldReceiver`) instead of concrete class imports. Each tool does `GetComponent<IXxx>()` — returns null if the phase isn't typed yet, code path skips gracefully. Systems that own game objects implement the interface (Phase C OrePiece implements `ICrushable`, Phase D BuildingObject implements `IHammerTarget`). ToolSystem also **owns** `IMagnetGrabbable` and `IScannable` — interfaces that define what ToolSystem needs from external objects. This pattern keeps ALL tools compilable in Phase B alone while preserving 100% main-source functionality when later phases are present.
+- **Observable system shapes (reference — most systems are hybrids of these):**
+  - 🕷️ **Spider** — defines interfaces, receives implementations. Never reaches out. (ShopUI, Inventory, Highlight, Interaction, SaveSystem)
+  - 🔍 **Hunter** — defines interfaces, actively scans world via `GetComponent<IXxx>()`. (ToolSystem — 9 owned interfaces)
+  - 🔌 **Adapter** — implements interfaces defined by Spiders/Hunters. Plugs into other systems' sockets. (BuildingSystem, OreSystem, EconomySystem, ConveyorSystem)
+  - 📡 **Broadcaster/Listener** — fires or subscribes to GameEvents only. No interfaces. (MiningSystem, QuestSystem, SoundSystem, PlayerSystem)
+  - 🌍 **Infrastructure** — used by ALL, doesn't count as dep. (GameEvents, UIManager, Singleton, GlobalEnums)
+  - **Hybrids are normal:** InventorySystem = Spider + Listener, BuildingSystem = Adapter(×7) + Broadcaster, OreSystem = Adapter + Broadcaster
+  - **Concrete (❌)** = game-specific by PURPOSE (AutoMiner → must call OrePiecePoolManager). Not a design flaw, just inherent to the system's job.
+- **Interface-isolation for cross-phase tools.** ToolSystem lives in Phase B-1. All 11 tools use interfaces (`ICrushable`, `IHammerTarget`, `IBuildingToolContext`, `IDrillBitHost`, etc.) instead of concrete class imports. Each tool does `GetComponent<IXxx>()` — returns null if the phase isn't typed → code path skips. Systems that own game objects implement the interface. ToolSystem **owns** all 9 interfaces it calls (caller-defines / DIP pattern). ShopUISystem similarly owns `IShopItemProvider` so SO_ShopItemDef can delegate to building definitions without importing Phase D.
 - **Portability levels (see GOAL.md diagram):**
   - **Portability = how many other `_-Systems/` folders must you copy.** Level = count of external system deps.
   - **FREE (doesn't count):** `GameEvents`, `Singleton<T>` base, `Singleton<UIManager>.Ins`, `GlobalEnumsX`, `SPACE_UTIL`, `INPUT.K`, `UtilsPhaseX`, shared infra in numbered folders (`1-Managers/`, `3-MonoBehaviours/Physics/`, `4-Utils/`). Using any of these = still L0.
@@ -3534,7 +3607,8 @@ _explosionFeedback?.PlayFeedbacks(ParticleObject.transform.position);
 |-------|------|--------|------------|------------|--------|
 | **A** | World Interaction + Shop Cart | 7% | 7% | Easy | ✅ Done |
 | **A½** | The Mine — Environment & Elevator | 3% | 10% | Easy | ✅ Done |
-| **B** | Player Controller + Inventory + Tools + Grabbing | 15% | 25% | Hard | ✅ Done |
+| **B** | Player Controller + Inventory + Grabbing | 12% | 22% | Hard | ✅ Done |
+| **B-1** | Tool System (all 11 tools, 9 owned interfaces) | 3% | 25% | Medium | ✅ Done |
 | **C** | Mining & Ore System | 14% | 39% | Medium | Planned |
 | **D** | Building & Conveyor System | 14% | 53% | Hard | Planned |
 | **E** | Ore Processing Machines | 18% | 71% | Medium | Planned |
@@ -3828,6 +3902,68 @@ Highlight/
 | PlayerMovementTest | WASD + jump + sprint + cursor lock | Inventory, tools, shop |
 | PlayerGrabTest | SpringJoint grab on physics cubes | Inventory, tools, shop |
 | InventoryTest | Add/remove/switch tools in hotbar UI | PlayerMovement, shop, interaction |
+
+---
+
+## Phase B-1 — Tool System (3%)
+
+### What It Looks Like
+
+```
+All 11 equippable tools — pickup, equip, use, drop. Each tool does one thing
+via an interface: pickaxe hits IDamageable, hammer hits IHammerTarget, magnet
+filters via IMagnetGrabbable, scanner reads IScannable, builder uses
+IBuildingToolContext, drill bit uses IDrillBitHost.
+
+Without later phases: tools compile and run, interface calls return null → skip.
+With later phases: bridges push context, objects implement interfaces → full behavior.
+```
+
+### Files — `_-Systems/` Architecture
+
+```
+0-Core/
+└── GameEvents.cs                     — partial: OnPickaxeHit
+
+_-Systems/
+└── ToolSystem/                       ← L5 PORTABLE — 9 owned interfaces, 0 concrete imports
+    ├── ToolBase.cs                   (BaseHeldTool: framework, implements IInventoryItem+IHighlightable+IInteractable)
+    ├── Interface/                    (9 owned interfaces)
+    │   ├── IDamageable.cs            → OreNode(C), DamageableOrePiece(C) implement
+    │   ├── ICrushable.cs             → OrePiece(C) implements
+    │   ├── IMagnetGrabbable.cs       → OrePiece(C) implements
+    │   ├── IScannable.cs             → everything implements (C/D/A)
+    │   ├── IHammerTarget.cs          → BuildingObject(D), BuildingCrate(D) implement
+    │   ├── ISupportToggleable.cs     → BuildingObject(D) implements
+    │   ├── IMoldReceiver.cs          → CastingFurnaceMoldArea(E) implements
+    │   ├── IBuildingToolContext.cs    → BuildingToolBridge(D) implements
+    │   └── IDrillBitHost.cs          → RapidAutoMiner(E) implements
+    ├── ToolBaseSub/
+    │   ├── ToolPickaxe.cs            (ICrushable + IDamageable)
+    │   ├── ToolHardHat.cs            (extends ToolPickaxe)
+    │   ├── ToolMagnet.cs             (IMagnetGrabbable)
+    │   ├── ToolHammer.cs             (IHammerTarget)
+    │   ├── ToolMiningHat.cs          (light toggle, pure)
+    │   ├── ToolSupportsWrench.cs     (ISupportToggleable)
+    │   ├── ToolResourceScanner.cs    (IScannable)
+    │   ├── ToolBuilder.cs            (IBuildingToolContext — complete, not stub)
+    │   ├── ToolCastingMold.cs        (IMoldReceiver)
+    │   └── RapidAutoMinerDrillBit.cs (IDrillBitHost + durability + mesh swap)
+    └── Bridge/
+        └── ItemEquipBridge.cs        (OnItemEquipped → SetOwnerContext)
+```
+
+### Key Architecture: Caller-Defines Pattern
+
+ToolSystem owns ALL interfaces it calls. Other phases implement them. Copy the ToolSystem folder + 5 imported interface files → compiles anywhere. No concrete cross-phase imports. No stubs. No file replacements.
+
+Future phases only provide: bridge implementations (BuildingToolBridge in D, RapidAutoMiner implements IDrillBitHost in E) + interface implementations on game objects.
+
+### Vertical Slice Tests
+
+| Test | Tests what independently | NOT required |
+|------|------------------------|-------------|
+| ToolActionTest | Pickaxe swing, magnet pull/launch/cycle, hammer, hat light | Shop, Ore, Buildings |
 
 ---
 
@@ -5485,15 +5621,7 @@ phase-b/
 │   │   ├── PlayerGrab.cs                   → "I grab physics objects with SpringJoint + LineRenderer"
 │   │   ├── PlayerFootsteps.cs              → "I play footstep sounds based on movement"
 │   │   └── PlayerSpawnPoint.cs             → "I mark where the player spawns"
-│   ├── Tool/
-│   │   ├── BaseHeldTool.cs                 → "I'm the base class for all equippable tools"
-│   │   ├── ToolPickaxe.cs                  → "I swing and raycast-hit with delay"
-│   │   ├── ToolMagnet.cs                   → "I pull nearby physics objects via spring joints"
-│   │   ├── ToolHammer.cs                   → "I pick up / pack placed buildings"
-│   │   ├── ToolMiningHat.cs                → "I toggle a light on equip/unequip"
-│   │   ├── ToolSupportsWrench.cs           → "I toggle building supports on/off"
-│   │   ├── ToolResourceScanner.cs          → "I show resource info on raycast hit"
-│   │   └── ToolBuilder.cs                  → "I show ghost + place buildings" (partial — Phase D completes)
+│   │   (Tools moved to phase-b-1/_-Systems/ToolSystem/ — see Phase B-1 below)
 │   ├── Physics/
 │   │   ├── BasePhysicsObject.cs            → "I accumulate conveyor velocities for FixedUpdate"
 │   │   ├── BaseSellableItem.cs             → "I have a base sell value"
@@ -5509,6 +5637,40 @@ phase-b/
     └── InventoryTest.cs
 ```
 
+### Phase B-1 — ToolSystem (caller-defines, 9 owned interfaces)
+
+```
+phase-b-1/
+├── 0-Core/
+│   └── GameEvents.cs                       (partial: OnPickaxeHit)
+└── _-Systems/
+    └── ToolSystem/                         ← L5 PORTABLE — 9 owned interfaces, 0 concrete imports
+        ├── ToolBase.cs                     (BaseHeldTool: framework)
+        ├── Interface/
+        │   ├── IDamageable.cs              (moved from DamageSystem)
+        │   ├── ICrushable.cs
+        │   ├── IMagnetGrabbable.cs
+        │   ├── IScannable.cs
+        │   ├── IHammerTarget.cs
+        │   ├── ISupportToggleable.cs
+        │   ├── IMoldReceiver.cs
+        │   ├── IBuildingToolContext.cs
+        │   └── IDrillBitHost.cs
+        ├── ToolBaseSub/
+        │   ├── ToolPickaxe.cs              (ICrushable + IDamageable)
+        │   ├── ToolHardHat.cs              (extends ToolPickaxe)
+        │   ├── ToolMagnet.cs               (IMagnetGrabbable)
+        │   ├── ToolHammer.cs               (IHammerTarget)
+        │   ├── ToolMiningHat.cs            (light toggle)
+        │   ├── ToolSupportsWrench.cs       (ISupportToggleable)
+        │   ├── ToolResourceScanner.cs      (IScannable)
+        │   ├── ToolBuilder.cs              (IBuildingToolContext — complete)
+        │   ├── ToolCastingMold.cs          (IMoldReceiver)
+        │   └── RapidAutoMinerDrillBit.cs   (IDrillBitHost + durability)
+        └── Bridge/
+            └── ItemEquipBridge.cs          (OnItemEquipped → SetOwnerContext)
+```
+
 ### Phase C — _-Systems/ Architecture
 
 ```
@@ -5517,8 +5679,7 @@ phase-c/
 │   └── GameEvents.cs                       (partial: OnOreMined, OnOreSold, OnOreLimitChanged)
 │
 ├── _-Systems/
-│   ├── MiningSystem/                       ← PORTABLE (owns IDamageable)
-│   │   ├── IDamageable.cs                  (interface — generic, no ore dependency)
+│   ├── MiningSystem/                       ← PORTABLE (IDamageable now in B-1 ToolSystem)
 │   │   ├── OreNode.cs                      (breakable node, uses WeightedNodeDrop)
 │   │   ├── WeightedNodeDrop.cs             (entity — OrePrefab + Weight)
 │   │   └── MiningTest.md
@@ -6033,38 +6194,61 @@ phase-All/
 
 ---
 
+## System Shapes
+
+> 5 distinct "shapes" describe how every system connects to others:
+>
+> 🕷️ **Spider** — sits alone, extends interface "legs" outward. Others grab them. DEFINES what it needs, RECEIVES implementations.
+> 🔍 **Hunter** — reaches OUT to the world via `GetComponent<IXxx>()`. DEFINES interfaces it needs, actively scans for implementors.
+> 🔌 **Adapter** — IMPLEMENTS interfaces defined by Spiders or Hunters. Plugs into other systems' sockets.
+> 📡 **Broadcaster / Listener** — fires or subscribes to GameEvents. No interfaces. Pure event-driven.
+> 🌍 **Infrastructure** — used by EVERY system. Doesn't count as a dependency. The ground everything stands on.
+
 ## Master Table
 
-| # | System | Phase | L | Owns Interface | Implements External Interface | Bridge | Concrete Deps | Portable | Finalized |
-|---|--------|-------|---|---------------|------------------------------|--------|--------------|----------|-----------|
-| 1 | ShopUISystem | A | 0 | IShopMoney | — | — | — | ✅ | ✅ |
-| 2 | InteractionSystem | A | 0 | IInteractable | — | — | — | ✅ | ✅ |
-| 3 | EconomySystem | A | 1 | — | IShopMoney ← ShopUISystem | MoneyBridge (owns) | — | ✅ | ✅ |
-| 4 | InventorySystem | B | 0 | IInventoryItem | — | — | — | ✅ | ✅ |
-| 5 | PlayerSystem | B | 0 | — | — | — | — | ✅ | ✅ |
-| 6 | HighlightSystem | B | 0 | IHighlightable | — | — | — | ✅ | ✅ perm |
-| 7 | DamageSystem | B | 0 | IDamageable | — | — | — | ✅ | ✅ perm |
-| 8 | ToolSystem | B | 8 | — | IInventoryItem + IHighlightable + IInteractable + IDamageable + ICrushable + IHammerTarget + ISupportToggle + IMoldReceiver | ItemEquipBridge (owns) | — | ✅ | ⚠️ D completes ToolBuilder |
-| 9 | MiningSystem | C | 0 | — | — | — | — | ✅ | ✅ |
-| 10 | OreSystem | C | 0 | — | — | — | — | ✅ | ✅ |
-| 11 | AutoMinerSystem | C | 2 | — | IInteractable ← InteractionSys | — | OreSystem (concrete) | ❌ | ✅ |
-| 12 | SellerSystem | C | 1 | — | — | — | OrePiece (concrete) | ❌ | ⚠️ E adds BoxObject |
-| 13 | BuildingSystem | D | 3 | — | IInventoryItem + IInteractable + IHighlightable | — | — | ✅ | ✅ |
-| 14 | ConveyorSystem | D | 1 | — | IInteractable ← InteractionSys | — | — | ✅ | ✅ |
-| 15 | ProcessingSystem | E | 2 | — | IInteractable ← InteractionSys | — | OreSystem (concrete) | ❌ | planned |
-| 16 | SortingSystem | E | 0 | — | — | — | — | ✅ | planned |
-| 17 | PackagingSystem | E | 1 | — | — | — | OrePiece (concrete) | ❌ | planned |
-| 18 | QuestSystem | F | 0 | — | — | — | — | ✅ | planned |
-| 19 | ResearchSystem | F | 0 | — | — | — | — | ✅ | planned |
-| 20 | SaveSystem | G | 0 | ISaveLoadable* ×5 | — | — | — | ✅ | planned |
-| 21 | SoundSystem | H | 0 | — | — | — | — | ✅ | planned |
-| 22 | SettingsSystem | H | 0 | — | — | — | — | ✅ | planned |
-| 23 | PauseSystem | H | 1 | — | — | — | SavingLoadingMgr (concrete) | ❌ | planned |
-| 24 | ContractSystem | I | 0 | — | — | — | — | ✅ | planned |
-| 25 | WorldObjectSystem | I | 3+ | — | — | — | multiple (concrete) | ❌ | planned |
-| 26 | MainMenuSystem | I | 1 | — | — | — | SavingLoadingMgr (concrete) | ❌ | planned |
-| 27 | DebugSystem | J | 3+ | — | — | — | multiple (concrete) | ❌ | planned |
-| 28 | MenuSystem | J | 3+ | — | — | — | multiple (concrete) | ❌ | planned |
+| # | System | Phase | L | Shape | Why this shape | Portable |
+|---|--------|-------|---|-------|---------------|----------|
+| 1 | ShopUISystem | A | 0 | 🕷️ Spider | Defines IShopMoney + IShopItemProvider. Receives implementations. Never reaches out. | ✅ |
+| 2 | InteractionSystem | A | 0 | 🕷️ Spider | Defines IInteractable. Raycasts to find implementors. | ✅ |
+| 3 | EconomySystem | A | 1 | 🔌 Adapter + 📡 Broadcaster | Implements IShopMoney (plugs into ShopUI). Fires OnMoneyChanged. MoneyBridge wires it. | ✅ |
+| 4 | InventorySystem | B | 0 | 🕷️ Spider + 📡 Listener | Defines IInventoryItem. Listens to OnToolPickupRequested. | ✅ |
+| 5 | PlayerSystem | B | 0 | 📡 Listener | Pure listener — OnItemEquipped, OnMenuStateChanged. No interfaces. | ✅ |
+| 6 | HighlightSystem | B | 0 | 🕷️ Spider + 📡 Listener | Defines IHighlightable. Listens to OnItemEquipped. | ✅ perm |
+| 7 | ToolSystem | B-1 | 5 | 🔍 Hunter + 📡 Broadcaster | 9 owned interfaces — each tool scans world via GetComponent<>. Fires OnPickaxeHit. 3 bridges receive context. | ✅ |
+| 8 | MiningSystem | C | 0 | 📡 Broadcaster | Fires 5 events. Zero interfaces. Zero deps. Pure emitter. | ✅ |
+| 9 | OreSystem | C | 0 | 🔌 Adapter + 📡 Broadcaster | OrePiece implements ICrushable+IMagnetGrabbable+IScannable+IDamageable. Fires OnOreSold. | ✅ |
+| 10 | AutoMinerSystem | C | 2 | 🔌 Adapter + ❌ Concrete | Implements IInteractable. But concrete dep on OrePiecePoolManager+OreLimitManager. | ❌ |
+| 11 | SellerSystem | C | 1 | ❌ Concrete + 📡 Broadcaster | Direct OrePiece ref. Fires OnOreSold. | ❌ |
+| 12 | BuildingSystem | D | 3 | 🔌 Adapter (×7) + 📡 Broadcaster | Heaviest adapter — implements 7 interfaces from 4 systems. Fires OnBuildingPlaced. Provides BuildingToolBridge. | ✅ |
+| 13 | ConveyorSystem | D | 1 | 🔌 Adapter | Implements IInteractable on 2 scripts. Trigger-based physics. | ✅ |
+| 14 | ProcessingSystem | E | 2 | 🔌 Adapter + ❌ Concrete | Implements IInteractable+IMoldReceiver. Concrete dep on OreSystem. | ❌ |
+| 15 | SortingSystem | E | 0 | (standalone) | Trigger-based sorting. No interfaces, no events. Self-contained. | ✅ |
+| 16 | PackagingSystem | E | 1 | ❌ Concrete | Direct OrePiece ref. | ❌ |
+| 17 | QuestSystem | F | 0 | 📡 Listener | Subscribes OnOreMined, OnOreSold, OnBuildingPlaced. Pure listener. | ✅ |
+| 18 | ResearchSystem | F | 0 | 📡 Listener | Subscribes quest completion events. | ✅ |
+| 19 | SaveSystem | G | 0 | 🕷️ Spider (🌍 borderline Infra) | Defines ISaveLoadable* ×5. Universal like GameEvents — everyone implements. | ✅ |
+| 20 | SoundSystem | H | 0 | 📡 Listener | Subscribes OnPickaxeHit, OnToolSwing, etc. | ✅ |
+| 21 | SettingsSystem | H | 0 | (standalone) | UI wiring via [SerializeField]. | ✅ |
+| 22 | PauseSystem | H | 1 | ❌ Concrete | Direct SavingLoadingMgr ref. | ❌ |
+| 23 | ContractSystem | I | 0 | 📡 Listener | Subscribes contract events. | ✅ |
+| 24 | WorldObjectSystem | I | 3+ | ❌ Concrete | Multiple direct deps. Game-specific world flavoring. | ❌ |
+| 25 | MainMenuSystem | I | 1 | ❌ Concrete | Direct SavingLoadingMgr ref. | ❌ |
+| 26 | DebugSystem | J | 3+ | ❌ Concrete | Touches everything. Dev tools. | ❌ |
+| 27 | MenuSystem | J | 3+ | ❌ Concrete | Game-wide meta. | ❌ |
+
+### Shape Distribution
+
+| Shape | Count | Systems |
+|-------|-------|---------|
+| 🕷️ Spider | 5 | ShopUI, Interaction, Inventory, Highlight, SaveSystem |
+| 🔍 Hunter | 1 | ToolSystem |
+| 🔌 Adapter | 6 | Economy, OreSystem, BuildingSystem, ConveyorSystem, AutoMiner*, Processing* |
+| 📡 Broadcaster/Listener | 8 | PlayerSystem, MiningSystem, QuestSystem, ResearchSystem, SoundSystem, ContractSystem + (many systems also broadcast/listen alongside their primary shape) |
+| (standalone) | 2 | SortingSystem, SettingsSystem |
+| ❌ Concrete | 7 | AutoMiner, Seller, Packaging, Pause, WorldObject, MainMenu, Debug, Menu |
+| 🌍 Infrastructure | — | GameEvents, UIManager, Singleton, GlobalEnums (+ SaveSystem borderline) |
+
+*AutoMiner and Processing are Adapter+Concrete hybrids — they implement interfaces but also have unavoidable concrete deps.
 
 ---
 
@@ -6076,9 +6260,11 @@ phase-All/
 
 **Portability:** Truly L0. The system never imports any concrete class. It receives `IShopMoney` via Build() and never knows if it's EconomyManager, a mock, or a server-backed wallet. Every cross-system wire is a GameEvent. Drop the folder in a new project, provide any IShopMoney implementation, subscribe to events → full shopping UI works.
 
-**Interface owned:** `IShopMoney` — sits at the system boundary. ShopDataService calls GetMoney/AddMoney/CanAfford on it. EconomyManager (external) implements it. MoneyBridge (in EconomySystem) wires the concrete to the interface.
+**Interfaces owned (2):**
+- `IShopMoney` — ShopDataService calls GetMoney/AddMoney/CanAfford. EconomyManager implements it. MoneyBridge (in EconomySystem) wires concrete to interface.
+- `IShopItemProvider` (**DIP pattern**) — SO_ShopItemDef stores `UnityEngine.Object`, casts to IShopItemProvider at runtime. If set: delegates GetName/GetDescription/GetIcon to the external provider. If null: uses own fields. SO_BuildingInventoryDefinition (Phase D) implements it. **This eliminates the concrete Phase D import** — the shop item never knows SO_BuildingInventoryDefinition exists, only the interface.
 
-**Finalized:** ✅ Yes. Phase F adds OnUnlockedCategory subscribers (no change to ShopUI). Phase G adds purchase tracking (minor DataService field). Core architecture is permanent.
+**Finalized:** ✅ Yes. Phase F adds OnUnlockedCategory subscribers (no change to ShopUI). Phase G adds purchase tracking (minor DataService field). Core architecture is permanent. Phase D only adds `IShopItemProvider` implementation on its SO — zero ShopUISystem modification.
 
 ---
 
@@ -6140,25 +6326,33 @@ phase-All/
 
 ---
 
-### 7. DamageSystem — L0 ✅ PERMANENTLY FINALIZED
+### 7. ToolSystem — L5 ✅ FINALIZED (Phase B-1)
 
-**What it does:** Defines the contract `IDamageable` — any world object that can take damage at a position. ToolPickaxe raycasts → GetComponent\<IDamageable\>() → calls TakeDamage(damage, hitPoint).
+**What it does:** BaseHeldTool is the base class for all 11 equippable tools. On equip → parents ViewModel to camera's viewModelContainer → hides WorldModel → fires OnItemEquipped. HandleActiveInput routes per-frame input (LMB/RMB/R/Q) to virtual methods. Each tool does ONE thing via an interface:
 
-**Portability:** Truly L0. Single interface, 7 lines, zero imports. The smallest possible system.
+- **ToolPickaxe** — swing + delayed raycast → `ICrushable.TryCrush()` + `IDamageable.TakeDamage()` + Rigidbody.AddForce
+- **ToolHardHat** — extends ToolPickaxe (different SavableObjectID)
+- **ToolMagnet** — OverlapSphere → SpringJoint pull → `IMagnetGrabbable` for filter modes + holder tracking
+- **ToolHammer** — raycast → `IHammerTarget.OnHammerPrimary()` / `OnHammerSecondary()`
+- **ToolMiningHat** — toggle light on equip/unequip
+- **ToolSupportsWrench** — raycast → `ISupportToggleable.SetSupportsEnabled(bool)`
+- **ToolResourceScanner** — continuous raycast → `IScannable.GetScanDisplayName()`
+- **ToolBuilder** — ghost preview + place via `IBuildingToolContext` (15 methods — complete code, not stub)
+- **ToolCastingMold** — swing → `IMoldReceiver.InsertMold(int)`
+- **RapidAutoMinerDrillBit** — attach to machine via `IDrillBitHost`, durability curve, mesh swap
 
-**Finalized:** ✅ PERMANENTLY. One interface, never changes. OreNode and DamageableOrePiece implement it. Future damageable objects just implement it.
+**Caller-defines pattern:** ToolSystem owns ALL 9 interfaces it calls. Other phases implement them on their objects. Copy the folder → you get every interface. Each `GetComponent<IXxx>()` returns null if the implementing phase isn't typed → code path skips → tool still compiles and runs with reduced functionality.
 
----
+**Portability:** L5 (5 imported interfaces that BaseHeldTool implements: IInventoryItem, IHighlightable, IInteractable, ISaveLoadableObject, IIconItem). Copy folder + 5 interface files (~60 lines total) → compiles in any Unity project. Zero concrete cross-phase imports. Zero stubs. Zero file replacements needed by any future phase.
 
-### 8. ToolSystem — L8 ✅ MOSTLY FINALIZED
+**9 Owned interfaces:** IDamageable, ICrushable, IMagnetGrabbable, IScannable, IHammerTarget, ISupportToggleable, IMoldReceiver, IBuildingToolContext, IDrillBitHost. All live in ToolSystem/Interface/ subfolder.
 
-**What it does:** BaseHeldTool is the base class for all equippable items. On equip → parents ViewModel to camera's viewModelContainer → hides WorldModel → fires OnItemEquipped. HandleActiveInput routes per-frame input (LMB/RMB/R/Q) to virtual methods. Each tool subclass overrides what it needs: ToolPickaxe swings + delayed raycast → IDamageable.TakeDamage + ICrushable check for ore crushing. ToolMagnet pulls Rigidbodies via SpringJoint. ToolHammer targets IHammerTarget for pack/take. ToolSupportsWrench targets ISupportToggle. ToolCastingMold (Phase E) targets IMoldReceiver. ToolBuilder shows ghost preview + places buildings. ItemEquipBridge sits on the Player GO, subscribes OnItemEquipped → calls item.SetOwnerContext(cam, container, magnetPos).
+**3 Bridges:**
+- `ItemEquipBridge` (lives HERE) — OnItemEquipped → SetOwnerContext(cam, container, magnetPos). Connects ToolSystem ↔ PlayerSystem.
+- `BuildingToolBridge` (Phase D provides, implements IBuildingToolContext) — wraps BuildingManager calls. Same pattern as ItemEquipBridge.
+- `DrillBitBridge` (Phase E provides, RapidAutoMiner implements IDrillBitHost) — pushes drill speed + attach/detach.
 
-**Portability:** L8 (8 interface deps — all lightweight). Implements/uses: IInventoryItem (slot storage), IHighlightable (outline on hover), IInteractable (pickup via E key), IDamageable (pickaxe hits), ICrushable (pickaxe ore crushing), IHammerTarget (hammer pack/take), ISupportToggle (wrench scaffolding), IMoldReceiver (casting mold placement). Copy folder + 8 interface files → works. All are small .cs files (7-20 lines each).
-
-**Bridge:** `ItemEquipBridge` — lives HERE. Connects ToolSystem ↔ PlayerSystem. When a tool is equipped, the bridge provides camera + transform context without PlayerMovement knowing about tools.
-
-**Finalized:** ⚠️ MOSTLY. ToolBuilder is partial — Phase D completes it with full placement logic. ToolCastingMold is Phase E. All other tools (Pickaxe, Magnet, Hammer, MiningHat, SupportsWrench, ResourceScanner) are done.
+**Finalized:** ✅ ALL 11 tools complete. No stubs. Future phases only provide bridge implementations + implement interfaces on their objects. Only Phase G fills save/load method bodies (designed for) and Phase H modifies 2 method bodies (GetControlsText for keybinds, GetIcon for SettingsManager).
 
 ---
 
@@ -6291,25 +6485,131 @@ phase-All/
 | DebugSystem | J | planned L3+ | ❌ No | Touches everything |
 | MenuSystem | J | planned L3+ | ❌ No | Game-wide meta |
 
-**7 future systems WILL be L0 → brings total to 22/28 = 79% portable at project completion.**
+**7 future systems WILL be L0 → brings total to 21/27 = 78% portable at project completion.**
+**(DamageSystem merged into ToolSystem B-1 → 27 total systems, not 28)**
+
+---
+
+## Future Phase Modifications to Existing Systems
+
+> Every modification below is required for 100% main-source functionality (including nice-to-have features).
+> "Type" column: **Fill stub** = method body was empty by design. **Add method** = new public method. **Add field** = new [SerializeField].
+> **Modify body** = change existing method logic. **Add line** = append 1-2 lines inside existing method.
+
+### Phase A Systems — Modified By Future Phases
+
+| System | File | Phase | What Changes | Type | Why (main-source feature) | Avoidable? |
+|--------|------|-------|-------------|------|--------------------------|-----------|
+| ShopUISystem | `ShopDataService.cs` | F | Add unlock method — quest completion unlocks shop items | Add method | Quests unlock new shop categories | Could use GameEvent sub |
+| ShopUISystem | `ShopDataService.cs` | G | Add `ShopPurchases` collection for persistent purchase history | Add field + methods | Save remembers what you bought | ❌ |
+| ShopUISystem | `ShopUIOrchestrator.cs` | H | Add sound calls on purchase/add/remove cart | Add 3 lines | UI sounds on shop actions | ✅ Use GameEvent (RaiseUISound) |
+| ShopUISystem | `ShopDataService.cs` | J | Show debug categories when dev mode active | Add method | Debug: see hidden items | ❌ |
+| InteractionSystem | `SimplePlayerInteraction.cs` | B | Add guard: skip interact if player is grabbing | Add 1 line | Grab + interact conflict | ❌ |
+| InteractionSystem | `SimplePlayerInteraction.cs` | H | Replace `KeyCode.E` → Input System action | Modify body | Rebindable interact key | ❌ |
+| EconomySystem | `EconomyManager.cs` | D | Add `GetPriceOfItemProvider(IShopItemProvider)` | Add method | BuildingCrate.GetSellValue needs shop price | ❌ |
+| EconomySystem | `EconomyManager.cs` | G | Add `SetMoney(float)` | Add method | Save/load restores money | ❌ |
+| EconomySystem | `EconomyManager.cs` | J | Add `UnlockAllShopItems()` | Add method | Debug shortcut | ❌ |
+| UIManager | `UIManager.cs` | B | Add inventory panel + Tab key routing + CloseAll adds RaiseCloseInventoryView | Add lines | Inventory opens via Tab | ❌ (designed to grow) |
+| UIManager | `UIManager.cs` | F | Add quest tree + Q key priority routing | Add lines | Quest tree opens via Q | ❌ (designed to grow) |
+| UIManager | `UIManager.cs` | H | Add ESC → pause menu, cursor lock/unlock | Add lines | Pause menu + cursor management | ❌ (designed to grow) |
+| UIManager | `UIManager.cs` | I | Add contracts panel + ESC routing | Add lines | Contracts UI | ❌ (designed to grow) |
+
+### Phase B Systems — Modified By Future Phases
+
+| System | File | Phase | What Changes | Type | Why (main-source feature) | Avoidable? |
+|--------|------|-------|-------------|------|--------------------------|-----------|
+| InventorySystem | `InventoryDataService.cs` | G | Add save/load serialization of slot contents | Add methods | Save remembers what's in inventory | ❌ |
+| PlayerSystem | `PlayerCamera.cs` | H | Read `SettingsManager.Ins` for sensitivity/FOV/bob | Modify body (3 values) | Settings become configurable | ❌ |
+| PlayerSystem | `PlayerMovement.cs` | H | Replace `Input.GetKeyDown` → Input System actions | Modify body (structural) | Keybind rebinding | ❌ |
+| PlayerSystem | `PlayerMovement.cs` | J | Add noclip toggle (V key, dev mode only) | Add ~30 lines | Debug fly mode | ❌ |
+| HighlightSystem | — | **NEVER** | **ZERO modifications ever** | — | Permanently finalized | ✅ |
+
+### Phase B-1 ToolSystem — Modified By Future Phases
+
+| System | File | Phase | What Changes | Type | Why (main-source feature) | Avoidable? |
+|--------|------|-------|-------------|------|--------------------------|-----------|
+| ToolSystem | `BaseHeldTool.LoadFromSave()` | G | Fill empty method body with BaseHeldToolSaveData deserialization | Fill stub | Tools persist in inventory across saves | ❌ (designed for) |
+| ToolSystem | `BaseHeldTool.GetCustomSaveData()` | G | Fill `return "{}"` with real serialization | Fill stub | Save knows which slot each tool is in | ❌ (designed for) |
+| ToolSystem | `ToolMagnet.cs` | G | Add LoadFromSave/GetCustomSaveData override for SelectionMode | Add override | Save remembers magnet filter mode | ❌ (designed for) |
+| ToolSystem | `ToolBuilder.cs` | G | Add LoadFromSave/GetCustomSaveData override for definition+qty | Add override | Save remembers building type + count | ❌ (designed for) |
+| ToolSystem | `RapidAutoMinerDrillBit.cs` | G | Add LoadFromSave/GetCustomSaveData override for durability | Add override | Save remembers drill wear state | ❌ (designed for) |
+| ToolSystem | `BaseHeldTool.GetControlsText()` | H | Change `"Drop - G"` → `KeybindManager.GetBindingText(...)` | Modify body | Keybind text shows actual bindings | ❌ |
+| ToolSystem | `BaseHeldTool.GetIcon()` | H | Add `SettingsManager.UseProgrammerIcons` check | Modify body | Programmer icon toggle in settings | ❌ |
+
+### Phase C Systems — Modified By Future Phases
+
+| System | File | Phase | What Changes | Type | Why (main-source feature) | Avoidable? |
+|--------|------|-------|-------------|------|--------------------------|-----------|
+| OreSystem | `OrePiece.cs` | C | Implement `ICrushable` + `IMagnetGrabbable` + `IScannable` + `IDamageable` (on DamageableOrePiece) | Add `implements` | Tools interact with ore via interfaces | ❌ |
+| MiningSystem | `OreNode.cs` | C | Implement `IDamageable` + `IScannable` | Add `implements` | Pickaxe damages nodes, scanner reads names | ❌ |
+| MiningSystem | `OreNode.cs` | G | Implement `ISaveLoadableStaticBreakable` | Add `implements` | Broken nodes persist across saves | ❌ |
+| AutoMinerSystem | `AutoMiner.cs` | G | Implement `ICustomSaveDataProvider` | Add `implements` | Save remembers on/off state | ❌ |
+
+### Phase D Systems — Modified By Future Phases
+
+| System | File | Phase | What Changes | Type | Why (main-source feature) | Avoidable? |
+|--------|------|-------|-------------|------|--------------------------|-----------|
+| BuildingSystem | `BuildingObject.cs` | D | Implement `IHammerTarget` + `ISupportToggleable` + `IScannable` + `IShopItemProvider` (on SO_BuildingInventoryDef) | Add `implements` | Tools + shop interact with buildings | ❌ |
+| BuildingSystem | `BuildingCrate.cs` | D | Implement `IHammerTarget` + `IScannable` | Add `implements` | Hammer picks up crates, scanner reads name | ❌ |
+| BuildingSystem | — | D | Provide `BuildingToolBridge` (implements `IBuildingToolContext`) | New file | ToolBuilder gets building placement context | ❌ |
+| BuildingSystem | `BuildingObject.cs` | G | Implement `ISaveLoadableBuildingObject` | Already stubbed | Buildings persist across saves | ❌ (designed for) |
+| ConveyorSystem | `RoutingConveyor.cs` | G | Already has `ICustomSaveDataProvider` | Already done | Direction state persists | ✅ |
+
+### Phase E Systems — Modified By Future Phases
+
+| System | File | Phase | What Changes | Type | Why (main-source feature) | Avoidable? |
+|--------|------|-------|-------------|------|--------------------------|-----------|
+| ProcessingSystem | `CastingFurnaceMoldArea.cs` | E | Implement `IMoldReceiver` | Add `implements` | ToolCastingMold inserts molds | ❌ |
+| ProcessingSystem | `RapidAutoMiner.cs` | E | Implement `IDrillBitHost` | Add `implements` | DrillBit attaches to machine | ❌ |
+| ProcessingSystem | `CastingFurnace.cs` | G | Implement `ICustomSaveDataProvider` | Add `implements` | Furnace state persists | ❌ |
+
+### Summary: Modification Counts Per System
+
+| System | Total future mods | Fill stubs | Add methods | Modify body | Add implements |
+|--------|------------------|-----------|-------------|-------------|---------------|
+| **UIManager** | 4 | 0 | 0 | 0 | 0 | (adds 1-2 lines per phase — designed to grow) |
+| **EconomyManager** | 3 | 0 | 3 | 0 | 0 |
+| **ShopDataService** | 3 | 0 | 2 | 0 | 0 | (+1 field) |
+| **PlayerMovement** | 2 | 0 | 0 | 2 | 0 |
+| **BaseHeldTool** | 4 | 2 | 0 | 2 | 0 |
+| **ToolMagnet/Builder/DrillBit** | 3 | 0 | 0 | 0 | 3 | (save overrides) |
+| **InteractionSystem** | 2 | 0 | 0 | 2 | 0 |
+| **InventoryDataService** | 1 | 0 | 1 | 0 | 0 |
+| **PlayerCamera** | 1 | 0 | 0 | 1 | 0 |
+| **HighlightSystem** | **0** | 0 | 0 | 0 | 0 | **NEVER modified** |
+
+### The 3 Most-Modified Scripts
+
+1. **UIManager.cs** — touched by B, F, H, I (4 phases). Adds 1-2 lines each time. Designed to grow — it's the centralized keyboard router.
+2. **EconomyManager.cs** — touched by D, G, J (3 phases). Each adds 1 method. It's the money owner — every system that sells/buys needs a query.
+3. **BaseHeldTool.cs** — touched by G, H (2 phases). G fills save stubs. H modifies 2 method bodies. All other tool files are untouched.
 
 ---
 
 ## Final Scorecard
 
 ```
-  CURRENT (Phases A–D built):
-    Portable: 19/28 = 68%
-    Built + finalized L0: 15 systems
+  CURRENT (Phases A–D + B-1 built):
+    Portable: 19/27 = 70%  (DamageSystem merged → 27 not 28)
+    Built + finalized: 14 systems (8 L0, 6 L1-L5 interface-only)
 
   PROJECTED (all phases complete):
-    Portable: 22/28 = 79%
-    L0: 22 systems
+    Portable: 21/27 = 78%
     Game-specific: 6 systems (AutoMiner, Seller, Processing, Packaging, Pause, MainMenu)
     Unavoidably game-specific: 3 systems (WorldObject, Debug, Menu)
 
-  INTERFACES: 10 owned by L0 systems
-  BRIDGES: 2 (MoneyBridge, ItemEquipBridge)
+  INTERFACES: 9 owned by ToolSystem (B-1) — caller-defines / DIP pattern
+              2 owned by ShopUISystem (A) — IShopMoney + IShopItemProvider (DIP)
+              + IInteractable (InteractionSystem A),
+                IInventoryItem (InventorySystem B), IHighlightable (HighlightSystem B),
+                ISaveLoadable* ×5 (SaveSystem G)
+              = 19 total interfaces across project
+
+  BRIDGES: 4 total
+    MoneyBridge (EconomySystem A → ShopUISystem)
+    ItemEquipBridge (ToolSystem B-1 → PlayerSystem)
+    BuildingToolBridge (BuildingSystem D → ToolSystem B-1) — Phase D provides
+    DrillBitHost (RapidAutoMiner E → ToolSystem B-1) — Phase E provides
 ```
 
 <!-- ==== FILE: learn/handTyped(latest)/Scripts/DEBUG_Check.cs ==== -->
@@ -16144,8 +16444,8 @@ public class SimplePlayerInteraction : MonoBehaviour
 |----------|-------|
 | Phase | A |
 | Level | **L0** |
-| Scripts | ShopUI, ShopUIOrchestrator, ShopDataService, ShopDataWrapper, Field_ShopCategory, Field_ShopItem, Field_ShopCartItem, SO_ShopCategory, SO_ShopItemDef, ShopSpawnPoint, IShopMoney |
-| Owns Interface | `IShopMoney` |
+| Scripts | ShopUI, ShopUIOrchestrator, ShopDataService, ShopDataWrapper, Field_ShopCategory, Field_ShopItem, Field_ShopCartItem, SO_ShopCategory, SO_ShopItemDef, ShopSpawnPoint, IShopMoney, IShopItemProvider |
+| Owns Interface | `IShopMoney`, `IShopItemProvider` |
 | External _-Systems/ Deps | **NONE** |
 
 ## FREE Requirements
@@ -16181,11 +16481,16 @@ public class SimplePlayerInteraction : MonoBehaviour
   │  ShopSpawnPoint (marks spawn positions)
   │  ShopDataWrapper (WShopItem — SO + session state)
   │
-  ├── BOUNDARY ───────────────────────────────────
+  ├── BOUNDARY ───────────────────────────────────────
   │
   │  ◆ IShopMoney ◆ (defined here, external systems implement)
   │    GetMoney(), AddMoney(), CanAfford()
   │    ShopDataService receives via Build() — never knows who implements
+  │
+  │  ◆ IShopItemProvider ◆ (defined here, external SOs implement)
+  │    GetItemName(), GetItemDescription(), GetItemIcon()
+  │    SO_ShopItemDef stores UnityEngine.Object → casts to IShopItemProvider at runtime
+  │    If set: delegates Name/Description/Icon. If null: uses own fields.
   │
   ├── EXTERNAL ───────────────────────────────────
   │
@@ -16196,7 +16501,8 @@ public class SimplePlayerInteraction : MonoBehaviour
   │  OUT: → OnUnlockedCategory ── self (refresh tabs after purchase)
   │
   │  IMPLEMENTED BY:
-  │  ◆ IShopMoney ◆ ──▶ EconomyManager (EconomySystem)
+  │  ◆ IShopMoney ◆ ──▶ EconomyManager (EconomySystem A)
+  │  ◆ IShopItemProvider ◆ ──▶ SO_BuildingInventoryDefinition (BuildingSystem D)
   │
   └───────────────────────────────────────────────
 ```
@@ -16214,7 +16520,9 @@ public class SimplePlayerInteraction : MonoBehaviour
 ## Checklist
 
 - [x] Zero _-Systems/ imports
-- [x] Owns IShopMoney — consumers implement it
+- [x] Owns IShopMoney — EconomyManager implements it
+- [x] Owns IShopItemProvider — SO_BuildingInventoryDefinition implements it (DIP pattern)
+- [x] SO_ShopItemDef stores UnityEngine.Object (not concrete type) for external provider
 - [x] All Field_ are display-only, SO_ are pure data
 - [x] DataService testable via `new` (DEBUG_Check)
 - [x] SubManager uses isFirstEnable pattern
@@ -16301,6 +16609,27 @@ public class Field_ShopItem : MonoBehaviour
 	}
 }
 
+<!-- ==== FILE: learn/phase-a/Scripts/_-Systems/ShopUISystem/IShopItemProvider.cs ==== -->
+using UnityEngine;
+
+/// <summary>
+/// Any external data source that can provide name, description, and icon for a shop item.
+/// SO_ShopItemDef stores a UnityEngine.Object ref — at runtime casts to IShopItemProvider.
+/// If the cast succeeds (e.g. SO_BuildingInventoryDefinition in Phase D implements this),
+/// the shop item delegates its display text to the external provider.
+/// If null or cast fails → shop item uses its own fields.
+///
+/// ShopUISystem OWNS this interface (caller-defines / DIP pattern).
+/// Implementors: SO_BuildingInventoryDefinition (Phase D).
+/// Callers: SO_ShopItemDef.GetName(), GetDescription(), GetIcon().
+/// </summary>
+public interface IShopItemProvider
+{
+    string GetItemName();
+    string GetItemDescription();
+    Sprite GetItemIcon();
+}
+
 <!-- ==== FILE: learn/phase-a/Scripts/_-Systems/ShopUISystem/IShopMoney.cs ==== -->
 /// <summary>
 /// Interface for any money/currency provider. ShopSystem depends on this — not on EconomyManager directly.
@@ -16333,27 +16662,71 @@ public class SO_ShopCategory : ScriptableObject
 }
 
 <!-- ==== FILE: learn/phase-a/Scripts/_-Systems/ShopUISystem/SO_ShopItemDef.cs ==== -->
-﻿using System.Collections.Generic;
+﻿using UnityEngine;
 
-using UnityEngine;
-using UnityEngine.InputSystem;
-using UnityEngine.UI;
-using TMPro;
-
-using SPACE_UTIL;
-
+/// <summary>
+/// I define what a shop item IS — name, description, price, icon, prefab to spawn.
+/// If _externalProvider is set (e.g. SO_BuildingInventoryDefinition from Phase D),
+/// GetName/GetDescription/GetIcon delegate to it via IShopItemProvider interface.
+/// This avoids importing any concrete Phase D type — the SO_ShopItemDef only knows
+/// about IShopItemProvider (owned by ShopUISystem).
+///
+/// Who uses me: ShopDataService wraps me into WShopItem, ShopUIOrchestrator displays me.
+/// </summary>
 [CreateAssetMenu(menuName = "SO/SO_ShopItemDef", fileName = "SO_ShopItemDef")]
 public class SO_ShopItemDef : ScriptableObject
 {
-	public string itemDefName = "itemDefName";
+	[SerializeField] string _itemDefName = "itemDefName";
 	[TextArea(2, 3)]
-	public string descr;
-	public float defaultPrice;
-	public bool isDefaultLocked = false;
+	[SerializeField] string _descr;
+	[SerializeField] float _defaultPrice;
+	[SerializeField] bool _isDefaultLocked = false;
+	[SerializeField] Sprite _sprite;
+	[SerializeField] GameObject _pfObject;
+	[SerializeField] int _maxStackableCount = 10;
 
-	public Sprite sprite;
-	public GameObject pfObject;
-	public int maxStackableCount = 10;
+	[Header("External Provider (DIP — caller-defines pattern)")]
+	[Tooltip("Drag any SO that implements IShopItemProvider (e.g. SO_BuildingInventoryDefinition). If set, Name/Description/Icon delegate to it.")]
+	[SerializeField] Object _externalProvider;
+	[SerializeField] bool _useExternalProvider;
+
+	/// <summary> Returns the external provider cast to IShopItemProvider, or null. </summary>
+	public IShopItemProvider GetExternalProvider() => _externalProvider as IShopItemProvider;
+
+	/// <summary> Returns the raw Object ref — used by EconomyManager.GetPriceOfItemProvider for identity match. </summary>
+	public Object GetExternalProviderRef() => _externalProvider;
+
+	/// <summary> Name: delegates to IShopItemProvider if set, else uses own field. </summary>
+	public string GetName()
+	{
+		if (_useExternalProvider && _externalProvider is IShopItemProvider p)
+			return p.GetItemName();
+		return _itemDefName;
+	}
+
+	/// <summary> Description: delegates to IShopItemProvider if set, else uses own field. </summary>
+	public string GetDescription()
+	{
+		if (_useExternalProvider && _externalProvider is IShopItemProvider p)
+			return p.GetItemDescription();
+		return _descr;
+	}
+
+	/// <summary> Icon: delegates to IShopItemProvider if set, else uses own field. </summary>
+	public Sprite GetIcon()
+	{
+		if (_useExternalProvider && _externalProvider is IShopItemProvider p)
+		{
+			Sprite ext = p.GetItemIcon();
+			if (ext != null) return ext;
+		}
+		return _sprite;
+	}
+
+	public float GetDefaultPrice() => _defaultPrice;
+	public bool GetIsDefaultLocked() => _isDefaultLocked;
+	public GameObject GetPfObject() => _pfObject;
+	public int GetMaxStackableCount() => _maxStackableCount;
 }
 
 <!-- ==== FILE: learn/phase-a/Scripts/_-Systems/ShopUISystem/ShopDataService.cs ==== -->
@@ -40766,4 +41139,91 @@ After initial delivery, did a method-by-method cross-reference of every original
 - **ToolBuilder stays as stub** — IBuildingPlacer would be a forced 15-method interface. Not worth it. Phase D replaces the file.
 - **RapidAutoMinerDrillBit + ToolDebugSpawnTool excluded** — Phase E/J tools. Not in Phase B ToolSystem.
 - **Result:** ToolSystem is L8 with 8 interface deps, 2 owned interfaces, ZERO concrete imports. All tools compile in Phase B alone. 100% main-source functionality preserved when later phases are present.
+
+---
+
+## Prompt: "Phase B-1 creation + IBuildingToolContext + IDrillBitHost bridge approach"
+
+**What I thought:**
+
+### Why Phase B-1 exists
+- ToolSystem was the ONLY system in Phase B that had concrete cross-phase imports (OrePiece, BuildingObject, ParticleManager). The other 3 systems (InventorySystem, PlayerSystem, HighlightSystem) were clean L0. Keeping the mess in Phase B contaminated the whole phase.
+- Phase A½ already set the sub-phase precedent. Phase B-1 = "tools as a separate typing checkpoint" — type all B core systems first, compile and test, THEN type tools.
+- The user specifically wanted all tools in ONE place — not scattered across C/D/E phases.
+
+### The caller-defines breakthrough
+- Old approach: each implementor's system owned the interface (DamageSystem owned IDamageable, MiningSystem owned ICrushable, BuildingSystem owned IHammerTarget). This meant ToolSystem imported interfaces from 6 different folders.
+- New approach: ToolSystem owns ALL 9 interfaces it calls. Copy the folder → you get everything. Other phases just `implement` them — zero changes to ToolSystem.
+- This is Dependency Inversion Principle applied correctly: the HIGH-LEVEL module (tool) defines the abstraction, the LOW-LEVEL module (ore, building) fulfills it.
+
+### IBuildingToolContext — no more file replacement
+- Previously ToolBuilder was a stub (Phase D replaced the entire file). The user pushed back: "is there a way without affecting the file?"
+- IBuildingToolContext (15 methods: UpdateGhost, CanPlace, Place, Rotate, Cleanup, etc.) wraps all BuildingManager calls. Phase D provides BuildingToolBridge that implements it.
+- ToolBuilder is now COMPLETE code — full HandleActiveInput, PrimaryFire, Reload, QButtonPressed, DropItem logic. All via `buildCtx.Method()`. Without Phase D: buildCtx is null → all building operations are no-ops.
+- Same bridge pattern as ItemEquipBridge (OnItemEquipped → SetOwnerContext). BuildingToolBridge subscribes → calls `SetBuildingContext(this)`.
+
+### IDrillBitHost — RapidAutoMinerDrillBit moves into B-1
+- Previously excluded from ToolSystem (Phase E tool, 250 lines of RapidAutoMiner coupling).
+- IDrillBitHost (4 methods: GetDrillSpeed, AttachDrillBit, DetachDrillBit, GetIsOn) decouples the drill bit from the concrete RapidAutoMiner class.
+- DrillBit stores `IDrillBitHost host` instead of `RapidAutoMiner AttachedAutoMiner`. All 250 lines of durability/mesh-swap logic stay in B-1.
+
+### Sound via GameEvents (no Phase H tool modifications)
+- RaisePickaxeHit already decouples particles. Same approach for sounds: tools fire events (OnPickaxeHit, OnToolSwing, OnToolToggle, OnToolModeChanged), Phase H SoundManager subscribes.
+- Only remaining Phase H modifications: GetControlsText (needs return value from KeybindManager) + GetIcon (needs SettingsManager check). These can't be fire-and-forget.
+
+### Final state
+- **11 tools, 9 owned interfaces, 0 concrete imports, 0 stubs, 0 file replacements**
+- L5 portable (5 imported interfaces from A/B systems that BaseHeldTool implements)
+- Future phases only: implement interfaces on their objects + provide bridges
+- Phase G fills save/load stubs (designed for). Phase H modifies 2 method bodies (keybind + icon).
+
+### What this means for the project
+- The portability guarantee is now REAL — not theoretical. You can physically copy the ToolSystem folder, add 5 interface files, and it compiles in a brand new Unity project.
+- The "100% source fidelity with clean architecture" goal is achieved for tools. Every tool does exactly what the original source does, but through interface calls instead of concrete class imports.
+- The bridge pattern (ItemEquipBridge, BuildingToolBridge, DrillBitBridge) is the universal answer to "how do I give runtime context to a portable system without importing the provider." One pattern, applied consistently.
+
+---
+
+## Prompt: "System shape patterns observed across the project"
+
+**What I thought:**
+
+### The 5 System Shapes
+Analysing how all 27 systems actually connect, I found they aren't all using "DIP" — there are 5 distinct shapes:
+
+**1. 🕷️ Spider (Inward Provider)** — system sits alone, extends interface "legs" outward. Others grab them. The system DEFINES what it needs and RECEIVES implementations. It never reaches out.
+- ShopUISystem (IShopMoney + IShopItemProvider)
+- InventorySystem (IInventoryItem)
+- HighlightSystem (IHighlightable)
+- InteractionSystem (IInteractable)
+- SaveSystem (ISaveLoadable* ×5)
+
+**2. 🔍 Hunter (Outward Consumer)** — system DEFINES interfaces it needs, actively scans the world via `GetComponent<IXxx>()`. The interface lives with the caller (caller-defines/DIP), but implementations live in other phases. Key difference from Spider: Hunter reaches OUT, Spider receives IN.
+- ToolSystem (9 owned interfaces — each tool actively raycasts to find implementors)
+
+**3. 🔌 Adapter (Implementor)** — system IMPLEMENTS interfaces defined by Spiders or Hunters. It plugs into other systems' sockets. BuildingSystem is the heaviest adapter — implements 7 interfaces from 4 different systems.
+- BuildingSystem (implements IInventoryItem+IInteractable+IHighlightable+IHammerTarget+ISupportToggleable+IScannable+IShopItemProvider)
+- OreSystem (OrePiece implements ICrushable+IMagnetGrabbable+IScannable+IDamageable)
+- EconomySystem (implements IShopMoney)
+- ConveyorSystem (implements IInteractable on 2 scripts)
+
+**4. 📡 Broadcaster / Listener** — pure event-driven. No interfaces. Fires or subscribes to GameEvents.
+- MiningSystem = pure broadcaster (fires 5 events, zero deps)
+- QuestSystem / SoundSystem / ContractSystem = pure listeners
+- PlayerSystem = listener (OnItemEquipped, OnMenuStateChanged)
+
+**5. 🌍 Universal Infrastructure** — used by EVERY system, doesn't count as a dependency. It's the ground everything stands on.
+- GameEvents, UIManager, Singleton<T>, GlobalEnums, SPACE_UTIL
+- SaveSystem is borderline infrastructure — ISaveLoadable* is so universal it's like GameEvents
+
+### Key insight: Spider vs Hunter
+The user pointed out ShopUISystem and ToolSystem use fundamentally different patterns even though both "own interfaces." The Spider (ShopUI) passively receives — MoneyBridge PUSHES IShopMoney into it. The Hunter (ToolSystem) actively scans — each tool does `GetComponent<>()` every frame to find what it needs. Both are portable, but the shape is different.
+
+### IShopItemProvider addition
+Added `IShopItemProvider` to ShopUISystem — SO_ShopItemDef stores `UnityEngine.Object`, casts to IShopItemProvider at runtime. SO_BuildingInventoryDefinition (Phase D) implements it. This eliminates the last concrete Phase D import from Phase A. The shop item delegates Name/Description/Icon to the external provider without knowing what class it is.
+
+### The portability rule simplified
+- **Portable** = 🕷️ Spider + 🔍 Hunter + 🔌 Adapter + 📡 Broadcaster/Listener (interfaces + events only)
+- **Game-specific** = ❌ Concrete (direct class imports — inherent to the system's purpose, e.g. AutoMiner MUST call OrePiecePoolManager)
+- **Infrastructure** = 🌍 Universal (GameEvents, UIManager, SaveSystem) — everyone uses, nobody counts
 
