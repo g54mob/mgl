@@ -41227,3 +41227,5 @@ Added `IShopItemProvider` to ShopUISystem — SO_ShopItemDef stores `UnityEngine
 - **Game-specific** = ❌ Concrete (direct class imports — inherent to the system's purpose, e.g. AutoMiner MUST call OrePiecePoolManager)
 - **Infrastructure** = 🌍 Universal (GameEvents, UIManager, SaveSystem) — everyone uses, nobody counts
 
+
+
