@@ -351,10 +351,10 @@ body {
     flex-direction: column;
     overflow: hidden;
     z-index: 10;
-    transition: margin-left .2s var(--ease);
     position: relative;
+    flex-shrink: 0;
 }
-#file-sidebar.hidden { margin-left: calc(var(--sidebar-w) * -1); min-width: 0; }
+#file-sidebar.hidden { display: none !important; }
 #sidebar-resize {
     position: absolute;
     top: 0; right: 0; bottom: 0;
@@ -714,11 +714,12 @@ body {
     background: var(--surface);
     overflow-y: auto;
     padding: 16px 0;
-    display: none;
+    display: none !important;
     flex-direction: column;
     position: relative;
+    flex-shrink: 0;
 }
-#toc.show { display: flex; }
+#toc.show { display: flex !important; }
 #toc-resize {
     position: absolute;
     top: 0; right: 0; bottom: 0;
@@ -7100,6 +7101,11 @@ function setTocHidden(hide) {
     localStorage.setItem('mdv_toc_hidden', hide ? '1' : '0');
     if (hide) {
         tocEl.classList.remove('show');
+        tocEl.style.minWidth = '';
+    } else {
+        // Restore saved width if any
+        const savedW = localStorage.getItem('mdv_toc_w');
+        if (savedW) { tocEl.style.width = savedW + 'px'; tocEl.style.minWidth = savedW + 'px'; }
     }
     updateTocBtn();
 }
