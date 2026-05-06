@@ -27879,6 +27879,745 @@ public class ToolSupportsWrench : BaseHeldTool
 	}
 }
 
+<!-- ==== FILE: learn/phase-b-1/prototype/Proto_ToolSystem.cs ==== -->
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+/// <summary>
+/// STANDALONE PROTOTYPE — Full ToolSystem with complete architecture. Zero external deps.
+/// Drop on empty GO → Press Play. Creates everything at runtime with primitives.
+///
+/// MIRRORS THE REAL ARCHITECTURE:
+///   ✅ 9 INTERNAL interfaces (ToolSystem owns): IDamageable, ICrushable, IMagnetGrabbable,
+///      IScannable, IHammerTarget, ISupportToggleable, IMoldReceiver, IBuildingToolContext, IDrillBitHost
+///   ✅ 5 EXTERNAL interfaces (from other systems): IInteractable, IInventoryItem,
+///      IHighlightable, ISaveLoadableObject, IIconItem
+///   ✅ Inline GameEvents — static Action fields + LogEvent wrapper + frame number
+///   ✅ Inline enums — InteractionType, MagnetToolSelectionMode, AnimParamType
+///   ✅ Inline SO_InteractionOption — interaction wheel options
+///   ✅ Inline InventorySystem — hotbar slots, pickup via IInventoryItem, equip/drop
+///   ✅ Inline HighlightSystem — raycast → IHighlightable → color tint
+///   ✅ Inline ItemEquipBridge — OnItemEquipped → SetOwnerContext
+///   ✅ Inline BaseSellableItem → BasePhysicsObject chain
+///   ✅ Tools on ground implement IInteractable (E to pickup via "Take")
+///   ✅ Tools implement IHighlightable (tint when looked at)
+///   ✅ Tools implement IInventoryItem (stored in hotbar)
+///   ✅ Tools implement ISaveLoadableObject (stub — Phase G fills)
+///
+/// 11 tools covered (switch with number keys or E to pickup from ground):
+///   1-9 = switch tool, 0 = drop, E = interact (pickup tool / interact with world)
+///   LMB/RMB = tool primary/secondary, R = reload, Q = Q-action
+///   Tab = toggle inventory view, N = spawn ore, M = spawn node, L = dump event log
+/// </summary>
+public class Proto_ToolSystem : MonoBehaviour
+{
+    #region Inline Interfaces (same as real ToolSystem)
+    public interface IDamageable { void TakeDamage(float damage, Vector3 position); }
+    public interface ICrushable { bool CanCrush(); bool TryCrush(); }
+    public interface IMagnetGrabbable { void SetMagnetHolder(MonoBehaviour holder); void ClearMagnetHolder(); bool IsInBasket(); bool IsOnConveyor(); }
+    public interface IScannable { string GetScanDisplayName(); }
+    public interface IHammerTarget { void OnHammerPrimary(); void OnHammerSecondary(); }
+    public interface ISupportToggleable { void SetSupportsEnabled(bool enabled); }
+    public interface IMoldReceiver { void InsertMold(int moldType); }
+    public interface IBuildingToolContext { void UpdateGhost(Vector3 aim, Quaternion rot, int idx); bool CanPlace(); void Place(); void Cleanup(); }
+    public interface IDrillBitHost { float GetDrillSpeed(); void AttachDrillBit(MonoBehaviour bit); void DetachDrillBit(); bool GetIsOn(); }
+    #endregion
+
+    #region External Interfaces (from other systems — BaseHeldTool implements these)
+    // IInteractable — from InteractionSystem (Phase A). Tools on ground show "Take"/"Destroy" when E pressed.
+    public interface IInteractable { bool ShouldUseInteractionWheel(); string GetObjectName(); List<PInteractionOption> GetOptions(); void Interact(PInteractionOption opt); }
+    // IInventoryItem — from InventorySystem (Phase B). Tools stored in hotbar slots.
+    public interface IInventoryItem { string GetName(); string GetDescription(); int GetQty(); void SetQty(int v); int GetMaxAmount(); bool GetShouldEquipWhenPickedUp(); Sprite GetIcon(); GameObject GetGameObject(); void OnEquipped(); void HandleActiveInput(); void SetOwnerContext(Camera cam, Transform container, Transform magnetPos); void DropItem(); string GetControlsText(); }
+    // IHighlightable — from HighlightSystem (Phase B). Outlined when player looks at them.
+    public interface IHighlightable { int GetHighlightColor(); } // returns color index: 0=cyan, 1=green, 2=red
+    // ISaveLoadableObject — from SaveSystem (Phase G stub). Discovered via FindObjectsOfType.
+    public interface ISaveLoadableObject { bool ShouldBeSaved(); string GetCustomSaveData(); void LoadFromSave(string json); }
+    // IIconItem — from Phase B. GetIcon() display contract.
+    public interface IIconItem { Sprite GetIcon(); }
+    #endregion
+
+    #region Inline GameEvents (mirrors real GameEvents — static Action fields + LogEvent)
+    // → domain reload cleanup: all nulled in Start() (Pitfall #9)
+    static Action<IInventoryItem> OnToolPickupRequested;
+    static Action<IInventoryItem> OnItemEquipped;
+    static Action<IInventoryItem> OnItemPickedUp;
+    static Action<IInventoryItem> OnItemDropped;
+    static Action<int> OnToolSwitched;
+    static Action<bool> OnMenuStateChanged;
+    static Action<Vector3, Vector3, bool> OnPickaxeHit;
+    static List<string> eventLog = new List<string>();
+
+    static void LogEvent(string name, string detail = "")
+    {
+        string entry = $"[{Time.frameCount}] {name}{(detail != "" ? $"({detail})" : "")}";
+        eventLog.Add(entry); Debug.Log(entry);
+    }
+    #endregion
+
+    #region Inline Enums (mirrors GlobalEnumsB)
+    public enum InteractionType { take, destroy, toggle, pack, switchDirection }
+    public enum MagnetToolSelectionMode { everything, resourcesNotInFilter, resourcesNotOnConveyors }
+    public enum AnimParamType { attack1, idle }
+    #endregion
+
+    #region Inline SO_InteractionOption (mirrors real SO_InteractionOption)
+    [Serializable]
+    public class PInteractionOption { public string name; public InteractionType type; }
+    #endregion
+
+    #region State
+    Camera cam; CharacterController cc; float pitch;
+    // tool state
+    int activeTool = 0;
+    PTool[] hotbar = new PTool[10]; // 1-9 slots + 0 unused
+    PTool equippedTool;
+    IHighlightable highlighted; Renderer highlightedRenderer; Color highlightOrigColor;
+    bool isMenuOpen;
+    // magnet shared state
+    List<Rigidbody> magnetBodies = new List<Rigidbody>();
+    List<SpringJoint> magnetJoints = new List<SpringJoint>();
+    List<GameObject> magnetAnchors = new List<GameObject>();
+    Transform magnetOrigin;
+    int magnetFilter;
+    bool magnetWants;
+    // builder
+    PBuildCtx buildCtx;
+    GameObject ghost;
+    Quaternion buildRot = Quaternion.identity;
+    // drill
+    PDrillHost drillHost;
+    float drillDurability = 1f;
+    // mining hat
+    bool hatLightOn;
+    GameObject hatLight;
+    // scanner
+    string scanText = "No Target";
+    float attackCooldown = 0.8f, lastAttack = -1f;
+    #endregion
+
+    void Start()
+    {
+        // → Pitfall #9: domain reload cleanup
+        OnToolPickupRequested = null; OnItemEquipped = null; OnItemPickedUp = null;
+        OnItemDropped = null; OnToolSwitched = null; OnMenuStateChanged = null; OnPickaxeHit = null;
+        eventLog.Clear();
+
+        // → Subscribe GameEvents (mirrors real subscription order)
+        // 1. InventoryOrchestrator-like: handles pickup
+        OnToolPickupRequested += item => {
+            for (int i = 1; i <= 9; i++) { if (hotbar[i] == null) { hotbar[i] = item.GetGameObject().GetComponent<PTool>(); item.GetGameObject().SetActive(false); LogEvent("Inventory", $"added to slot {i}: {item.GetName()}"); if (item.GetShouldEquipWhenPickedUp()) EquipSlot(i); OnItemPickedUp?.Invoke(item); return; } }
+            LogEvent("Inventory", "FULL — can't pickup"); };
+        // 2. ItemEquipBridge-like: pushes context on equip
+        OnItemEquipped += item => { item.SetOwnerContext(cam, magnetOrigin, magnetOrigin); LogEvent("Bridge", $"SetOwnerContext → {item.GetName()}"); };
+        // 3. MenuStateChanged: cursor + input block
+        OnMenuStateChanged += open => { isMenuOpen = open; Cursor.lockState = open ? CursorLockMode.None : CursorLockMode.Locked; LogEvent("MenuState", open.ToString()); };
+        // 4. PickaxeHit: particle stand-in (log only in proto)
+        OnPickaxeHit += (pos, normal, isDmg) => LogEvent("PickaxeHit", $"pos={pos} dmg={isDmg}");
+
+        // player
+        cc = gameObject.AddComponent<CharacterController>(); cc.height = 1.8f;
+        transform.position = new Vector3(0, 1, -3);
+        var camGO = new GameObject("Cam"); camGO.transform.parent = transform;
+        camGO.transform.localPosition = new Vector3(0, 0.8f, 0);
+        cam = camGO.AddComponent<Camera>(); cam.nearClipPlane = 0.1f;
+        // magnet origin
+        magnetOrigin = new GameObject("MagnetOrigin").transform;
+        magnetOrigin.parent = camGO.transform; magnetOrigin.localPosition = Vector3.forward * 1.5f;
+        // hat light
+        hatLight = new GameObject("HatLight");
+        var lt = hatLight.AddComponent<Light>(); lt.type = LightType.Spot; lt.range = 15; lt.spotAngle = 60;
+        hatLight.transform.parent = camGO.transform; hatLight.transform.localPosition = Vector3.zero;
+        hatLight.SetActive(false);
+        // ghost for builder
+        ghost = GameObject.CreatePrimitive(PrimitiveType.Cube); ghost.name = "Ghost";
+        Destroy(ghost.GetComponent<Collider>());
+        var gr = ghost.GetComponent<Renderer>(); gr.material.color = new Color(0, 1, 0, 0.3f);
+        SetTransparent(gr.material); ghost.SetActive(false);
+        // build context
+        buildCtx = gameObject.AddComponent<PBuildCtx>(); buildCtx.ghost = ghost; buildCtx.proto = this;
+        // drill host machine
+        var drillGO = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        drillGO.name = "DrillMachine"; drillGO.transform.position = new Vector3(8, 0.5f, 6);
+        drillGO.GetComponent<Renderer>().material.color = Color.cyan;
+        drillHost = drillGO.AddComponent<PDrillHost>();
+        // world objects
+        CreateFloor();
+        SpawnOreNode(new Vector3(3, 0.5f, 3));
+        SpawnOreNode(new Vector3(-3, 0.5f, 4));
+        SpawnOrePiece(new Vector3(1, 0.3f, 2));
+        SpawnOrePiece(new Vector3(2, 0.3f, 1));
+        SpawnBuilding(new Vector3(-2, 0.5f, 2));
+        SpawnBuilding(new Vector3(5, 0.5f, 0));
+        SpawnFurnaceMold(new Vector3(6, 0.5f, 3));
+        // → spawn tools on ground (implement IInteractable — E to pickup)
+        SpawnToolOnGround("Pickaxe", new Vector3(-1, 0.2f, 0), Color.white, 1);
+        SpawnToolOnGround("Magnet", new Vector3(0, 0.2f, 0), Color.magenta, 2);
+        SpawnToolOnGround("Hammer", new Vector3(1, 0.2f, 0), Color.gray, 3);
+        SpawnToolOnGround("MiningHat", new Vector3(2, 0.2f, 0), Color.yellow, 4);
+        // light
+        var dlt = new GameObject("DirLight").AddComponent<Light>();
+        dlt.type = LightType.Directional; dlt.transform.rotation = Quaternion.Euler(50, -30, 0);
+        Cursor.lockState = CursorLockMode.Locked;
+        Log("READY", "E=interact 1-9=switch 0=drop WASD LMB/RMB R Q N M Tab L");
+    }
+
+    void Update()
+    {
+        if (isMenuOpen) { if (Input.GetKeyDown(KeyCode.Tab) || Input.GetKeyDown(KeyCode.Escape)) OnMenuStateChanged?.Invoke(false); return; }
+        Move();
+        HandleHighlight();
+        HandleInteract();
+        HandleToolSwitch();
+        HandleToolAction();
+        if (activeTool == 6) ScannerUpdate();
+        if (activeTool == 9) DrillUpdate();
+        if (Input.GetKeyDown(KeyCode.N)) SpawnOrePiece(cam.transform.position + cam.transform.forward * 2f + Vector3.up);
+        if (Input.GetKeyDown(KeyCode.M)) SpawnOreNode(cam.transform.position + cam.transform.forward * 3f);
+        if (Input.GetKeyDown(KeyCode.Tab)) OnMenuStateChanged?.Invoke(true);
+        if (Input.GetKeyDown(KeyCode.L)) DumpLog();
+        if (Input.GetKeyDown(KeyCode.Escape)) Cursor.lockState = Cursor.lockState == CursorLockMode.Locked ? CursorLockMode.None : CursorLockMode.Locked;
+    }
+
+    #region Highlight System (inline — mirrors ObjectHighlighterManager)
+    void HandleHighlight()
+    {
+        // → clear previous
+        if (highlightedRenderer != null) { highlightedRenderer.material.color = highlightOrigColor; highlightedRenderer = null; highlighted = null; }
+        if (!Physics.Raycast(cam.transform.position, cam.transform.forward, out RaycastHit hit, 5f)) return;
+        var hl = hit.collider.GetComponentInParent<IHighlightable>();
+        if (hl == null) return;
+        highlighted = hl;
+        highlightedRenderer = hit.collider.GetComponentInParent<Renderer>();
+        if (highlightedRenderer != null) { highlightOrigColor = highlightedRenderer.material.color; highlightedRenderer.material.color = Color.Lerp(highlightOrigColor, Color.white, 0.4f); }
+    }
+    #endregion
+
+    #region Interaction System (inline — mirrors SimplePlayerInteraction)
+    void HandleInteract()
+    {
+        if (!Input.GetKeyDown(KeyCode.E)) return;
+        if (!Physics.Raycast(cam.transform.position, cam.transform.forward, out RaycastHit hit, 4f)) return;
+        // → check IInteractable (tools on ground, world objects)
+        var interactable = hit.collider.GetComponentInParent<IInteractable>();
+        if (interactable == null) return;
+        var opts = interactable.GetOptions();
+        if (opts != null && opts.Count > 0) { interactable.Interact(opts[0]); LogEvent("Interact", $"{interactable.GetObjectName()} → {opts[0].name}"); }
+    }
+    #endregion
+
+    #region Equip / Drop (inline — mirrors InventoryOrchestrator)
+    void EquipSlot(int slot)
+    {
+        if (equippedTool != null) { equippedTool.gameObject.SetActive(false); }
+        activeTool = slot;
+        equippedTool = hotbar[slot];
+        if (equippedTool != null)
+        {
+            equippedTool.gameObject.SetActive(true);
+            OnItemEquipped?.Invoke(equippedTool); // → Bridge pushes SetOwnerContext
+            equippedTool.OnEquipped();
+            LogEvent("Equip", equippedTool.GetName());
+        }
+        OnToolSwitched?.Invoke(slot);
+    }
+    #endregion
+
+    void FixedUpdate()
+    {
+        // magnet: cleanup broken joints
+        for (int i = magnetJoints.Count - 1; i >= 0; i--)
+        {
+            if (magnetJoints[i] == null || magnetJoints[i].connectedBody == null)
+            {
+                if (i < magnetAnchors.Count && magnetAnchors[i] != null) Destroy(magnetAnchors[i]);
+                if (i < magnetBodies.Count) { var rb = magnetBodies[i]; if (rb != null) { rb.linearDamping = 0.2f; rb.angularDamping = 0.05f; } magnetBodies.RemoveAt(i); }
+                magnetJoints.RemoveAt(i); magnetAnchors.RemoveAt(i);
+            }
+        }
+        if (magnetWants) MagnetGrab();
+    }
+
+    #region Movement
+    void Move()
+    {
+        float mx = Input.GetAxis("Mouse X") * 2f, my = Input.GetAxis("Mouse Y") * 2f;
+        transform.Rotate(0, mx, 0); pitch = Mathf.Clamp(pitch - my, -80, 80);
+        cam.transform.localEulerAngles = new Vector3(pitch, 0, 0);
+        Vector3 m = transform.right * Input.GetAxis("Horizontal") + transform.forward * Input.GetAxis("Vertical");
+        m.y = -9.8f * Time.deltaTime; cc.Move(m * 5f * Time.deltaTime);
+    }
+    #endregion
+
+    #region Tool Switch
+    void HandleToolSwitch()
+    {
+        for (int i = 1; i <= 9; i++)
+            if (Input.GetKeyDown(KeyCode.Alpha0 + i) && hotbar[i] != null) EquipSlot(i);
+        if (Input.GetKeyDown(KeyCode.Alpha0) && equippedTool != null) DropTool();
+        // G key also drops
+        if (Input.GetKeyDown(KeyCode.G) && equippedTool != null) DropTool();
+    }
+    void DropTool()
+    {
+        if (equippedTool == null) return;
+        equippedTool.DropItem();
+        // purpose: InventoryOrchestrator clears slot
+        OnItemDropped?.Invoke(equippedTool);
+        LogEvent("Drop", equippedTool.GetName());
+        hotbar[activeTool] = null; equippedTool = null; activeTool = 0;
+    }
+    #endregion
+
+    #region Tool Actions
+    void HandleToolAction()
+    {
+        if (activeTool == 0) return;
+        // LMB
+        if (Input.GetMouseButtonDown(0))
+        {
+            switch (activeTool)
+            {
+                case 1: PickaxeSwing(); break;
+                case 2: MagnetDropAll(3f); break; // launch
+                case 3: HammerPrimary(); break;
+                case 4: hatLightOn = !hatLightOn; hatLight.SetActive(hatLightOn); Log("MiningHat", hatLightOn ? "ON" : "OFF"); break;
+                case 5: WrenchAction(false); break;
+                case 7: BuilderPlace(); break;
+                case 8: CastingMoldSwing(); break;
+                case 9: DrillBitAttach(); break;
+            }
+        }
+        // RMB
+        if (Input.GetMouseButtonDown(1))
+        {
+            if (activeTool == 3) HammerSecondary();
+            if (activeTool == 5) WrenchAction(true);
+        }
+        // RMB hold (magnet pull)
+        if (Input.GetMouseButton(1) && activeTool == 2) magnetWants = true;
+        // R (reload)
+        if (Input.GetKeyDown(KeyCode.R))
+        {
+            if (activeTool == 2) MagnetDropAll(0.5f); // gentle drop
+            if (activeTool == 7) { buildRot *= Quaternion.Euler(0, 90, 0); Log("Builder", "rotate 90"); }
+        }
+        // Q
+        if (Input.GetKeyDown(KeyCode.Q))
+        {
+            if (activeTool == 2) { magnetFilter = (magnetFilter + 1) % 3; string[] fl = { "Everything", "NotInBasket", "NotOnConveyor" }; Log("Magnet", "filter=" + fl[magnetFilter]); }
+            if (activeTool == 7) Log("Builder", "cycle variant (visual only in proto)");
+        }
+        // builder ghost update every frame
+        if (activeTool == 7)
+        {
+            Vector3 aim = Physics.Raycast(cam.transform.position, cam.transform.forward, out RaycastHit bh, 6f) ? bh.point : cam.transform.position + cam.transform.forward * 6f;
+            buildCtx.UpdateGhost(aim, buildRot, 0);
+        }
+    }
+    #endregion
+
+    #region Pickaxe
+    void PickaxeSwing()
+    {
+        if (Time.time - lastAttack < attackCooldown) return;
+        lastAttack = Time.time;
+        Log("Pickaxe", "swing");
+        StartCoroutine(PickaxeDelayedHit(0.2f));
+    }
+    IEnumerator PickaxeDelayedHit(float delay)
+    {
+        yield return new WaitForSeconds(delay);
+        if (!Physics.Raycast(cam.transform.position, cam.transform.forward, out RaycastHit hit, 3f)) yield break;
+        // ICrushable first
+        var crushable = hit.collider.GetComponent<ICrushable>();
+        if (crushable != null && crushable.CanCrush() && crushable.TryCrush())
+        {
+            Log("Pickaxe", "CRUSHED via ICrushable"); yield break;
+        }
+        // IDamageable
+        var dmg = hit.collider.GetComponent<IDamageable>();
+        if (dmg != null) { dmg.TakeDamage(25f, hit.point); Log("Pickaxe", "hit IDamageable"); }
+        // Rigidbody push
+        var rb = hit.collider.GetComponent<Rigidbody>();
+        if (rb != null) rb.AddForceAtPosition(cam.transform.forward * 3f, hit.point, ForceMode.Impulse);
+    }
+    #endregion
+
+    #region Magnet
+    void MagnetGrab()
+    {
+        magnetWants = false;
+        foreach (var col in Physics.OverlapSphere(magnetOrigin.position, 3f))
+        {
+            var rb = col.attachedRigidbody; if (rb == null || magnetBodies.Contains(rb)) continue;
+            // IMagnetGrabbable filter
+            var grabbable = rb.GetComponentInParent<IMagnetGrabbable>();
+            if (magnetFilter == 1 || magnetFilter == 2)
+            {
+                if (grabbable == null) continue;
+                if (grabbable.IsInBasket()) continue;
+                if (magnetFilter == 2 && grabbable.IsOnConveyor()) continue;
+            }
+            // create SpringJoint
+            var anchor = new GameObject("MagAnchor"); anchor.transform.position = magnetOrigin.position;
+            anchor.transform.parent = magnetOrigin; anchor.AddComponent<Rigidbody>().isKinematic = true;
+            var sj = anchor.AddComponent<SpringJoint>(); sj.connectedBody = rb;
+            sj.autoConfigureConnectedAnchor = false;
+            sj.connectedAnchor = rb.transform.InverseTransformPoint(col.transform.position);
+            sj.spring = 100; sj.damper = 25; sj.maxDistance = 0.01f;
+            sj.breakForce = 120; sj.breakTorque = 20;
+            rb.linearDamping = 3f; rb.angularDamping = 1.5f;
+            magnetBodies.Add(rb); magnetJoints.Add(sj); magnetAnchors.Add(anchor);
+            grabbable?.SetMagnetHolder(this);
+            Log("Magnet", "grabbed " + rb.name);
+        }
+    }
+    void MagnetDropAll(float force)
+    {
+        for (int i = 0; i < magnetJoints.Count; i++) if (magnetJoints[i] != null) Destroy(magnetJoints[i].gameObject);
+        magnetJoints.Clear(); magnetAnchors.Clear();
+        foreach (var rb in magnetBodies)
+        {
+            if (rb == null) continue;
+            rb.AddForce(cam.transform.forward * force, ForceMode.Impulse);
+            rb.linearDamping = 0.2f; rb.angularDamping = 0.05f;
+            rb.GetComponentInParent<IMagnetGrabbable>()?.ClearMagnetHolder();
+        }
+        magnetBodies.Clear();
+        if (force > 1f) Log("Magnet", "LAUNCH"); else Log("Magnet", "drop");
+    }
+    #endregion
+
+    #region Hammer
+    void HammerPrimary()
+    {
+        if (!Physics.Raycast(cam.transform.position, cam.transform.forward, out RaycastHit hit, 4f)) return;
+        var target = hit.collider.GetComponentInParent<IHammerTarget>();
+        if (target != null) { target.OnHammerPrimary(); Log("Hammer", "primary on " + hit.collider.name); }
+    }
+    void HammerSecondary()
+    {
+        if (!Physics.Raycast(cam.transform.position, cam.transform.forward, out RaycastHit hit, 4f)) return;
+        var target = hit.collider.GetComponentInParent<IHammerTarget>();
+        if (target != null) { target.OnHammerSecondary(); Log("Hammer", "secondary on " + hit.collider.name); }
+    }
+    #endregion
+
+    #region Wrench
+    void WrenchAction(bool enable)
+    {
+        if (!Physics.Raycast(cam.transform.position, cam.transform.forward, out RaycastHit hit, 4f)) return;
+        var tog = hit.collider.GetComponentInParent<ISupportToggleable>();
+        if (tog != null) { tog.SetSupportsEnabled(enable); Log("Wrench", (enable ? "enable" : "disable") + " supports on " + hit.collider.name); }
+    }
+    #endregion
+
+    #region Scanner
+    void ScannerUpdate()
+    {
+        scanText = "No Target";
+        if (Physics.Raycast(cam.transform.position, cam.transform.forward, out RaycastHit hit, 5f))
+        {
+            var s = hit.collider.GetComponentInParent<IScannable>();
+            if (s != null) scanText = s.GetScanDisplayName();
+        }
+    }
+    #endregion
+
+    #region Builder
+    void BuilderPlace()
+    {
+        if (buildCtx.CanPlace()) { buildCtx.Place(); Log("Builder", "PLACED"); }
+        else Log("Builder", "can't place here");
+    }
+    #endregion
+
+    #region CastingMold
+    void CastingMoldSwing()
+    {
+        if (Time.time - lastAttack < attackCooldown) return;
+        lastAttack = Time.time;
+        Log("CastingMold", "swing");
+        StartCoroutine(MoldDelayedHit(0.2f));
+    }
+    IEnumerator MoldDelayedHit(float delay)
+    {
+        yield return new WaitForSeconds(delay);
+        if (!Physics.Raycast(cam.transform.position, cam.transform.forward, out RaycastHit hit, 3f)) yield break;
+        var recv = hit.collider.GetComponent<IMoldReceiver>();
+        if (recv != null) { recv.InsertMold(1); Log("CastingMold", "inserted into " + hit.collider.name); }
+        else
+        {
+            var rb = hit.collider.GetComponent<Rigidbody>();
+            if (rb != null) rb.AddForceAtPosition(cam.transform.forward * 3f, hit.point, ForceMode.Impulse);
+            Log("CastingMold", "whack " + hit.collider.name);
+        }
+    }
+    #endregion
+
+    #region DrillBit
+    void DrillBitAttach()
+    {
+        if (!Physics.Raycast(cam.transform.position, cam.transform.forward, out RaycastHit hit, 3f)) return;
+        var host = hit.collider.GetComponent<IDrillBitHost>();
+        if (host != null) { drillHost = hit.collider.GetComponent<PDrillHost>(); host.AttachDrillBit(this); drillDurability = 1f; Log("DrillBit", "attached to " + hit.collider.name); }
+    }
+    void DrillUpdate()
+    {
+        if (drillHost == null || !drillHost.GetIsOn()) return;
+        drillDurability -= Time.deltaTime * 0.05f * drillHost.GetDrillSpeed();
+        if (drillDurability <= 0) { drillHost.DetachDrillBit(); drillHost = null; Log("DrillBit", "BROKEN — detached"); }
+    }
+    #endregion
+
+    #region Helpers
+    void Log(string src, string msg) { string e = $"[{Time.frameCount}] {src}: {msg}"; eventLog.Add(e); Debug.Log(e); }
+    void DumpLog() { Debug.Log("=== EVENT LOG ==="); foreach (var e in eventLog) Debug.Log(e); Debug.Log($"=== {eventLog.Count} events ==="); }
+    void CreateFloor()
+    {
+        var f = GameObject.CreatePrimitive(PrimitiveType.Plane); f.transform.localScale = new Vector3(3, 1, 3);
+        f.GetComponent<Renderer>().material.color = new Color(0.25f, 0.25f, 0.25f);
+    }
+    void SetTransparent(Material m)
+    {
+        m.SetFloat("_Mode", 3); m.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+        m.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+        m.SetInt("_ZWrite", 0); m.DisableKeyword("_ALPHATEST_ON");
+        m.EnableKeyword("_ALPHABLEND_ON"); m.renderQueue = 3000;
+    }
+    void SpawnOreNode(Vector3 pos)
+    {
+        var go = GameObject.CreatePrimitive(PrimitiveType.Cube); go.name = "OreNode";
+        go.transform.position = pos; go.GetComponent<Renderer>().material.color = new Color(0.5f, 0.3f, 0.1f);
+        go.AddComponent<POreNode>();
+    }
+    void SpawnOrePiece(Vector3 pos)
+    {
+        var go = GameObject.CreatePrimitive(PrimitiveType.Sphere); go.name = "OrePiece";
+        go.transform.position = pos; go.transform.localScale = Vector3.one * 0.3f;
+        go.GetComponent<Renderer>().material.color = UnityEngine.Random.ColorHSV(0, 1, 0.5f, 1, 0.6f, 1);
+        var rb = go.AddComponent<Rigidbody>(); rb.mass = 0.3f;
+        go.AddComponent<POrePiece>();
+    }
+    void SpawnBuilding(Vector3 pos)
+    {
+        var go = GameObject.CreatePrimitive(PrimitiveType.Cube); go.name = "Building";
+        go.transform.position = pos; go.GetComponent<Renderer>().material.color = new Color(0.3f, 0.5f, 0.8f);
+        var b = go.AddComponent<PBuilding>(); b.proto = this;
+        // spawn support legs
+        for (int i = 0; i < 4; i++)
+        {
+            var leg = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            leg.name = "Leg"; leg.transform.parent = go.transform;
+            float hx = (i % 2 == 0 ? -1 : 1) * 0.4f, hz = (i < 2 ? -1 : 1) * 0.4f;
+            leg.transform.localPosition = new Vector3(hx, -0.75f, hz);
+            leg.transform.localScale = new Vector3(0.08f, 0.25f, 0.08f);
+            leg.GetComponent<Renderer>().material.color = Color.gray;
+            Destroy(leg.GetComponent<Collider>()); b.legs.Add(leg);
+        }
+    }
+    void SpawnFurnaceMold(Vector3 pos)
+    {
+        var go = GameObject.CreatePrimitive(PrimitiveType.Cube); go.name = "FurnaceMoldArea";
+        go.transform.position = pos; go.GetComponent<Renderer>().material.color = new Color(0.9f, 0.5f, 0.1f);
+        go.AddComponent<PFurnace>();
+    }
+    void SpawnToolOnGround(string toolName, Vector3 pos, Color col, int toolId)
+    {
+        var go = GameObject.CreatePrimitive(PrimitiveType.Capsule); go.name = $"Tool_{toolName}";
+        go.transform.position = pos; go.transform.localScale = new Vector3(0.2f, 0.3f, 0.2f);
+        go.GetComponent<Renderer>().material.color = col;
+        go.AddComponent<Rigidbody>().mass = 0.5f;
+        var pt = go.AddComponent<PTool>(); pt.toolName = toolName; pt.toolId = toolId; pt.proto = this;
+    }
+    void OnGUI()
+    {
+        string tName = equippedTool != null ? equippedTool.GetName() : "Empty";
+        string hotbarStr = "Hotbar: ";
+        for (int i = 1; i <= 9; i++) hotbarStr += hotbar[i] != null ? $"[{i}:{hotbar[i].toolName}]" : $"[{i}:—]";
+        GUI.Label(new Rect(10, 10, 600, 20), $"Equipped: {tName}  Filter: {magnetFilter}  DrillHP: {drillDurability:F2}  Light: {hatLightOn}  Menu: {isMenuOpen}");
+        GUI.Label(new Rect(10, 28, 700, 20), hotbarStr);
+        GUI.Label(new Rect(10, 46, 600, 20), "E=interact 1-9=switch 0/G=drop LMB/RMB R Q Tab=menu N=ore M=node L=log");
+        if (activeTool == 6) GUI.Label(new Rect(10, 64, 400, 20), $"Scanner: {scanText}");
+        if (activeTool == 7) GUI.Label(new Rect(10, 64, 400, 20), $"Builder: {(buildCtx.CanPlace() ? "GREEN" : "RED")}  R=rotate Q=variant");
+    }
+    #endregion
+
+    #region PTool — implements ALL external interfaces (IInteractable + IInventoryItem + IHighlightable + ISaveLoadableObject)
+    // This mirrors BaseHeldTool in the real ToolSystem. One class implements all 5 external interfaces.
+    public class PTool : MonoBehaviour, IInteractable, IInventoryItem, IHighlightable, ISaveLoadableObject, IIconItem
+    {
+        public string toolName; public int toolId; public Proto_ToolSystem proto;
+        Camera ownerCam; Transform ownerContainer, ownerMagnetPos;
+        // IInteractable — "Take" interaction when on ground
+        public bool ShouldUseInteractionWheel() => true;
+        public string GetObjectName() => toolName;
+        public List<PInteractionOption> GetOptions() => new List<PInteractionOption> { new PInteractionOption { name = "Take", type = InteractionType.take }, new PInteractionOption { name = "Destroy", type = InteractionType.destroy } };
+        public void Interact(PInteractionOption opt)
+        {
+            if (opt.type == InteractionType.take)
+            {
+                // purpose: InventoryOrchestrator adds this to hotbar
+                OnToolPickupRequested?.Invoke(this);
+            }
+            else if (opt.type == InteractionType.destroy) Destroy(gameObject);
+        }
+        // IInventoryItem
+        public string GetName() => toolName;
+        public string GetDescription() => $"Tool: {toolName}";
+        public int GetQty() => 1; public void SetQty(int v) { } public int GetMaxAmount() => 1;
+        public bool GetShouldEquipWhenPickedUp() => true;
+        public Sprite GetIcon() => null; // no sprites in proto
+        public GameObject GetGameObject() => gameObject;
+        public void OnEquipped() { LogEvent("PTool.OnEquipped", toolName); }
+        public void HandleActiveInput() { /* proto handles this in HandleToolAction */ }
+        public void SetOwnerContext(Camera cam, Transform container, Transform magnetPos) { ownerCam = cam; ownerContainer = container; ownerMagnetPos = magnetPos; }
+        public void DropItem()
+        {
+            // → show in world, launch forward
+            gameObject.SetActive(true);
+            if (ownerCam != null)
+            {
+                transform.parent = null;
+                transform.position = ownerCam.transform.position + ownerCam.transform.forward * 0.5f;
+                var rb = GetComponent<Rigidbody>(); if (rb == null) rb = gameObject.AddComponent<Rigidbody>();
+                rb.isKinematic = false; rb.linearVelocity = ownerCam.transform.forward * 5f;
+            }
+            ownerCam = null; ownerContainer = null; ownerMagnetPos = null;
+        }
+        public string GetControlsText() => $"Drop - G\n{toolName} controls";
+        // IHighlightable
+        public int GetHighlightColor() => 0; // cyan
+        // ISaveLoadableObject (stub)
+        public bool ShouldBeSaved() => true;
+        public string GetCustomSaveData() => "{}";
+        public void LoadFromSave(string json) { }
+        // IIconItem
+        Sprite IIconItem.GetIcon() => null;
+    }
+    #endregion
+
+    #region World Objects — implement the same internal interfaces
+
+    // OreNode: IDamageable + IScannable
+    public class POreNode : MonoBehaviour, IDamageable, IScannable
+    {
+        float hp = 50;
+        public void TakeDamage(float damage, Vector3 position)
+        {
+            hp -= damage;
+            GetComponent<Renderer>().material.color = Color.Lerp(Color.red, new Color(0.5f, 0.3f, 0.1f), hp / 50f);
+            if (hp <= 0) { Debug.Log($"[OreNode] BROKEN at {position}"); Destroy(gameObject); }
+        }
+        public string GetScanDisplayName() => $"Ore Node (HP:{hp:F0})";
+    }
+
+    // OrePiece: ICrushable + IMagnetGrabbable + IScannable
+    public class POrePiece : MonoBehaviour, ICrushable, IMagnetGrabbable, IScannable
+    {
+        MonoBehaviour magnetHolder;
+        bool inBasket, onConveyor;
+        public bool CanCrush() => true;
+        public bool TryCrush()
+        {
+            Debug.Log($"[OrePiece] CRUSHED {name}");
+            transform.localScale *= 0.5f;
+            GetComponent<Renderer>().material.color = Color.gray;
+            return true;
+        }
+        public void SetMagnetHolder(MonoBehaviour holder) => magnetHolder = holder;
+        public void ClearMagnetHolder() => magnetHolder = null;
+        public bool IsInBasket() => inBasket;
+        public bool IsOnConveyor() => onConveyor;
+        public string GetScanDisplayName() => $"Ore Piece ({name})";
+    }
+
+    // Building: IHammerTarget + ISupportToggleable + IScannable
+    public class PBuilding : MonoBehaviour, IHammerTarget, ISupportToggleable, IScannable
+    {
+        public Proto_ToolSystem proto;
+        public List<GameObject> legs = new List<GameObject>();
+        bool supportsOn = true;
+        public void OnHammerPrimary()
+        {
+            Debug.Log($"[Building] TAKEN {name}");
+            Destroy(gameObject);
+        }
+        public void OnHammerSecondary()
+        {
+            Debug.Log($"[Building] PACKED {name}");
+            var c = GameObject.CreatePrimitive(PrimitiveType.Cube); c.name = "Crate";
+            c.transform.position = transform.position + Vector3.up; c.transform.localScale = Vector3.one * 0.3f;
+            c.GetComponent<Renderer>().material.color = new Color(0.6f, 0.4f, 0.2f);
+            c.AddComponent<Rigidbody>().AddForce(Vector3.up * 2f, ForceMode.Impulse);
+            Destroy(gameObject);
+        }
+        public void SetSupportsEnabled(bool enabled)
+        {
+            supportsOn = enabled;
+            foreach (var l in legs) { if (l != null) l.SetActive(enabled); }
+            Debug.Log($"[Building] supports {(enabled ? "ON" : "OFF")}");
+        }
+        public string GetScanDisplayName() => $"Building ({name}) supports:{supportsOn}";
+    }
+
+    // FurnaceMoldArea: IMoldReceiver + IScannable
+    public class PFurnace : MonoBehaviour, IMoldReceiver, IScannable
+    {
+        int insertedMold = -1;
+        public void InsertMold(int moldType)
+        {
+            insertedMold = moldType;
+            GetComponent<Renderer>().material.color = Color.green;
+            Debug.Log($"[Furnace] mold type {moldType} inserted");
+        }
+        public string GetScanDisplayName() => insertedMold >= 0 ? $"Furnace (mold:{insertedMold})" : "Furnace (empty)";
+    }
+
+    // DrillMachine: IDrillBitHost
+    public class PDrillHost : MonoBehaviour, IDrillBitHost
+    {
+        MonoBehaviour attachedBit;
+        bool isOn = true;
+        public float GetDrillSpeed() => 2f;
+        public void AttachDrillBit(MonoBehaviour bit) { attachedBit = bit; GetComponent<Renderer>().material.color = Color.yellow; Debug.Log("[DrillHost] bit attached"); }
+        public void DetachDrillBit() { attachedBit = null; GetComponent<Renderer>().material.color = Color.cyan; Debug.Log("[DrillHost] bit detached"); }
+        public bool GetIsOn() => isOn;
+    }
+
+    // BuildContext: IBuildingToolContext
+    public class PBuildCtx : MonoBehaviour, IBuildingToolContext
+    {
+        public GameObject ghost;
+        public Proto_ToolSystem proto;
+        Vector3 gridPos; bool valid;
+        public void UpdateGhost(Vector3 aim, Quaternion rot, int idx)
+        {
+            // grid snap
+            Vector3 off = aim - new Vector3(0.5f, 0, 0.5f);
+            gridPos = new Vector3(Mathf.RoundToInt(off.x) + 0.5f, Mathf.Max(0, Mathf.RoundToInt(off.y)), Mathf.RoundToInt(off.z) + 0.5f);
+            ghost.SetActive(true); ghost.transform.position = gridPos; ghost.transform.rotation = rot;
+            // overlap check
+            valid = true;
+            foreach (var c in Physics.OverlapBox(gridPos, Vector3.one * 0.45f, rot, ~0, QueryTriggerInteraction.Ignore))
+                if (c.GetComponent<PBuilding>() != null) { valid = false; break; }
+            ghost.GetComponent<Renderer>().material.color = valid ? new Color(0, 1, 0, 0.3f) : new Color(1, 0, 0, 0.3f);
+        }
+        public bool CanPlace() => valid;
+        public void Place()
+        {
+            var go = GameObject.CreatePrimitive(PrimitiveType.Cube); go.name = "Placed";
+            go.transform.position = gridPos; go.transform.rotation = ghost.transform.rotation;
+            go.GetComponent<Renderer>().material.color = Color.HSVToRGB(UnityEngine.Random.Range(0f, 1f), 0.4f, 0.8f);
+            var b = go.AddComponent<PBuilding>(); b.proto = proto;
+        }
+        public void Cleanup() { ghost.SetActive(false); }
+    }
+    #endregion
+}
+
 <!-- ==== FILE: learn/phase-c(New)/FLOW.md ==== -->
 # Phase C — Data Flow & Event Architecture
 
@@ -41226,6 +41965,4 @@ Added `IShopItemProvider` to ShopUISystem — SO_ShopItemDef stores `UnityEngine
 - **Portable** = 🕷️ Spider + 🔍 Hunter + 🔌 Adapter + 📡 Broadcaster/Listener (interfaces + events only)
 - **Game-specific** = ❌ Concrete (direct class imports — inherent to the system's purpose, e.g. AutoMiner MUST call OrePiecePoolManager)
 - **Infrastructure** = 🌍 Universal (GameEvents, UIManager, SaveSystem) — everyone uses, nobody counts
-
-
 
