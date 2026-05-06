@@ -28837,6 +28837,27 @@ phase-c/Scripts/
 
 ---
 
+## Scene Setup Checklist
+
+> Drop these GOs in your scene. Order doesn't matter — GameEvents handle all wiring.
+
+| # | GO Name | Component | Required Fields | Notes |
+|---|---------|-----------|----------------|-------|
+| 1 | **OrePiecePoolManager** | `OrePiecePoolManager` | (none) | Auto-registers prefabs on first spawn |
+| 2 | **OreManager** | `OreManager` | `_allResourceDescriptions` list (ResourceDescription entries) | Display formatting + cleanup |
+| 3 | **OreLimitManager** | `OreLimitManager` | Thresholds (defaults: 500/1000/2000) | Throttles spawning |
+| 4 | **ParticleManager** | `ParticleManager` | 3 particle prefabs | Auto-subscribes to events |
+| 5 | **OreSpawnerBridge** | `OreSpawnerBridge` | (none) | Auto-finds AutoMiners on Start |
+| 6 | **PhysicsLimitUIWarning** | `PhysicsLimitUIWarning` | `_warningPanel` + `_warningImage` | Under Canvas |
+| 7 | **MiningNode prefab** | `MiningNode` | resourceType, health, drops list, models, breakParticle | Place in mine tunnels |
+| 8 | **OrePiece prefab** | `OrePiece` | ResourceType, PieceType, meshes, CrushedPrefab | Spawned by pool |
+| 9 | **AutoMiner prefab** | `AutoMiner` | _possibleSpawns, _spawnPoint, _drillVisual, light materials | Place or attach to node |
+| 10 | **SellerMachine** | `SellerMachine` | _sellDelay=2f, Box Collider (isTrigger ✅) | At conveyor output |
+
+> **⚠️ Pitfall #8:** SellerMachine needs trigger collider on SAME GO (not child). OrePiece needs BOTH trigger (for baskets) and physical collider (for bouncing).
+
+---
+
 ## Source vs Phase Diff
 
 | Original | Our approach |
@@ -29224,6 +29245,19 @@ public class AutoMiner : MonoBehaviour, IInteractable, IScannable, INodeConfigur
 
 **Verdict: COMPLETE.** Zero cross-phase concrete deps. ISpawner decouples from OrePiecePoolManager + OreLimitManager. INodeConfigurable decouples Phase D from AutoMiner. ConfigureFromNode casts SO_AutoMinerResourceDefinition internally (Phase C only).
 
+## Scene Setup (beginner-friendly)
+
+1. Create AutoMiner prefab: Empty GO → add `AutoMiner` component
+2. Set `_displayName` = "Iron Auto-Miner" (or matching resource)
+3. Add `_possibleSpawns` list: drag ore prefab GameObjects + set Weight per entry
+4. Create child GO for drill visual → assign to `_drillVisual` (rotates in Update)
+5. Create child GO at spawn output → assign to `_spawnPoint`
+6. Assign `_lightRenderer` + green/red materials for on/off indicator
+7. Place in scene. `OreSpawnerBridge` auto-finds it on Start and pushes ISpawner.
+8. **Optional (Phase D):** Place on a `BuildingPlacementNode` — node calls `INodeConfigurable.ConfigureFromNode(SO)` to override spawns from the SO.
+
+> **⚠️ Without OreSpawnerBridge in scene:** AutoMiner.spawner stays null → does nothing. Always add the bridge GO.
+
 <!-- ==== FILE: learn/phase-c/Scripts/_-Systems/AutoMinerSystem/INodeConfigurable.cs ==== -->
 using UnityEngine;
 
@@ -29327,6 +29361,16 @@ public class WeightedGameObjectChance
 ```
 
 **Verdict: COMPLETE.** Zero concrete deps. Uses GameObject for prefab refs (OrePiecePoolManager does GetComponent<OrePiece> internally). Future phases only subscribe to existing events.
+
+## Scene Setup (beginner-friendly)
+
+1. Create ore node prefab: Cube → add `MiningNode` component
+2. Set `_resourceType` = iron (or gold, copper, etc.)
+3. Set `_health` = 50, `_minDrops` = 2, `_maxDrops` = 4
+4. Add 2-3 child mesh variants in `_models[]` (MiningNode.Start picks random)
+5. Create `WeightedNodeDrop` list entries: drag OrePiece prefab GameObjects + set Weight
+6. Assign `_breakParticlePrefab` (any particle prefab — ParticleManager spawns it on break)
+7. Place nodes in mine tunnels. Done — pickaxe hits them via IDamageable.
 
 <!-- ==== FILE: learn/phase-c/Scripts/_-Systems/MiningSystem/MiningNode.cs ==== -->
 using System.Collections.Generic;
@@ -29592,6 +29636,19 @@ OrePiece.SellAfterDelay fires OnObjectSold → EconomyManager subscribes. Zero i
 ```
 
 **Verdict: COMPLETE.** All conversion methods from original source present. Phase E machines call them directly (concrete dep on THEM, not on us). Phase G adds ISaveLoadable stubs on OrePiece if needed.
+
+## Scene Setup (beginner-friendly)
+
+1. **OrePiece prefab:** Sphere/custom mesh → add `OrePiece` component
+   - Set ResourceType + PieceType. Assign CrushedPrefab (for TryConvertToCrushed)
+   - Add MeshFilter + MeshCollider refs. Add Rigidbody (mass=0.3). Add `_possibleMeshes[]` for random variant.
+2. **DamageableOrePiece:** same as above but add `DamageableOrePiece` instead (for collision-break clusters)
+3. **OrePiecePoolManager:** Empty GO → add component. No config needed — self-registers prefabs on first spawn.
+4. **OreManager:** Empty GO → add component. Drag all `ResourceDescription` entries into `_allResourceDescriptions` list.
+5. **OreLimitManager:** Empty GO → add component. Thresholds: 500/1000/2000 (defaults).
+6. **PhysicsLimitUIWarning:** Canvas child → add component. Assign `_warningPanel` (inactive by default) + `_warningImage`.
+7. **OreSpawnerBridge:** Empty GO → add component. On Start it auto-finds all AutoMiners and pushes ISpawner.
+8. **SO_AutoMinerResourceDefinition:** Create → `SO/SO_AutoMinerResourceDefinition`. Add PossibleResources entries (drag OrePiece prefabs + Weight).
 
 <!-- ==== FILE: learn/phase-c/Scripts/_-Systems/OreSystem/OreLimitManager.cs ==== -->
 using UnityEngine;
@@ -30256,6 +30313,16 @@ public class WeightedOreChance
 
 **Verdict: PERMANENTLY COMPLETE.** Zero deps. Pure GameEvent listener. Drop in any project → works.
 
+## Scene Setup (beginner-friendly)
+
+1. Create Empty GO → name "ParticleManager"
+2. Add `ParticleManager` component
+3. Assign particle prefabs:
+   - `_oreNodeHitParticlePrefab` → small spark burst (plays when pickaxe hits IDamageable)
+   - `_genericHitImpactParticle` → dust puff (plays when pickaxe hits non-damageable)
+   - `_breakOreNodeParticlePrefab` → big explosion burst (plays when MiningNode breaks)
+4. Done — auto-subscribes to GameEvents on Start. No wiring needed.
+
 <!-- ==== FILE: learn/phase-c/Scripts/_-Systems/ParticleSystem/ParticleManager.cs ==== -->
 using UnityEngine;
 
@@ -30353,6 +30420,15 @@ public class ParticleManager : Singleton<ParticleManager>
 ```
 
 **Verdict: COMPLETE.** Zero concrete deps. ISellableWithDelay decouples from OrePiece. Any object implementing the interface gets the delayed sell behavior. BaseSellableItem fallback is FREE infra.
+
+## Scene Setup (beginner-friendly)
+
+1. Create Empty GO → name "SellerMachine" (or "Deposit Hopper")
+2. Add `SellerMachine` component. Set `_sellDelay` = 2f.
+3. Add Box Collider → check **Is Trigger** ✅. Size it to cover the hopper area.
+4. Place at end of conveyor belt. Ore enters trigger → sold after 2s → money goes up.
+
+> **⚠️ CRITICAL:** The trigger collider MUST be on the same GO as SellerMachine (not a child). OnTriggerEnter won't fire otherwise.
 
 <!-- ==== FILE: learn/phase-c/Scripts/_-Systems/SellerSystem/ISellableWithDelay.cs ==== -->
 /// <summary>
@@ -30615,6 +30691,87 @@ phase-d/Scripts/
 ### RobotGrabberArm — generic Rigidbody grab
 - Original checked `OrePiece.PieceType` — our version works with any Rigidbody
 - Zero Phase C concrete imports
+
+---
+
+## Scene Setup (Beginner-Friendly)
+
+### Step 1 — BuildingManager GO
+
+1. Create empty GO → name it `BuildingManager`
+2. Add `BuildingManager` component
+3. Assign all LayerMask fields (create layers if missing):
+   - `_buildingPlacementCollisionLayers` = Default + BuildingObject
+   - `_scaffoldingPlacementCollisionLayers` = Default + Terrain
+   - `_buildingSupportsCollisionLayers` = BuildingObject
+   - `_buildingObjectLayer` = BuildingObject
+   - `_buildingPlacementRaycastLayer` = Default + Terrain + BuildingObject
+4. Create 3 materials in Project: `GhostGreen`, `GhostRed`, `GhostOrange` (transparent, Standard shader)
+   - Assign to `_ghostMaterial`, `_invalidGhostMaterial`, `_requirementGhostMaterial`
+5. Create `SO_InteractionOption` assets: "Pack" (type=pack), "Take" (type=take)
+   - Assign to `_interactionPack`, `_interactionTake`
+6. Assign `_buildingCratePrefab` → drag BuildingCrate prefab
+
+> **⚠️ Without BuildingManager in scene:** ghost won't appear, placement validation won't run, scaffolding won't update.
+
+### Step 2 — ConveyorBeltManager GO
+
+1. Create empty GO → name it `ConveyorBeltManager`
+2. Add `ConveyorBeltManager` component
+3. No inspector fields needed — it auto-discovers belts via static list
+
+> **⚠️ Without ConveyorBeltManager:** conveyor velocities accumulate but never get applied to Rigidbodies.
+
+### Step 3 — BuildingToolBridge GO
+
+1. Create empty GO → name it `BuildingToolBridge` (or put on same GO as BuildingManager)
+2. Add `BuildingToolBridge` component
+3. No inspector fields — it subscribes to `OnItemEquipped` and fires `OnBuildingToolContextReady` automatically
+
+> **⚠️ Without BuildingToolBridge:** ToolBuilder equips but buildCtx stays null → can't place buildings.
+
+### Step 4 — ConveyorRenderer GO (optional — performance)
+
+1. Create empty GO → name it `ConveyorRenderer`
+2. Add `ConveyorRenderer` component
+3. Assign `_beltMesh` (belt surface mesh) + `_beltMaterial` (scrolling belt material)
+
+### Step 5 — BuildingPlacementNode (per AutoMiner spot)
+
+1. Create empty GO at desired position → name it `Node_Iron`
+2. Add `BuildingPlacementNode` component
+3. Set `_requirementType` = `autoMiner`
+4. Set `_primaryResourceName` = "Iron"
+5. Set `_attachmentText` = "Iron Auto-Miner Node"
+6. Drag the `SO_AutoMinerResourceDefinition` SO into `_resourceDefinition` (ScriptableObject field)
+7. Create a child GO with a simple sphere mesh → assign to `_ghostVisual` (yellow indicator)
+
+### Step 6 — Building Prefab
+
+1. Create a prefab with:
+   - Root: `BuildingObject` component + BoxCollider (physical)
+   - Child `PlacementCollider`: BoxCollider (placement validation area)
+   - Child `CrateSpawnPoint`: empty Transform (where crate spawns on Pack)
+   - Optional children: `ConveyorInputSnap`, `ConveyorOutputSnap` (empty Transforms for snap points)
+2. Create `SO_BuildingInventoryDefinition` asset → assign prefab to `BuildingPrefabs[0]`
+3. Create `SO_ShopItemDef` for shop → drag the building def into `_externalProvider`, check `_useExternalProvider`
+
+### Step 7 — ConveyorBelt Prefab
+
+1. Create a prefab:
+   - Root: `ConveyorBelt` component + BoxCollider (physical surface)
+   - Child `Trigger`: BoxCollider (isTrigger=true, taller than surface)
+   - Optional: add `ConveyorBatchRenderingComponent` + `ConveyorSoundSource`
+2. Set `_speed`, `_retainYVelocity` on the ConveyorBelt component
+
+### Required Layers
+
+| Layer Name | Used By |
+|---|---|
+| `BuildingGhost` | Ghost objects during placement (set by BuildingManager) |
+| `BuildingObject` | Placed buildings (set by BuildingObject.Start) |
+
+> **⚠️ PITFALL #5: Missing Layers = silent failure.** Create these in Edit → Project Settings → Tags and Layers BEFORE testing.
 
 ---
 
@@ -31062,7 +31219,7 @@ public class BuildingCrate : BaseSellableItem, IInteractable, IHammerTarget, ISc
 	#endregion
 
 	#region IInteractable
-	public bool ShouldUseInteractionWheel() => true;
+	public bool ShouldUseInteractionWheel() => false; // original: direct Take on E, no wheel
 	public List<SO_InteractionOption> GetOptions() => _interactions;
 	public string GetObjectName() => _definition != null ? _definition.Name : "Crate";
 	public void Interact(SO_InteractionOption opt)
