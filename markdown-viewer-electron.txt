@@ -1481,6 +1481,7 @@ body {
         <div id="sidebar-resize"></div>
         <div id="sidebar-hdr">
             <span id="sidebar-dir">No folder open</span>
+            <button class="hbtn" id="btn-collapse-all" title="Collapse all folders">&#9660;</button>
             <button class="hbtn" id="btn-change-dir" title="Change folder">&#128194;</button>
         </div>
         <input type="text" id="sidebar-search" placeholder="Filter files..." spellcheck="false" />
@@ -6654,6 +6655,9 @@ async function openFolderByPath(dir) {
     // Scan
     allFiles = await window.electronAPI.scanDir(dir);
     allFiles.sort((a, b) => a.relPath.localeCompare(b.relPath));
+
+    // Default: start with all folders collapsed
+    collapseAllFolders();
     renderFileList();
 
     // Auto-open first file if nothing is open
@@ -6743,6 +6747,63 @@ function saveCollapsed() {
     localStorage.setItem('mdv_collapsed', JSON.stringify([...collapsedFolders]));
 }
 
+// Recursively collapse or expand a folder DOM element and all its descendant folders
+function toggleSubtree(folderEl, folderPath, treeNode, collapse) {
+    if (collapse) {
+        folderEl.classList.add('collapsed');
+        collapsedFolders.add(folderPath);
+    } else {
+        folderEl.classList.remove('collapsed');
+        collapsedFolders.delete(folderPath);
+    }
+    // Find child .tree-folder elements and recurse
+    const childFolders = folderEl.querySelectorAll(':scope > .tree-children > .tree-folder');
+    const subKeys = Object.keys(treeNode).filter(k => k !== '_files').sort();
+    childFolders.forEach((childEl, i) => {
+        const key = subKeys[i];
+        if (!key) return;
+        const childPath = folderPath ? folderPath + '/' + key : key;
+        toggleSubtree(childEl, childPath, treeNode[key], collapse);
+    });
+}
+
+// Collapse/expand all helpers
+let allCollapsed = true;
+
+function collapseAllFolders() {
+    allFiles.forEach(f => {
+        if (f.dir) {
+            const parts = f.dir.split('/');
+            let p = '';
+            parts.forEach(seg => { p = p ? p + '/' + seg : seg; collapsedFolders.add(p); });
+        }
+    });
+    allCollapsed = true;
+    saveCollapsed();
+    syncCollapseBtn();
+    // Update DOM if already rendered
+    fileList.querySelectorAll('.tree-folder').forEach(el => el.classList.add('collapsed'));
+}
+
+function expandAllFolders() {
+    collapsedFolders.clear();
+    allCollapsed = false;
+    saveCollapsed();
+    syncCollapseBtn();
+    fileList.querySelectorAll('.tree-folder').forEach(el => el.classList.remove('collapsed'));
+}
+
+function syncCollapseBtn() {
+    $('btn-collapse-all').textContent = allCollapsed ? '\u25B6' : '\u25BC';
+    $('btn-collapse-all').title = allCollapsed ? 'Expand all folders' : 'Collapse all folders';
+}
+syncCollapseBtn();
+
+$('btn-collapse-all').addEventListener('click', () => {
+    if (allCollapsed) expandAllFolders();
+    else collapseAllFolders();
+});
+
 function renderFileList() {
     fileList.innerHTML = '';
     const q = sidebarSearchQ.toLowerCase().trim();
@@ -6802,11 +6863,18 @@ function renderFileList() {
                 hdr.className = 'tree-folder-hdr';
                 hdr.style.paddingLeft = (depth > 0 ? 4 : 4) + 'px';
                 hdr.innerHTML = `${branch ? `<span class="tree-branch">${branch}</span>` : ''}<span class="tree-chevron">\u25BC</span><span class="tree-folder-icon">\uD83D\uDCC1</span><span class="tree-folder-name">${esc(key)}</span><span class="tree-folder-count">${fileCount}</span>`;
-                hdr.addEventListener('click', () => {
-                    folder.classList.toggle('collapsed');
-                    if (folder.classList.contains('collapsed')) collapsedFolders.add(folderPath);
-                    else collapsedFolders.delete(folderPath);
-                    saveCollapsed();
+                hdr.addEventListener('click', (e) => {
+                    if (e.altKey) {
+                        // Alt+click: toggle entire subtree recursively
+                        const shouldCollapse = !folder.classList.contains('collapsed');
+                        toggleSubtree(folder, folderPath, subNode, shouldCollapse);
+                        saveCollapsed();
+                    } else {
+                        folder.classList.toggle('collapsed');
+                        if (folder.classList.contains('collapsed')) collapsedFolders.add(folderPath);
+                        else collapsedFolders.delete(folderPath);
+                        saveCollapsed();
+                    }
                 });
                 const absFolderPath = watchedDir + (watchedDir.includes('/') ? '/' : '\\') + folderPath.replace(/\//g, watchedDir.includes('/') ? '/' : '\\');
                 hdr.addEventListener('contextmenu', e => { e.preventDefault(); e.stopPropagation(); showCtxMenu(e, absFolderPath, true); });
