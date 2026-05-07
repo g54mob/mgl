@@ -11,6 +11,11 @@
 | 4 | `index.html` | Full UI — header, tabs (Raw/Preview/Split), file sidebar (tree hierarchy), landing page, TOC, status bar. All CSS inline |
 | 5 | `renderer.js` | All renderer logic — marked.js rendering, hljs highlighting, tree builder, editor, TOC, theme, sliders, dirty tracking, live reload |
 
+## Prerequisites
+
+- **Node.js >= 18.x** (required by Electron 28+). Verify: `node --version`
+- **npm** (comes with Node.js)
+
 ## Setup (from scratch)
 
 ```powershell
@@ -381,7 +386,16 @@ body {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    background: var(--surface2);
+    border: 1px solid var(--border-soft);
+    border-radius: 5px;
+    padding: 3px 8px;
+    height: 26px;
+    outline: none;
+    transition: border-color .15s, color .15s;
 }
+#sidebar-dir:hover { border-color: var(--text-muted); }
+#sidebar-dir:focus { border-color: var(--accent); color: var(--text); }
 #sidebar-search {
     width: 100%;
     height: 28px;
@@ -1220,6 +1234,58 @@ body {
 }
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+/* ══ Find bar ════════════════════════════════════════════ */
+#find-bar {
+    position: fixed;
+    top: 56px;
+    right: 16px;
+    z-index: 9998;
+    display: none;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0,0,0,.35);
+    font-family: var(--font-code);
+    font-size: 12px;
+}
+#find-bar.show { display: flex; }
+#find-input {
+    width: 220px;
+    height: 28px;
+    background: var(--surface2);
+    border: 1px solid var(--border-soft);
+    border-radius: 5px;
+    padding: 0 10px;
+    font-family: var(--font-code);
+    font-size: 12px;
+    color: var(--text);
+    outline: none;
+    transition: border-color .15s;
+}
+#find-input:focus { border-color: var(--accent); }
+#find-input::placeholder { color: var(--text-muted); }
+#find-count {
+    font-size: 11px;
+    color: var(--text-muted);
+    min-width: 50px;
+    text-align: center;
+}
+.find-btn {
+    width: 26px; height: 26px;
+    display: flex; align-items: center; justify-content: center;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--surface2);
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 12px;
+    transition: color .12s, border-color .12s;
+}
+.find-btn:hover { color: var(--text); border-color: var(--text-muted); }
+
 /* ══ Width/Font slider ══════════════════════════════════════ */
 #width-ctrl, #font-ctrl {
     display: flex;
@@ -1480,7 +1546,7 @@ body {
     <div id="file-sidebar">
         <div id="sidebar-resize"></div>
         <div id="sidebar-hdr">
-            <span id="sidebar-dir">No folder open</span>
+            <input type="text" id="sidebar-dir" value="" placeholder="Paste folder path..." spellcheck="false" />
             <button class="hbtn" id="btn-collapse-all" title="Collapse all folders">&#9660;</button>
             <button class="hbtn" id="btn-change-dir" title="Change folder">&#128194;</button>
         </div>
@@ -1608,6 +1674,15 @@ Ctrl+Enter to preview"></textarea>
 <!-- Toast -->
 <div id="toast"></div>
 
+<!-- Find bar -->
+<div id="find-bar">
+    <input type="text" id="find-input" placeholder="Find..." spellcheck="false" />
+    <span id="find-count"></span>
+    <button class="find-btn" id="find-prev" title="Previous (Shift+Enter)">▲</button>
+    <button class="find-btn" id="find-next" title="Next (Enter)">▼</button>
+    <button class="find-btn" id="find-close" title="Close (Escape)">✕</button>
+</div>
+
 <!-- Context menu -->
 <div id="ctx-menu">
     <div class="ctx-item" id="ctx-open-explorer"><span class="ctx-icon">&#128194;</span> Show in Explorer</div>
@@ -1647,6 +1722,14 @@ function createWindow() {
     mainWindow.setMenuBarVisibility(false);
     mainWindow.loadFile('index.html');
 
+    // Forward find-in-page results to renderer
+    mainWindow.webContents.on('found-in-page', (_ev, result) => {
+        mainWindow.webContents.send('find-result', {
+            activeMatch: result.activeMatchOrdinal,
+            total: result.matches,
+        });
+    });
+
     // Prevent native Ctrl+/- zoom so renderer.js handles font size instead
     mainWindow.webContents.on('before-input-event', (event, input) => {
         if ((input.control || input.meta) && (input.key === '=' || input.key === '+' || input.key === '-' || input.key === '0')) {
@@ -1658,6 +1741,21 @@ function createWindow() {
 app.whenReady().then(createWindow);
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+
+/* ══ IPC: Find in page (fire-and-forget + result stream) ═══ */
+ipcMain.on('do-find', (_e, text, forward) => {
+    if (!text) { mainWindow.webContents.stopFindInPage('clearSelection'); return; }
+    mainWindow.webContents.findInPage(text, { forward, findNext: false });
+});
+
+ipcMain.on('do-find-next', (_e, text, forward) => {
+    if (!text) return;
+    mainWindow.webContents.findInPage(text, { forward, findNext: true });
+});
+
+ipcMain.on('do-stop-find', () => {
+    mainWindow.webContents.stopFindInPage('clearSelection');
+});
 
 /* ══ IPC: Pick folder ════════════════════════════════════════ */
 ipcMain.handle('pick-folder', async () => {
@@ -6169,6 +6267,10 @@ window.electronAPI = {
     stopWatch:    ()                   => ipcRenderer.invoke('stop-watch'),
     showInExplorer:    (p)             => ipcRenderer.invoke('show-in-explorer', p),
     openFolderInExplorer: (p)          => ipcRenderer.invoke('open-folder-in-explorer', p),
+    doFind:            (t, fwd)        => ipcRenderer.send('do-find', t, fwd),
+    doFindNext:        (t, fwd)        => ipcRenderer.send('do-find-next', t, fwd),
+    stopFind:          ()              => ipcRenderer.send('do-stop-find'),
+    onFindResult:      (cb)            => ipcRenderer.on('find-result', (_e, data) => cb(data)),
 
     onFsAdd:      (cb) => ipcRenderer.on('fs-add',    (_e, data) => cb(data)),
     onFsChange:   (cb) => ipcRenderer.on('fs-change', (_e, data) => cb(data)),
@@ -6621,6 +6723,17 @@ $('btn-sidebar').addEventListener('click', () => {
 
 $('btn-change-dir').addEventListener('click', pickFolder);
 
+// Allow pasting/typing a path and pressing Enter to open it
+$('sidebar-dir').addEventListener('keydown', async e => {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        const dir = $('sidebar-dir').value.trim();
+        if (dir) await openFolderByPath(dir);
+        $('sidebar-dir').blur();
+    }
+    if (e.key === 'Escape') { $('sidebar-dir').value = watchedDir || ''; $('sidebar-dir').blur(); }
+});
+
 $('sidebar-search').addEventListener('input', e => {
     sidebarSearchQ = e.target.value;
     renderFileList();
@@ -6634,7 +6747,7 @@ async function pickFolder() {
 
 async function openFolderByPath(dir) {
     watchedDir = dir;
-    $('sidebar-dir').textContent = dir;
+    $('sidebar-dir').value = dir;
     $('sidebar-dir').title = dir;
     $('sb-watch').textContent = 'on';
     localStorage.setItem('mdv_last_dir', dir);
@@ -7297,6 +7410,71 @@ $('btn-theme').addEventListener('click', () => {
     localStorage.setItem('mdv_theme', dark ? 'dark' : 'light');
 });
 $('btn-theme').textContent = dark ? '\uD83C\uDF19' : '\u2600\uFE0F';
+
+/* ══ Find in page (Ctrl+F) ════════════════════════════════ */
+const findBar   = $('find-bar');
+const findInput = $('find-input');
+const findCount = $('find-count');
+let findOpen = false;
+
+// Keep focus on find input after Chromium findInPage steals it
+function refocusFind() {
+    if (findOpen) setTimeout(() => findInput.focus(), 0);
+}
+
+// Listen for results from main process
+window.electronAPI.onFindResult(data => {
+    if (data) findCount.textContent = data.activeMatch + '/' + data.total;
+    refocusFind();
+});
+
+function openFind() {
+    findOpen = true;
+    findBar.classList.add('show');
+    findInput.focus();
+    findInput.select();
+}
+
+function closeFind() {
+    findOpen = false;
+    findBar.classList.remove('show');
+    findCount.textContent = '';
+    findInput.value = '';
+    window.electronAPI.stopFind();
+}
+
+// Typing → fresh search
+findInput.addEventListener('input', () => {
+    const text = findInput.value;
+    if (!text) { findCount.textContent = ''; window.electronAPI.stopFind(); return; }
+    window.electronAPI.doFind(text, true);
+    refocusFind();
+});
+
+// Enter/Shift+Enter → next/prev match
+findInput.addEventListener('keydown', e => {
+    e.stopPropagation(); // Never leak to editor handlers
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        const text = findInput.value;
+        if (text) window.electronAPI.doFindNext(text, !e.shiftKey);
+        refocusFind();
+    }
+    if (e.key === 'Escape') { e.preventDefault(); closeFind(); }
+});
+
+$('find-next').addEventListener('click', () => { const t = findInput.value; if (t) { window.electronAPI.doFindNext(t, true); refocusFind(); } });
+$('find-prev').addEventListener('click', () => { const t = findInput.value; if (t) { window.electronAPI.doFindNext(t, false); refocusFind(); } });
+$('find-close').addEventListener('click', closeFind);
+
+document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault();
+        if (findOpen) { findInput.focus(); findInput.select(); }
+        else openFind();
+    }
+    if (e.key === 'Escape' && findOpen) { e.preventDefault(); closeFind(); }
+});
 
 /* ══ Toast ════════════════════════════════════════════════ */
 function toast(msg, dur = 1800) {
