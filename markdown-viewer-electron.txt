@@ -5,11 +5,12 @@
 
 | # | File | Purpose |
 |---|------|---------|
-| 1 | `package.json` | Dependencies (electron, chokidar, marked, highlight.js, lz-string), scripts, electron-builder config |
-| 2 | `main.js` | Electron main process — window creation, IPC handlers, chokidar file watcher, folder scanner |
-| 3 | `preload.js` | Bridge — exposes `window.electronAPI` with IPC methods (pickFolder, readFile, saveFile, scanDir, watchDir, fs events) |
-| 4 | `index.html` | Full UI — header, tabs (Raw/Preview/Split), file sidebar (tree hierarchy), landing page, TOC, status bar. All CSS inline |
-| 5 | `renderer.js` | All renderer logic — marked.js rendering, hljs highlighting, tree builder, editor, TOC, theme, sliders, dirty tracking, live reload |
+| 1 | `package.json` | Dependencies, scripts, electron-builder config |
+| 2 | `main.js` | Main process — window, IPC, chokidar watcher, folder scanner, window bounds, Ctrl+Tab/W interception |
+| 3 | `preload.js` | Bridge — `window.electronAPI` with all IPC methods + event listeners |
+| 4 | `index.html` | Full UI — header, file tabs bar, view-mode tabs, file sidebar, TOC, find bar, context menu, status bar, landing page. All CSS inline. Mermaid CDN |
+| 5 | `renderer.js` | All renderer logic — marked.js, hljs, mermaid, image resolution, file tabs, tree, editor, TOC, zoom, find, theme, sliders, dirty tracking, live reload |
+| 6 | `sample.md` | Demo file exercising all features |
 
 ## Prerequisites
 
@@ -23,7 +24,7 @@
 mkdir markdown-viewer-electron
 cd markdown-viewer-electron
 
-# 2. Create all 5 files above (package.json, main.js, preload.js, index.html, renderer.js)
+# 2. Create all files above (package.json, main.js, preload.js, index.html, renderer.js)
 
 # 3. Install dependencies
 npm install
@@ -38,37 +39,67 @@ npx electron .
 |---------|---------|-----|
 | `electron` | ^28.1.0 | Desktop shell (Chromium + Node.js) — devDependency |
 | `chokidar` | ^3.6.0 | OS-level file watching (add/change/unlink events) |
-| `marked` | ^9.1.6 | Markdown → HTML parser |
+| `marked` | ^9.1.6 | Markdown to HTML parser |
 | `highlight.js` | ^11.9.0 | Syntax highlighting for code blocks |
 | `lz-string` | ^1.5.0 | Compression (kept from original HTML viewer) |
 | `electron-builder` | ^24.9.1 | Package into .exe installer — devDependency |
+| `mermaid` | ^10 (CDN) | Diagram rendering (flowcharts, sequence, gantt, etc.) — loaded via CDN in index.html |
 
 ## Architecture
 
 ```
 main.js (Main Process)
-  ├── Creates BrowserWindow
-  ├── IPC handlers: pick-folder, read-file, save-file, save-file-as, scan-dir, watch-dir, stop-watch
-  ├── chokidar.watch() → sends fs-add, fs-change, fs-unlink events to renderer
-  └── Recursive directory scanner (skips dotfiles, node_modules)
+  ├── Creates BrowserWindow (persists size/position/maximized state)
+  ├── IPC handlers: pick-folder, read-file, save-file, save-file-as, scan-dir,
+  │   watch-dir, stop-watch, show-in-explorer, open-folder-in-explorer
+  ├── chokidar.watch() → sends fs-add, fs-change, fs-unlink to renderer
+  ├── Intercepts Ctrl+Tab/Ctrl+W via before-input-event → sends switch-tab/close-tab
+  ├── Recursive directory scanner (skips dotfiles, node_modules)
+  └── Window bounds save/restore via %APPDATA%/window-bounds.json
 
 preload.js
-  └── Exposes window.electronAPI (IPC invoke wrappers + event listeners)
+  └── window.electronAPI (IPC invoke/send wrappers + event listeners)
 
 index.html + renderer.js (Renderer Process)
-  ├── File sidebar: tree hierarchy, collapsible folders, search filter, file count badges
-  ├── Markdown rendering: marked.js + custom renderer (headings, code, tables, blockquotes, callouts, footnotes, math, task lists)
-  ├── Tabs: Raw (editor + line numbers), Preview (rendered + TOC), Split (both side-by-side with draggable divider)
-  ├── Live reload: when chokidar detects external file change, auto-reloads if not dirty
-  ├── Dirty tracking: title shows * when unsaved, Ctrl+S saves back to disk
-  └── Theme toggle, font size slider, preview width slider, copy MD/HTML, download
+  ├── File tabs bar: multi-file tabs, close (x/middle-click), Ctrl+Tab round-robin, Ctrl+W
+  ├── File sidebar: tree with branch lines, collapsible (Alt+click recursive), collapse-all,
+  │   search filter, file count, right-click context menu, resizable (drag edge)
+  ├── Markdown: marked.js + custom renderer (headings, code, tables, blockquotes, callouts,
+  │   footnotes, math, task lists, mermaid diagrams, relative image resolution)
+  ├── View modes: Raw (editor + line numbers), Preview (rendered + TOC), Split (draggable)
+  ├── TOC sidebar: auto-generated, intersection observer, resizable
+  ├── Live reload: chokidar changes auto-reload across all open tabs
+  ├── Dirty tracking: title *, tab dot, auto-save 3s, Ctrl+S instant
+  ├── Find: Ctrl+F, window.find(), Enter/Shift+Enter navigate, Escape close
+  ├── Zoom: Ctrl+/-, Ctrl+scroll, Ctrl+0 reset, zoom % in status bar (persisted)
+  └── Theme, font slider, width slider, DM Mono font, landing page with recent folders
 ```
+
+## Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+Tab` | Next file tab (round-robin) |
+| `Ctrl+Shift+Tab` | Previous file tab (round-robin) |
+| `Ctrl+W` | Close current file tab |
+| `Ctrl+S` | Save current file |
+| `Ctrl+F` | Find in page |
+| `Ctrl+Enter` | Switch to Preview |
+| `Ctrl+` / `Ctrl-` | Page zoom in/out |
+| `Ctrl+0` | Reset zoom to 100% |
+| `Ctrl+scroll` | Page zoom in/out |
+| `Alt+click folder` | Recursive expand/collapse subtree |
+| `Escape` | Close find bar / cancel rename |
+| `Tab` (in editor) | Insert 4 spaces |
+| `Middle-click tab` | Close that tab |
 
 ## Config Choices
 
-- `nodeIntegration: true` + `contextIsolation: false` — allows `require()` in renderer for marked/hljs/lz-string. Safe because this is a local-only app (no remote content loaded).
-- highlight.js CSS loaded from `./node_modules/highlight.js/styles/atom-one-dark.min.css` (local, no CDN needed).
-- Google Fonts still loaded from CDN (Literata, Fira Code, Outfit). Works offline with fallback to system monospace.
+- `nodeIntegration: true` + `contextIsolation: false` — allows `require()` in renderer. Safe: local-only app.
+- highlight.js CSS from `./node_modules/highlight.js/styles/atom-one-dark.min.css` (local).
+- mermaid.js from CDN (`cdn.jsdelivr.net/npm/mermaid@10`). Requires internet on first load.
+- DM Mono font from Google Fonts CDN. Offline fallback: Consolas/system monospace.
+- Window bounds saved to `%APPDATA%/markdown-viewer-electron/window-bounds.json`.
 
 ## Build .exe Installer
 
@@ -89,18 +120,28 @@ Everything from `web-tools/markdown-viewer.html` is preserved:
 - Code block copy buttons, language badges
 - Preview width slider, font size slider
 - Stats bar (words, lines, chars, read time)
-- Drag & drop .md files
+- Drag and drop .md files
 
 ## What's New (Electron-only)
 
-- **File sidebar** — tree hierarchy with collapsible folders, search filter, file count
-- **Live file watching** — chokidar monitors directory for add/change/unlink
-- **Auto-reload** — externally edited files refresh automatically (if no local unsaved edits)
-- **Save to disk** — Ctrl+S writes back to the original file
-- **Save As** — dialog for new files
-- **Dirty tracking** — title bar shows `*` when unsaved
-- **Last directory remembered** — auto-opens on next launch
-- **Collapse state persisted** — folder open/close state saved in localStorage
+- **File tabs** — open multiple files in browser-style tabs. Close with x, middle-click, or Ctrl+W. Ctrl+Tab/Ctrl+Shift+Tab round-robin cycle. Each tab saves scroll position, view mode, dirty state
+- **File sidebar** — tree hierarchy with branch lines, SVG outline file icons, collapsible folders (Alt+click recursive), collapse-all button, path input field, resizable (180-500px), right-click context menu (Show in Explorer, Open folder, Copy path)
+- **TOC sidebar resizable** — drag right edge (160-400px), width persisted
+- **Mermaid diagrams** — fenced mermaid code blocks render as SVG diagrams
+- **Image preview** — relative image paths resolve to file:// URLs based on current file directory
+- **Live file watching** — chokidar monitors directory, updates all open tabs
+- **Auto-reload** — externally edited files refresh if no local unsaved edits
+- **Auto-save** — saves to disk after 3s idle. Ctrl+S for instant save
+- **Dirty tracking** — title bar `*`, tab dot indicator
+- **Find in page** — Ctrl+F, live search, Enter/Shift+Enter navigate, match counter
+- **Page zoom** — Ctrl+/-, Ctrl+scroll, Ctrl+0 reset. Zoom % in status bar, persisted
+- **Window state** — size, position, maximized state restored on next launch
+- **Recent folders** — landing page shows clickable folder history
+- **Folder path input** — paste a path and press Enter to open
+- **Filename rename** — click header filename to rename
+- **Social links** — GitHub + Discord icons on landing page
+- **Folders start collapsed** — cleaner initial view
+- **DM Mono font** — same monospace as Claude.ai
 
 <!-- ==== FILE: markdown-viewer-electron/index.html ==== -->
 <!DOCTYPE html>
@@ -117,6 +158,8 @@ Everything from `web-tools/markdown-viewer.html` is preserved:
 
 <!-- highlight.js theme (local) -->
 <link rel="stylesheet" href="./node_modules/highlight.js/styles/atom-one-dark.min.css" />
+<!-- mermaid.js for diagrams -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 
 <style>
 /* ══ Reset ═══════════════════════════════════════════════════ */
@@ -1475,6 +1518,90 @@ body {
 .rf-card:hover .rf-del { opacity: 1; }
 .rf-del:hover { color: var(--red); border-color: var(--red); }
 
+/* ══ File tabs bar ═══════════════════════════════════════════ */
+#file-tabs-bar {
+    display: none;
+    align-items: center;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    height: 32px;
+    min-height: 32px;
+    flex-shrink: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0 4px;
+    gap: 2px;
+}
+#file-tabs-bar.show { display: flex; }
+#file-tabs-bar::-webkit-scrollbar { height: 0; }
+
+.ftab {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    font-family: var(--font-code);
+    font-size: 11.5px;
+    color: var(--text-muted);
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: color .12s, border-color .12s, background .12s;
+    height: 100%;
+}
+.ftab:hover { color: var(--text-dim); background: var(--surface2); }
+.ftab.active { color: var(--text); border-bottom-color: var(--accent); background: var(--surface2); }
+.ftab.dirty .ftab-name::after { content: ' \2022'; color: var(--accent); }
+.ftab-name { pointer-events: none; }
+.ftab-close {
+    width: 16px; height: 16px;
+    display: flex; align-items: center; justify-content: center;
+    border: none; background: transparent;
+    color: var(--text-muted);
+    font-size: 10px;
+    border-radius: 3px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity .12s, color .12s, background .12s;
+}
+.ftab:hover .ftab-close, .ftab.active .ftab-close { opacity: 1; }
+.ftab-close:hover { color: var(--red); background: rgba(248,113,113,.12); }
+
+/* ══ Mermaid diagrams ═══════════════════════════════════════ */
+.mermaid-wrap {
+    margin: 1.15em 0;
+    padding: 20px 16px;
+    background: linear-gradient(135deg, #131720 0%, #1a1f2e 100%);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow-x: auto;
+    text-align: center;
+    box-shadow: 0 2px 12px rgba(0,0,0,.2);
+    position: relative;
+}
+.mermaid-wrap::before {
+    content: 'diagram';
+    position: absolute;
+    top: 6px; right: 12px;
+    font-family: var(--font-code);
+    font-size: 9.5px;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    opacity: .5;
+}
+.mermaid-wrap svg { max-width: 100%; height: auto; }
+.mermaid-wrap .node rect,
+.mermaid-wrap .node circle,
+.mermaid-wrap .node polygon { rx: 6; ry: 6; }
+[data-theme="light"] .mermaid-wrap {
+    background: linear-gradient(135deg, #ffffff 0%, #f0ede6 100%);
+    box-shadow: 0 2px 12px rgba(0,0,0,.08);
+}
+
 @media (max-width: 960px) { #font-ctrl { display: none; } }
 @media (max-width: 780px) { #width-ctrl { display: none; } }
 @media (max-width: 720px) {
@@ -1539,7 +1666,10 @@ body {
     </div>
 </header>
 
-<!-- ══ Main ═══════════════════════════════════════════════ -->
+<!-- File tabs bar -->
+<div id="file-tabs-bar"></div>
+
+<!-- ══ Main ═══════════════════════════════════════════════════════ -->
 <div id="main">
 
     <!-- File Sidebar -->
@@ -1663,6 +1793,9 @@ Ctrl+Enter to preview"></textarea>
     <div class="sp"><span class="l">Chars</span><span class="v" id="sb-c">0</span></div>
     <div class="sp"><span class="l">Read</span><span class="v" id="sb-r">&mdash;</span></div>
     <div id="sb-spacer"></div>
+    <div class="sp" id="sb-zoom-wrap" style="cursor:pointer" title="Click to reset zoom">
+        <span class="l">Zoom</span><span class="v" id="sb-zoom">100%</span>
+    </div>
     <div class="sp"><span class="l">Watching</span><span class="v" id="sb-watch">off</span></div>
     <div class="sp" style="border-right:none;border-left:1px solid rgba(52,211,153,.12)">
         <span class="l">Tab</span><span class="v" id="sb-tab">raw</span>
@@ -1705,10 +1838,27 @@ let mainWindow = null;
 let watcher = null;
 let watchedDir = null;
 
+const BOUNDS_FILE = path.join(app.getPath('userData'), 'window-bounds.json');
+
+function loadBounds() {
+    try { return JSON.parse(fs.readFileSync(BOUNDS_FILE, 'utf-8')); }
+    catch { return null; }
+}
+
+function saveBounds() {
+    if (!mainWindow) return;
+    const data = { bounds: mainWindow.getBounds(), isMaximized: mainWindow.isMaximized() };
+    try { fs.writeFileSync(BOUNDS_FILE, JSON.stringify(data)); } catch {}
+}
+
 function createWindow() {
+    const saved = loadBounds();
+
     mainWindow = new BrowserWindow({
-        width: 1400,
-        height: 900,
+        width:  saved?.bounds?.width  || 1400,
+        height: saved?.bounds?.height || 900,
+        x:      saved?.bounds?.x,
+        y:      saved?.bounds?.y,
         minWidth: 700,
         minHeight: 500,
         title: 'Markdown.View',
@@ -1719,21 +1869,27 @@ function createWindow() {
             nodeIntegration: true,
         },
     });
+
+    if (saved?.isMaximized) mainWindow.maximize();
+
     mainWindow.setMenuBarVisibility(false);
     mainWindow.loadFile('index.html');
 
-    // Forward find-in-page results to renderer
-    mainWindow.webContents.on('found-in-page', (_ev, result) => {
-        mainWindow.webContents.send('find-result', {
-            activeMatch: result.activeMatchOrdinal,
-            total: result.matches,
-        });
-    });
+    // Save window bounds on move/resize/close
+    mainWindow.on('resize', saveBounds);
+    mainWindow.on('move', saveBounds);
+    mainWindow.on('close', saveBounds);
 
-    // Prevent native Ctrl+/- zoom so renderer.js handles font size instead
+    // Intercept Ctrl+Tab/Ctrl+Shift+Tab/Ctrl+W at main process level
+    // (Chromium swallows Ctrl+Tab before DOM keydown fires)
     mainWindow.webContents.on('before-input-event', (event, input) => {
-        if ((input.control || input.meta) && (input.key === '=' || input.key === '+' || input.key === '-' || input.key === '0')) {
+        if ((input.control || input.meta) && input.key === 'Tab') {
             event.preventDefault();
+            mainWindow.webContents.send('switch-tab', input.shift ? -1 : 1);
+        }
+        if ((input.control || input.meta) && input.key === 'w') {
+            event.preventDefault();
+            mainWindow.webContents.send('close-tab');
         }
     });
 }
@@ -1741,21 +1897,6 @@ function createWindow() {
 app.whenReady().then(createWindow);
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
-
-/* ══ IPC: Find in page (fire-and-forget + result stream) ═══ */
-ipcMain.on('do-find', (_e, text, forward) => {
-    if (!text) { mainWindow.webContents.stopFindInPage('clearSelection'); return; }
-    mainWindow.webContents.findInPage(text, { forward, findNext: false });
-});
-
-ipcMain.on('do-find-next', (_e, text, forward) => {
-    if (!text) return;
-    mainWindow.webContents.findInPage(text, { forward, findNext: true });
-});
-
-ipcMain.on('do-stop-find', () => {
-    mainWindow.webContents.stopFindInPage('clearSelection');
-});
 
 /* ══ IPC: Pick folder ════════════════════════════════════════ */
 ipcMain.handle('pick-folder', async () => {
@@ -6267,14 +6408,11 @@ window.electronAPI = {
     stopWatch:    ()                   => ipcRenderer.invoke('stop-watch'),
     showInExplorer:    (p)             => ipcRenderer.invoke('show-in-explorer', p),
     openFolderInExplorer: (p)          => ipcRenderer.invoke('open-folder-in-explorer', p),
-    doFind:            (t, fwd)        => ipcRenderer.send('do-find', t, fwd),
-    doFindNext:        (t, fwd)        => ipcRenderer.send('do-find-next', t, fwd),
-    stopFind:          ()              => ipcRenderer.send('do-stop-find'),
-    onFindResult:      (cb)            => ipcRenderer.on('find-result', (_e, data) => cb(data)),
-
     onFsAdd:      (cb) => ipcRenderer.on('fs-add',    (_e, data) => cb(data)),
     onFsChange:   (cb) => ipcRenderer.on('fs-change', (_e, data) => cb(data)),
     onFsUnlink:   (cb) => ipcRenderer.on('fs-unlink', (_e, data) => cb(data)),
+    onSwitchTab:  (cb) => ipcRenderer.on('switch-tab', (_e, dir) => cb(dir)),
+    onCloseTab:   (cb) => ipcRenderer.on('close-tab',  () => cb()),
 };
 
 <!-- ==== FILE: markdown-viewer-electron/renderer.js ==== -->
@@ -6306,6 +6444,40 @@ let sidebarSearchQ  = '';
 let isDirty         = false;
 let autoSaveTimer   = null;
 
+// File tabs
+let openTabs = [];       // [{id, path, name, content, isDirty, scrollTop, viewTab}]
+let activeTabId = null;
+let tabIdCounter = 0;
+
+// Persistent scroll memory: { filePath: { scrollTop, viewTab } }
+const SCROLL_KEY = 'mdv_scroll_mem';
+function loadScrollMem() { try { return JSON.parse(localStorage.getItem(SCROLL_KEY) || '{}'); } catch { return {}; } }
+function saveScrollMem(mem) { localStorage.setItem(SCROLL_KEY, JSON.stringify(mem)); }
+function saveFileScroll(filePath, scrollTop, viewTab) {
+    if (!filePath) return;
+    const mem = loadScrollMem();
+    mem[filePath] = { scrollTop, viewTab };
+    saveScrollMem(mem);
+}
+function getFileScroll(filePath) {
+    if (!filePath) return null;
+    return loadScrollMem()[filePath] || null;
+}
+function removeFileScroll(filePath) {
+    const mem = loadScrollMem();
+    delete mem[filePath];
+    saveScrollMem(mem);
+}
+function pruneScrollMem(validPaths) {
+    const mem = loadScrollMem();
+    const validSet = new Set(validPaths);
+    let changed = false;
+    for (const k of Object.keys(mem)) {
+        if (!validSet.has(k)) { delete mem[k]; changed = true; }
+    }
+    if (changed) saveScrollMem(mem);
+}
+
 // Apply persisted theme immediately
 document.documentElement.dataset.theme = dark ? 'dark' : 'light';
 
@@ -6326,6 +6498,7 @@ const tabs         = $('tabs');
 const pill         = $('tab-pill');
 const fileSidebar  = $('file-sidebar');
 const fileList     = $('file-list');
+const fileTabsBar  = $('file-tabs-bar');
 
 /* ══ marked.js renderer ════════════════════════════════════ */
 const renderer = new marked.Renderer();
@@ -6342,6 +6515,10 @@ renderer.heading = function(text, level) {
 };
 
 renderer.code = function(code, lang) {
+    // Mermaid diagrams
+    if (lang && lang.toLowerCase() === 'mermaid') {
+        return `<div class="mermaid-wrap"><pre class="mermaid">${esc(code)}</pre></div>\n`;
+    }
     const raw = code.replace(/\t/g, '    ');
     const vl = lang && hljs.getLanguage(lang) ? lang : null;
     let hl;
@@ -6359,7 +6536,13 @@ renderer.table = function(header, body) {
 };
 
 renderer.image = function(href, title, text) {
-    return `<img src="${esc(href)}" alt="${esc(text)}"${title ? ` title="${esc(title)}"` : ''} loading="lazy" />\n`;
+    // Resolve relative paths to file:// URLs based on current file's directory
+    let src = href;
+    if (currentFilePath && href && !href.startsWith('http') && !href.startsWith('data:') && !href.startsWith('file:')) {
+        const dir = require('path').dirname(currentFilePath);
+        src = 'file:///' + require('path').resolve(dir, href).replace(/\\/g, '/');
+    }
+    return `<img src="${esc(src)}" alt="${esc(text)}"${title ? ` title="${esc(title)}"` : ''} loading="lazy" />\n`;
 };
 
 renderer.link = function(href, title, text) {
@@ -6438,6 +6621,94 @@ function renderMD(src) {
     catch(e) { return `<pre style="color:var(--red)">Parse error: ${esc(e.message)}</pre>`; }
 }
 
+// Initialize mermaid with custom theme matching app palette + DM Mono font
+if (typeof mermaid !== 'undefined') {
+    mermaid.initialize({
+        startOnLoad: false,
+        theme: 'base',
+        securityLevel: 'loose',
+        themeVariables: {
+            // Fonts
+            fontFamily: "'DM Mono', 'Consolas', monospace",
+            fontSize: '13px',
+            // Background
+            darkMode: true,
+            background: '#131720',
+            mainBkg: '#1a1f2e',
+            // Node colors (d3-inspired palette)
+            primaryColor: '#1e3a5f',
+            primaryTextColor: '#d4dce8',
+            primaryBorderColor: '#34d399',
+            secondaryColor: '#2d1b4e',
+            secondaryTextColor: '#d4dce8',
+            secondaryBorderColor: '#a78bfa',
+            tertiaryColor: '#1b3b33',
+            tertiaryTextColor: '#d4dce8',
+            tertiaryBorderColor: '#34d399',
+            // Lines and edges
+            lineColor: '#4a5568',
+            textColor: '#d4dce8',
+            // Notes and labels
+            noteBkgColor: '#1a1f2e',
+            noteTextColor: '#8896b0',
+            noteBorderColor: '#252c3d',
+            // Actor/sequence
+            actorBkg: '#1e3a5f',
+            actorBorder: '#60a5fa',
+            actorTextColor: '#d4dce8',
+            actorLineColor: '#4a5568',
+            signalColor: '#d4dce8',
+            signalTextColor: '#d4dce8',
+            // Pie
+            pie1: '#34d399',
+            pie2: '#60a5fa',
+            pie3: '#f472b6',
+            pie4: '#fbbf24',
+            pie5: '#a78bfa',
+            pie6: '#f87171',
+            pie7: '#2dd4bf',
+            pie8: '#818cf8',
+            // Labels
+            labelColor: '#d4dce8',
+            labelTextColor: '#d4dce8',
+            // Section
+            sectionBkgColor: '#1a1f2e',
+            sectionBkgColor2: '#131720',
+            altSectionBkgColor: '#1e2435',
+            // Task (gantt)
+            taskBkgColor: '#1e3a5f',
+            taskTextColor: '#d4dce8',
+            taskBorderColor: '#34d399',
+            activeTaskBkgColor: '#0a8f5f',
+            activeTaskBorderColor: '#34d399',
+            doneTaskBkgColor: '#2d1b4e',
+            doneTaskBorderColor: '#a78bfa',
+            // Cluster
+            clusterBkg: '#131720',
+            clusterBorder: '#252c3d',
+            // Title
+            titleColor: '#34d399',
+        },
+    });
+}
+
+function renderMermaidBlocks() {
+    if (typeof mermaid === 'undefined') return;
+    document.querySelectorAll('pre.mermaid').forEach((el, i) => {
+        if (el.dataset.processed) return;
+        el.dataset.processed = '1';
+        const code = el.textContent;
+        const id = 'mermaid-' + Date.now() + '-' + i;
+        try {
+            mermaid.render(id, code).then(({ svg }) => {
+                el.innerHTML = svg;
+            }).catch(() => {
+                el.innerHTML = '<span style="color:var(--red)">Mermaid render error</span>';
+            });
+        } catch { /* mermaid not ready */ }
+    });
+}
+
 function render() {
     mdvTaskIdx = 0;
     const html = renderMD(MD);
@@ -6445,6 +6716,7 @@ function render() {
     splitPrev.innerHTML = html;
     buildTOC(html);
     updateStats();
+    renderMermaidBlocks();
     // Interactive task checkboxes
     [prevBody, splitPrev].forEach(container => {
         container.querySelectorAll('.task-cb').forEach(cb => {
@@ -6544,11 +6816,16 @@ function markDirty() {
     isDirty = true;
     document.title = (fname ? fname : 'untitled.md') + ' * \u2014 Markdown.View';
     schedAutoSave();
+    // Sync tab dirty state
+    const tab = openTabs.find(t => t.id === activeTabId);
+    if (tab) { tab.isDirty = true; renderFileTabs(); }
 }
 
 function markClean() {
     isDirty = false;
     document.title = (fname ? fname : 'untitled.md') + ' \u2014 Markdown.View';
+    const tab = openTabs.find(t => t.id === activeTabId);
+    if (tab) { tab.isDirty = false; renderFileTabs(); }
 }
 
 function schedAutoSave() {
@@ -6597,23 +6874,114 @@ tabs.addEventListener('click', e => {
     if (btn) setTab(btn.dataset.tab);
 });
 
-/* ══ Enter workspace (from file or paste) ═════════════════ */
-function enter(src, name, filePath = null) {
-    MD = src;
-    fname = name || 'untitled.md';
-    currentFilePath = filePath;
+/* ══ File tabs management ═════════════════════════════════ */
+function saveActiveTabState() {
+    if (!activeTabId) return;
+    const tab = openTabs.find(t => t.id === activeTabId);
+    if (!tab) return;
+    tab.content = MD;
+    tab.isDirty = isDirty;
+    tab.scrollTop = $('prev-scroll')?.scrollTop || 0;
+    tab.viewTab = curTab;
+    // Persist scroll to localStorage
+    saveFileScroll(tab.path, tab.scrollTop, tab.viewTab);
+}
+
+function renderFileTabs() {
+    fileTabsBar.innerHTML = '';
+    if (!openTabs.length) { fileTabsBar.classList.remove('show'); return; }
+    fileTabsBar.classList.add('show');
+    openTabs.forEach(tab => {
+        const el = document.createElement('div');
+        el.className = 'ftab' + (tab.id === activeTabId ? ' active' : '') + (tab.isDirty ? ' dirty' : '');
+        el.dataset.tabId = tab.id;
+        el.innerHTML = `<span class="ftab-name">${esc(tab.name)}</span><button class="ftab-close">\u2715</button>`;
+        el.addEventListener('click', e => {
+            if (e.target.closest('.ftab-close')) return;
+            switchToTab(tab.id);
+        });
+        // Middle-click to close
+        el.addEventListener('mousedown', e => { if (e.button === 1) { e.preventDefault(); closeTab(tab.id); } });
+        el.querySelector('.ftab-close').addEventListener('click', e => { e.stopPropagation(); closeTab(tab.id); });
+        fileTabsBar.appendChild(el);
+    });
+    // Scroll active tab into view
+    const activeEl = fileTabsBar.querySelector('.ftab.active');
+    if (activeEl) activeEl.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+
+function switchToTab(tabId) {
+    if (tabId === activeTabId) return;
+    saveActiveTabState();
+    const tab = openTabs.find(t => t.id === tabId);
+    if (!tab) return;
+    activeTabId = tabId;
+    loadTabIntoEditor(tab);
+    renderFileTabs();
+    renderFileList();
+}
+
+function loadTabIntoEditor(tab) {
+    MD = tab.content;
+    fname = tab.name;
+    currentFilePath = tab.path;
+    isDirty = tab.isDirty;
     $('fname-display').value = fname;
     rawEditor.value = MD;
     splitEd.value = MD;
     setLnums(MD, lnums);
     setLnums(MD, splitLnums);
     updateStats();
+    if (tab.isDirty) markDirty(); else markClean();
+    setTab(tab.viewTab || curTab);
+    // Restore scroll position
+    setTimeout(() => { if ($('prev-scroll')) $('prev-scroll').scrollTop = tab.scrollTop || 0; }, 50);
+}
+
+function closeTab(tabId) {
+    const idx = openTabs.findIndex(t => t.id === tabId);
+    if (idx === -1) return;
+    openTabs.splice(idx, 1);
+    if (tabId === activeTabId) {
+        if (openTabs.length) {
+            const newIdx = Math.min(idx, openTabs.length - 1);
+            activeTabId = openTabs[newIdx].id;
+            loadTabIntoEditor(openTabs[newIdx]);
+        } else {
+            activeTabId = null;
+            currentFilePath = null;
+            MD = '';
+            fname = 'untitled.md';
+            workspace.classList.remove('active');
+            landing.classList.remove('hidden');
+        }
+    }
+    renderFileTabs();
+    renderFileList();
+}
+
+function openInTab(src, name, filePath) {
+    // Check if already open
+    if (filePath) {
+        const existing = openTabs.find(t => t.path === filePath);
+        if (existing) { switchToTab(existing.id); return; }
+    }
+    saveActiveTabState();
+    const id = ++tabIdCounter;
+    const saved = getFileScroll(filePath);
+    const tab = { id, path: filePath, name: name || 'untitled.md', content: src, isDirty: false, scrollTop: saved?.scrollTop || 0, viewTab: saved?.viewTab || curTab };
+    openTabs.push(tab);
+    activeTabId = id;
+    loadTabIntoEditor(tab);
     landing.classList.add('hidden');
     workspace.classList.add('active');
-    markClean();
-    setTimeout(() => setTab(curTab), 40);
-    // Highlight active in sidebar
+    renderFileTabs();
     renderFileList();
+}
+
+/* ══ Enter workspace (from file or paste) ═════════════════ */
+function enter(src, name, filePath = null) {
+    openInTab(src, name, filePath);
 }
 
 /* ══ Landing actions ══════════════════════════════════════ */
@@ -6667,8 +7035,10 @@ fnameInput.addEventListener('click', e => e.stopPropagation());
 /* ══ Logo → Home ═════════════════════════════════════════ */
 $('logo').addEventListener('click', () => {
     clearTimeout(autoSaveTimer);
+    saveActiveTabState();
     workspace.classList.remove('active');
     landing.classList.remove('hidden');
+    fileTabsBar.classList.remove('show');
     // Collapse both side panels
     fileSidebar.classList.add('hidden');
     sidebarVisible = false;
@@ -6761,9 +7131,10 @@ async function openFolderByPath(dir) {
         updateSidebarBtn();
     }
 
-    // Hide landing, show workspace
+    // Hide landing, show workspace + restore tab bar
     landing.classList.add('hidden');
     workspace.classList.add('active');
+    if (openTabs.length) renderFileTabs();
 
     // Scan
     allFiles = await window.electronAPI.scanDir(dir);
@@ -6772,6 +7143,9 @@ async function openFolderByPath(dir) {
     // Default: start with all folders collapsed
     collapseAllFolders();
     renderFileList();
+
+    // Prune scroll memory for files that no longer exist
+    pruneScrollMem(allFiles.map(f => f.path));
 
     // Auto-open first file if nothing is open
     if (!currentFilePath && allFiles.length) {
@@ -7016,15 +7390,10 @@ function renderFileList() {
 }
 
 async function openFile(fileInfo) {
-    // If dirty, save first
-    if (isDirty && currentFilePath) {
-        await window.electronAPI.saveFile(currentFilePath, MD);
-        markClean();
-    }
     const content = await window.electronAPI.readFile(fileInfo.path);
     if (content === null) { toast('\u26A0 Could not read file'); return; }
     enter(content, fileInfo.name, fileInfo.path);
-    setTab(curTab === 'raw' ? 'preview' : curTab);
+    if (curTab === 'raw') setTab('preview');
 }
 
 /* ══ File system events (chokidar) ═══════════════════════ */
@@ -7042,30 +7411,31 @@ window.electronAPI.onFsChange(async data => {
     const idx = allFiles.findIndex(f => f.path === data.path);
     if (idx !== -1) { allFiles[idx].size = data.size; allFiles[idx].mtime = data.mtime; }
 
-    // If it's the currently viewed file and we haven't made local edits, reload
-    if (data.path === currentFilePath && !isDirty) {
+    // Check if this file is open in any tab
+    const tab = openTabs.find(t => t.path === data.path);
+    if (tab && !tab.isDirty) {
         const content = await window.electronAPI.readFile(data.path);
-        if (content !== null && content !== MD) {
-            MD = content;
-            rawEditor.value = MD;
-            splitEd.value = MD;
-            setLnums(MD, lnums);
-            setLnums(MD, splitLnums);
-            updateStats();
-            if (curTab !== 'raw') render();
-            toast('\u21BB ' + fname + ' reloaded');
+        if (content !== null && content !== tab.content) {
+            tab.content = content;
+            // If it's the active tab, reload the editor
+            if (tab.id === activeTabId) {
+                MD = content;
+                rawEditor.value = MD;
+                splitEd.value = MD;
+                setLnums(MD, lnums);
+                setLnums(MD, splitLnums);
+                updateStats();
+                if (curTab !== 'raw') render();
+                toast('\u21BB ' + fname + ' reloaded');
+            }
         }
-    } else if (data.path === currentFilePath && isDirty) {
-        // Show dot indicator
-        const dotId = 'dot-' + btoa(data.path).replace(/[^a-zA-Z0-9]/g,'');
-        const dot = document.getElementById(dotId);
-        if (dot) dot.classList.add('changed');
     }
     renderFileList();
 });
 
 window.electronAPI.onFsUnlink(data => {
     allFiles = allFiles.filter(f => f.path !== data.path);
+    removeFileScroll(data.path);
     renderFileList();
     if (data.path === currentFilePath) {
         toast('\u26A0 ' + fname + ' was deleted externally');
@@ -7167,6 +7537,18 @@ function editorKeys(e) {
         }
     }
 }
+
+/* ══ Tab shortcuts: Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+W ═════ */
+// Handled via IPC from main process (Chromium swallows Ctrl+Tab before DOM keydown)
+window.electronAPI.onSwitchTab(dir => {
+    if (openTabs.length < 2) return;
+    const curIdx = openTabs.findIndex(t => t.id === activeTabId);
+    const next = (curIdx + dir + openTabs.length) % openTabs.length;
+    switchToTab(openTabs[next].id);
+});
+window.electronAPI.onCloseTab(() => {
+    if (activeTabId) closeTab(activeTabId);
+});
 
 /* ══ Global Ctrl+S ═════════════════════════════════════════ */
 document.addEventListener('keydown', e => {
@@ -7379,28 +7761,45 @@ fontSlider.addEventListener('input', () => {
     localStorage.setItem('mdv_font_size', fontSlider.value);
 });
 
-/* ══ Ctrl+/- zoom (font size) ═══════════════════════ */
+/* ══ Ctrl+/- and Ctrl+scroll = page zoom ═══════════════════ */
+const webFrame = require('electron').webFrame;
+let zoomLevel = parseFloat(localStorage.getItem('mdv_zoom') || '0');
+webFrame.setZoomLevel(zoomLevel);
+
+function updateZoomDisplay() {
+    const pct = Math.round(Math.pow(1.2, zoomLevel) * 100);
+    $('sb-zoom').textContent = pct + '%';
+}
+updateZoomDisplay();
+
+function applyZoom(delta) {
+    zoomLevel = Math.max(-5, Math.min(5, zoomLevel + delta));
+    webFrame.setZoomLevel(zoomLevel);
+    localStorage.setItem('mdv_zoom', zoomLevel);
+    updateZoomDisplay();
+}
+
+function resetZoom() {
+    zoomLevel = 0;
+    webFrame.setZoomLevel(0);
+    localStorage.setItem('mdv_zoom', '0');
+    updateZoomDisplay();
+}
+
 document.addEventListener('keydown', e => {
     if (!(e.ctrlKey || e.metaKey)) return;
-    if (e.key === '=' || e.key === '+') {
-        e.preventDefault();
-        const v = Math.min(24, parseInt(fontSlider.value) + 1);
-        fontSlider.value = v;
-        applyFontSize(v);
-        localStorage.setItem('mdv_font_size', v);
-    } else if (e.key === '-') {
-        e.preventDefault();
-        const v = Math.max(12, parseInt(fontSlider.value) - 1);
-        fontSlider.value = v;
-        applyFontSize(v);
-        localStorage.setItem('mdv_font_size', v);
-    } else if (e.key === '0') {
-        e.preventDefault();
-        fontSlider.value = 16;
-        applyFontSize(16);
-        localStorage.setItem('mdv_font_size', 16);
-    }
+    if (e.key === '=' || e.key === '+') { e.preventDefault(); applyZoom(0.5); }
+    else if (e.key === '-') { e.preventDefault(); applyZoom(-0.5); }
+    else if (e.key === '0') { e.preventDefault(); resetZoom(); }
 });
+
+document.addEventListener('wheel', e => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    applyZoom(e.deltaY < 0 ? 0.5 : -0.5);
+}, { passive: false });
+
+$('sb-zoom-wrap').addEventListener('click', resetZoom);
 
 /* ══ Theme toggle ═════════════════════════════════════════ */
 $('btn-theme').addEventListener('click', () => {
@@ -7411,22 +7810,13 @@ $('btn-theme').addEventListener('click', () => {
 });
 $('btn-theme').textContent = dark ? '\uD83C\uDF19' : '\u2600\uFE0F';
 
-/* ══ Find in page (Ctrl+F) ════════════════════════════════ */
+/* ══ Find in page (Ctrl+F) — uses window.find(), no IPC ══ */
 const findBar   = $('find-bar');
 const findInput = $('find-input');
 const findCount = $('find-count');
 let findOpen = false;
-
-// Keep focus on find input after Chromium findInPage steals it
-function refocusFind() {
-    if (findOpen) setTimeout(() => findInput.focus(), 0);
-}
-
-// Listen for results from main process
-window.electronAPI.onFindResult(data => {
-    if (data) findCount.textContent = data.activeMatch + '/' + data.total;
-    refocusFind();
-});
+let findMatchIndex = 0;
+let findMatchTotal = 0;
 
 function openFind() {
     findOpen = true;
@@ -7440,31 +7830,54 @@ function closeFind() {
     findBar.classList.remove('show');
     findCount.textContent = '';
     findInput.value = '';
-    window.electronAPI.stopFind();
+    findMatchIndex = 0;
+    findMatchTotal = 0;
+    // Clear selection/highlight
+    window.getSelection()?.removeAllRanges();
+}
+
+function countMatches(text) {
+    if (!text) return 0;
+    // Count occurrences in visible text content
+    const body = document.body.innerText || '';
+    const re = new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    const m = body.match(re);
+    return m ? m.length : 0;
+}
+
+function doFind(backwards) {
+    const text = findInput.value;
+    if (!text) { findCount.textContent = ''; return; }
+    // window.find(string, caseSensitive, backwards, wrapAround)
+    const found = window.find(text, false, !!backwards, true);
+    findMatchTotal = countMatches(text);
+    if (found) {
+        if (backwards) { findMatchIndex--; if (findMatchIndex < 1) findMatchIndex = findMatchTotal; }
+        else { findMatchIndex++; if (findMatchIndex > findMatchTotal) findMatchIndex = 1; }
+        findCount.textContent = findMatchIndex + '/' + findMatchTotal;
+    } else {
+        findCount.textContent = '0/0';
+        findMatchIndex = 0;
+    }
+}
+
+function doFreshFind() {
+    findMatchIndex = 0;
+    doFind(false);
 }
 
 // Typing → fresh search
-findInput.addEventListener('input', () => {
-    const text = findInput.value;
-    if (!text) { findCount.textContent = ''; window.electronAPI.stopFind(); return; }
-    window.electronAPI.doFind(text, true);
-    refocusFind();
-});
+findInput.addEventListener('input', () => doFreshFind());
 
-// Enter/Shift+Enter → next/prev match
+// Enter/Shift+Enter → next/prev
 findInput.addEventListener('keydown', e => {
-    e.stopPropagation(); // Never leak to editor handlers
-    if (e.key === 'Enter') {
-        e.preventDefault();
-        const text = findInput.value;
-        if (text) window.electronAPI.doFindNext(text, !e.shiftKey);
-        refocusFind();
-    }
+    e.stopPropagation();
+    if (e.key === 'Enter') { e.preventDefault(); doFind(e.shiftKey); }
     if (e.key === 'Escape') { e.preventDefault(); closeFind(); }
 });
 
-$('find-next').addEventListener('click', () => { const t = findInput.value; if (t) { window.electronAPI.doFindNext(t, true); refocusFind(); } });
-$('find-prev').addEventListener('click', () => { const t = findInput.value; if (t) { window.electronAPI.doFindNext(t, false); refocusFind(); } });
+$('find-next').addEventListener('click', () => doFind(false));
+$('find-prev').addEventListener('click', () => doFind(true));
 $('find-close').addEventListener('click', closeFind);
 
 document.addEventListener('keydown', e => {
@@ -7551,4 +7964,278 @@ window.addEventListener('load', async () => {
     }
     renderRecentFolders();
 });
+
+<!-- ==== FILE: markdown-viewer-electron/sample-img.svg ==== -->
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="120" viewBox="0 0 320 120">
+  <rect width="320" height="120" rx="12" fill="#131720"/>
+  <rect x="8" y="8" width="304" height="104" rx="8" fill="none" stroke="#34d399" stroke-width="2"/>
+  <text x="160" y="50" text-anchor="middle" font-family="monospace" font-size="18" font-weight="bold" fill="#34d399">Markdown.View</text>
+  <text x="160" y="78" text-anchor="middle" font-family="monospace" font-size="12" fill="#8896b0">Relative image loaded via file://</text>
+</svg>
+
+<!-- ==== FILE: markdown-viewer-electron/sample.md ==== -->
+# Markdown.View — Sample File
+
+This file exercises **every feature** of the Markdown.View Electron app. Open it in Preview or Split mode to see everything rendered.
+
+---
+
+## Headings (TOC auto-generates from these)
+
+### Third Level
+
+#### Fourth Level
+
+##### Fifth Level
+
+---
+
+## Text Formatting
+
+**Bold text**, *italic text*, ~~strikethrough~~, and `inline code`.
+
+Here's a <kbd>Ctrl</kbd>+<kbd>S</kbd> keyboard shortcut styled as keys.
+
+> **Blockquote** — this is a standard blockquote with **bold** inside.
+
+> [!NOTE]
+> This is a GitHub-style NOTE callout.
+
+> [!TIP]
+> This is a TIP callout — useful for hints.
+
+> [!WARNING]
+> This is a WARNING callout — be careful!
+
+> [!IMPORTANT]
+> This is an IMPORTANT callout.
+
+> [!CAUTION]
+> This is a CAUTION callout — danger zone.
+
+---
+
+## Links
+
+- [External link](https://github.com) — opens in default browser
+- [Anchor link to Tables section](#tables)
+- [Anchor link to Mermaid section](#mermaid-diagrams)
+
+---
+
+## Image Preview (Relative Path)
+
+The image below loads from a relative path (`./sample-img.svg`) — resolved to a `file://` URL automatically:
+
+![Sample Image](./sample-img.svg)
+
+---
+
+## Code Blocks
+
+### JavaScript
+
+```javascript
+function greet(name) {
+    const msg = `Hello, ${name}!`;
+    console.log(msg);
+    return msg;
+}
+greet('Markdown.View');
+```
+
+### C#
+
+```csharp
+public class GameEvents
+{
+    /// <summary> Raised when a tool is picked up. </summary>
+    public static event Action<IInventoryItem> OnItemPickedUp;
+
+    public static void RaiseItemPickedUp(IInventoryItem item)
+    {
+        OnItemPickedUp?.Invoke(item);
+    }
+}
+```
+
+### Python
+
+```python
+def fibonacci(n: int) -> list[int]:
+    """Generate first n Fibonacci numbers."""
+    fib = [0, 1]
+    for i in range(2, n):
+        fib.append(fib[-1] + fib[-2])
+    return fib[:n]
+
+print(fibonacci(10))
+```
+
+### JSON
+
+```json
+{
+    "name": "markdown-viewer-electron",
+    "version": "1.0.0",
+    "dependencies": {
+        "chokidar": "^3.6.0",
+        "marked": "^9.1.6",
+        "highlight.js": "^11.9.0"
+    }
+}
+```
+
+---
+
+## Tables
+
+| Feature | Shortcut | Status |
+|---------|----------|--------|
+| Save | `Ctrl+S` | Done |
+| Find | `Ctrl+F` | Done |
+| Next tab | `Ctrl+Tab` | Done |
+| Close tab | `Ctrl+W` | Done |
+| Zoom in | `Ctrl+` | Done |
+| Zoom out | `Ctrl-` | Done |
+| Reset zoom | `Ctrl+0` | Done |
+
+| Left | Center | Right |
+|:-----|:------:|------:|
+| A | B | C |
+| Long text here | Centered | 42 |
+
+---
+
+## Task Lists
+
+- [x] File sidebar with tree hierarchy
+- [x] Collapsible folders (Alt+click recursive)
+- [x] Right-click context menu
+- [x] Multi-file tabs (Ctrl+Tab round-robin)
+- [x] Mermaid diagram support
+- [x] Relative image resolution
+- [x] Find in page (Ctrl+F)
+- [x] Page zoom (Ctrl+/-, Ctrl+scroll)
+- [ ] Future: Breadcrumb navigation
+- [ ] Future: Scroll position memory per tab
+
+---
+
+## Lists
+
+### Unordered
+
+- First item
+- Second item
+  - Nested item A
+  - Nested item B
+    - Deep nested
+- Third item
+
+### Ordered
+
+1. Step one
+2. Step two
+3. Step three
+   1. Sub-step A
+   2. Sub-step B
+
+---
+
+## Math (styled spans)
+
+Inline math: $E = mc^2$
+
+Block math:
+
+$$
+\sum_{i=1}^{n} i = \frac{n(n+1)}{2}
+$$
+
+---
+
+## Footnotes
+
+This sentence has a footnote[^1] and another one[^2].
+
+[^1]: First footnote — footnotes appear at the bottom.
+[^2]: Second footnote — with a [link](https://example.com) inside.
+
+---
+
+## Mermaid Diagrams
+
+### Flowchart
+
+```mermaid
+graph TD
+    A[Open App] --> B{Folder selected?}
+    B -->|Yes| C[Scan directory]
+    B -->|No| D[Show landing page]
+    C --> E[Render file tree]
+    E --> F[Click file]
+    F --> G[Open in tab]
+    G --> H[Preview markdown]
+```
+
+### Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant R as Renderer
+    participant M as Main Process
+    participant FS as File System
+
+    U->>R: Click file in sidebar
+    R->>M: readFile(path)
+    M->>FS: fs.readFileSync
+    FS-->>M: content
+    M-->>R: content
+    R->>R: Open in new tab
+    R->>R: Parse & render markdown
+```
+
+### Pie Chart
+
+```mermaid
+pie title Feature Categories
+    "Editing" : 30
+    "Navigation" : 25
+    "Rendering" : 25
+    "File Management" : 20
+```
+
+---
+
+## Horizontal Rules
+
+The lines above and below are horizontal rules (`---`).
+
+---
+
+## Definition List
+
+Electron
+: A framework for building desktop apps with web technologies.
+
+Chokidar
+: A file watching library for Node.js.
+
+Mermaid
+: A diagramming library that renders text definitions into SVG diagrams.
+
+---
+
+## Abbreviation
+
+The HTML specification is maintained by the W3C.
+
+*[HTML]: Hyper Text Markup Language
+*[W3C]: World Wide Web Consortium
+
+---
+
+> **End of sample.** Try editing this file in Raw mode — changes auto-save after 3 seconds. Switch between tabs with Ctrl+Tab. Use Ctrl+F to search. Zoom with Ctrl+/- or Ctrl+scroll wheel.
 
