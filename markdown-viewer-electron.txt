@@ -1531,6 +1531,7 @@ body {
     overflow-y: hidden;
     padding: 0 4px;
     gap: 2px;
+    position: relative;
 }
 #file-tabs-bar.show { display: flex; }
 #file-tabs-bar::-webkit-scrollbar { height: 0; }
@@ -1569,6 +1570,55 @@ body {
 }
 .ftab:hover .ftab-close, .ftab.active .ftab-close { opacity: 1; }
 .ftab-close:hover { color: var(--red); background: rgba(248,113,113,.12); }
+.ftab.dragging { opacity: .35; }
+.ftab-pin-icon {
+    font-size: 10px;
+    color: var(--accent);
+    pointer-events: none;
+    display: none;
+}
+.ftab.pinned .ftab-pin-icon { display: inline-flex; }
+
+/* Drop indicator line between tabs */
+#tab-drop-indicator {
+    position: absolute;
+    top: 4px;
+    width: 2px;
+    height: calc(100% - 8px);
+    background: var(--accent);
+    border-radius: 1px;
+    pointer-events: none;
+    z-index: 10;
+    display: none;
+}
+#tab-drop-indicator.show { display: block; }
+
+/* Tab context menu */
+#tab-ctx-menu {
+    position: fixed;
+    z-index: 9999;
+    min-width: 140px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 30px rgba(0,0,0,.4);
+    padding: 4px 0;
+    font-family: var(--font-code);
+    font-size: 12px;
+    display: none;
+}
+#tab-ctx-menu.show { display: block; }
+.tab-ctx-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 14px;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: background .1s, color .1s;
+    white-space: nowrap;
+}
+.tab-ctx-item:hover { background: var(--accent-mid); color: var(--text); }
 
 /* ══ Mermaid diagrams ═══════════════════════════════════════ */
 .mermaid-wrap {
@@ -1600,6 +1650,103 @@ body {
 [data-theme="light"] .mermaid-wrap {
     background: linear-gradient(135deg, #ffffff 0%, #f0ede6 100%);
     box-shadow: 0 2px 12px rgba(0,0,0,.08);
+}
+.mermaid-wrap { cursor: pointer; }
+.mermaid-wrap:hover { border-color: var(--accent); }
+
+/* Mermaid node tooltip */
+#mermaid-tooltip {
+    position: fixed;
+    z-index: 10001;
+    background: var(--surface);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    padding: 5px 10px;
+    font-family: var(--font-code);
+    font-size: 11.5px;
+    color: var(--text);
+    pointer-events: none;
+    display: none;
+    max-width: 300px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.3);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+#mermaid-tooltip.show { display: block; }
+
+/* ══ Mermaid fullscreen overlay ════════════════════════════ */
+#mermaid-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    background: rgba(0,0,0,.85);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    cursor: grab;
+}
+#mermaid-overlay.show { display: flex; }
+#mermaid-overlay.panning { cursor: grabbing; }
+#mermaid-overlay * { user-select: none; }
+#mermaid-overlay-inner {
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+#mermaid-overlay {
+    touch-action: none;
+}
+#mermaid-overlay-hint {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: var(--font-code);
+    font-size: 11px;
+    color: var(--text-muted);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 12px;
+    pointer-events: none;
+    opacity: .7;
+}
+#mermaid-toolbar {
+    position: absolute;
+    top: 16px;
+    right: 20px;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 3px;
+    z-index: 1;
+    pointer-events: auto;
+}
+.mo-btn {
+    width: 32px; height: 32px;
+    display: flex; align-items: center; justify-content: center;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: var(--text-dim);
+    font-family: var(--font-code);
+    font-size: 15px;
+    cursor: pointer;
+    transition: color .12s, background .12s;
+}
+.mo-btn:hover { color: var(--text); background: var(--surface2); }
+.mo-btn.close:hover { color: var(--red); }
+#mermaid-overlay-zoom {
+    font-family: var(--font-code);
+    font-size: 11px;
+    color: var(--accent);
+    min-width: 42px;
+    text-align: center;
+    pointer-events: none;
+    padding: 0 4px;
 }
 
 @media (max-width: 960px) { #font-ctrl { display: none; } }
@@ -1667,7 +1814,7 @@ body {
 </header>
 
 <!-- File tabs bar -->
-<div id="file-tabs-bar"></div>
+<div id="file-tabs-bar"><div id="tab-drop-indicator"></div></div>
 
 <!-- ══ Main ═══════════════════════════════════════════════════════ -->
 <div id="main">
@@ -1822,6 +1969,29 @@ Ctrl+Enter to preview"></textarea>
     <div class="ctx-item" id="ctx-open-folder"><span class="ctx-icon">&#128193;</span> Open folder</div>
     <div class="ctx-sep"></div>
     <div class="ctx-item" id="ctx-copy-path"><span class="ctx-icon">&#9112;</span> Copy path</div>
+</div>
+
+<!-- Tab context menu -->
+<div id="tab-ctx-menu">
+    <div class="tab-ctx-item" id="tab-ctx-pin">📌 Pin tab</div>
+    <div class="tab-ctx-item" id="tab-ctx-close">✕ Close tab</div>
+    <div class="tab-ctx-item" id="tab-ctx-close-others">Close others</div>
+</div>
+
+<!-- Mermaid tooltip -->
+<div id="mermaid-tooltip"></div>
+
+<!-- Mermaid fullscreen overlay -->
+<div id="mermaid-overlay">
+    <div id="mermaid-toolbar">
+        <button class="mo-btn" id="mo-zoom-out" title="Zoom out">&minus;</button>
+        <span id="mermaid-overlay-zoom">100%</span>
+        <button class="mo-btn" id="mo-zoom-in" title="Zoom in">&plus;</button>
+        <button class="mo-btn" id="mo-zoom-reset" title="Reset zoom">&#8634;</button>
+        <button class="mo-btn close" id="mermaid-overlay-close" title="Close (Esc)">&times;</button>
+    </div>
+    <div id="mermaid-overlay-inner"></div>
+    <span id="mermaid-overlay-hint">Scroll to zoom &middot; Drag to pan &middot; Esc to close</span>
 </div>
 
 <script src="renderer.js"></script>
@@ -6702,12 +6872,190 @@ function renderMermaidBlocks() {
         try {
             mermaid.render(id, code).then(({ svg }) => {
                 el.innerHTML = svg;
+                // Click to open fullscreen overlay
+                const wrap = el.closest('.mermaid-wrap');
+                if (wrap) wrap.addEventListener('click', () => openMermaidOverlay(svg));
             }).catch(() => {
                 el.innerHTML = '<span style="color:var(--red)">Mermaid render error</span>';
             });
         } catch { /* mermaid not ready */ }
     });
 }
+
+/* ══ Mermaid fullscreen overlay (zoom + pan via SVG viewBox — crisp text) ═ */
+const mermaidOverlay = $('mermaid-overlay');
+const mermaidInner  = $('mermaid-overlay-inner');
+const mermaidZoomEl = $('mermaid-overlay-zoom');
+let mOverlayOpen = false, mPanning = false, mStartX = 0, mStartY = 0;
+// viewBox state: vx,vy = top-left of visible area in SVG coords, vw,vh = visible size
+let vx = 0, vy = 0, vw = 0, vh = 0, svgNatW = 0, svgNatH = 0;
+
+function openMermaidOverlay(svgHtml) {
+    mermaidInner.innerHTML = svgHtml;
+    const svg = mermaidInner.querySelector('svg');
+    if (!svg) return;
+    mermaidOverlay.classList.add('show');
+    mOverlayOpen = true;
+    // Get native SVG size
+    svgNatW = parseFloat(svg.getAttribute('width')) || svg.viewBox?.baseVal?.width || 800;
+    svgNatH = parseFloat(svg.getAttribute('height')) || svg.viewBox?.baseVal?.height || 600;
+    // Make SVG fill the overlay with no aspect ratio constraint
+    svg.removeAttribute('width');
+    svg.removeAttribute('height');
+    svg.style.width = '100%';
+    svg.style.height = '100%';
+    svg.setAttribute('preserveAspectRatio', 'xMinYMin slice');
+    // Match viewBox aspect ratio to screen so pan works in both directions
+    const screenAR = mermaidOverlay.clientWidth / mermaidOverlay.clientHeight;
+    const svgAR = svgNatW / svgNatH;
+    if (screenAR > svgAR) {
+        // Screen is wider — expand width to match
+        vw = svgNatH * screenAR; vh = svgNatH;
+        vx = -(vw - svgNatW) / 2; vy = 0;
+    } else {
+        // Screen is taller — expand height to match
+        vw = svgNatW; vh = svgNatW / screenAR;
+        vx = 0; vy = -(vh - svgNatH) / 2;
+    }
+    svg.setAttribute('viewBox', `${vx} ${vy} ${vw} ${vh}`);
+    mermaidZoomEl.textContent = '100%';
+}
+
+function closeMermaidOverlay() {
+    mermaidOverlay.classList.remove('show');
+    mOverlayOpen = false;
+    mermaidInner.innerHTML = '';
+}
+
+function applyViewBox() {
+    const svg = mermaidInner.querySelector('svg');
+    if (!svg) return;
+    svg.setAttribute('viewBox', `${vx} ${vy} ${vw} ${vh}`);
+    const zoom = Math.round((svgNatW / vw) * 100);
+    mermaidZoomEl.textContent = zoom + '%';
+}
+
+// Scroll to zoom toward cursor
+mermaidOverlay.addEventListener('wheel', e => {
+    if (!mOverlayOpen) return;
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 0.85 : 1.18;
+    const clamp = Math.max(0.05, Math.min(20, (vw * factor) / svgNatW));
+    const newW = svgNatW * clamp;
+    const newH = vh * (newW / vw); // maintain current aspect ratio
+    // Mouse position in SVG coords (the point under cursor)
+    const rect = mermaidOverlay.getBoundingClientRect();
+    const mx = vx + (e.clientX - rect.left) / rect.width * vw;
+    const my = vy + (e.clientY - rect.top) / rect.height * vh;
+    // After zoom, reposition so (mx,my) stays at the same screen pixel
+    const fx = (e.clientX - rect.left) / rect.width;
+    const fy = (e.clientY - rect.top) / rect.height;
+    vx = mx - fx * newW;
+    vy = my - fy * newH;
+    vw = newW;
+    vh = newH;
+    applyViewBox();
+}, { passive: false });
+
+// Pan via drag — pointerdown on overlay (inner SVG has pointer-events:none so events reach here)
+mermaidOverlay.addEventListener('pointerdown', e => {
+    if (!mOverlayOpen) return;
+    if (e.target.closest('#mermaid-toolbar')) return;
+    mPanning = true;
+    mStartX = e.clientX;
+    mStartY = e.clientY;
+    mermaidOverlay.setPointerCapture(e.pointerId);
+    mermaidOverlay.classList.add('panning');
+});
+mermaidOverlay.addEventListener('pointermove', e => {
+    if (!mPanning) return;
+    const rect = mermaidOverlay.getBoundingClientRect();
+    const dx = (e.clientX - mStartX) * (vw / rect.width);
+    const dy = (e.clientY - mStartY) * (vh / rect.height);
+    vx -= dx;
+    vy -= dy;
+    mStartX = e.clientX;
+    mStartY = e.clientY;
+    applyViewBox();
+});
+mermaidOverlay.addEventListener('pointerup', e => {
+    if (!mPanning) return;
+    mPanning = false;
+    mermaidOverlay.releasePointerCapture(e.pointerId);
+    mermaidOverlay.classList.remove('panning');
+});
+
+// Toolbar buttons: zoom in, zoom out, reset, close
+function mermaidZoomBy(factor) {
+    const newW = Math.max(svgNatW * 0.05, Math.min(svgNatW * 20, vw * factor));
+    const newH = Math.max(svgNatH * 0.05, Math.min(svgNatH * 20, vh * factor));
+    // Zoom toward center
+    vx = vx + (vw - newW) * 0.5;
+    vy = vy + (vh - newH) * 0.5;
+    vw = newW; vh = newH;
+    applyViewBox();
+}
+
+// Block all events on toolbar from reaching the overlay
+$('mermaid-toolbar').addEventListener('click', e => e.stopPropagation());
+$('mermaid-toolbar').addEventListener('dblclick', e => e.stopPropagation());
+$('mermaid-toolbar').addEventListener('pointerdown', e => e.stopPropagation());
+
+$('mo-zoom-in').addEventListener('click', () => mermaidZoomBy(0.7));
+$('mo-zoom-out').addEventListener('click', () => mermaidZoomBy(1.4));
+$('mo-zoom-reset').addEventListener('click', () => {
+    const screenAR = mermaidOverlay.clientWidth / mermaidOverlay.clientHeight;
+    const svgAR = svgNatW / svgNatH;
+    if (screenAR > svgAR) {
+        vw = svgNatH * screenAR; vh = svgNatH;
+        vx = -(vw - svgNatW) / 2; vy = 0;
+    } else {
+        vw = svgNatW; vh = svgNatW / screenAR;
+        vx = 0; vy = -(vh - svgNatH) / 2;
+    }
+    applyViewBox();
+});
+$('mermaid-overlay-close').addEventListener('click', closeMermaidOverlay);
+
+// Double-click on background to close (not on toolbar)
+mermaidOverlay.addEventListener('dblclick', closeMermaidOverlay);
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && mOverlayOpen) { e.preventDefault(); closeMermaidOverlay(); }
+});
+
+/* ── Mermaid node tooltip (styled, instant) ──────────── */
+const mermaidTip = $('mermaid-tooltip');
+
+document.addEventListener('mouseover', e => {
+    // Find closest node/element with a title inside a mermaid SVG
+    const node = e.target.closest('[title]');
+    if (!node) { mermaidTip.classList.remove('show'); return; }
+    const inMermaid = node.closest('.mermaid-wrap') || node.closest('#mermaid-overlay-inner');
+    if (!inMermaid) { mermaidTip.classList.remove('show'); return; }
+    const text = node.getAttribute('title');
+    if (!text) { mermaidTip.classList.remove('show'); return; }
+    // Suppress browser native tooltip by temporarily removing title
+    node.dataset.tipText = text;
+    node.removeAttribute('title');
+    mermaidTip.textContent = text;
+    mermaidTip.classList.add('show');
+});
+
+document.addEventListener('mousemove', e => {
+    if (!mermaidTip.classList.contains('show')) return;
+    mermaidTip.style.left = (e.clientX + 12) + 'px';
+    mermaidTip.style.top = (e.clientY + 12) + 'px';
+});
+
+document.addEventListener('mouseout', e => {
+    const node = e.target.closest('[data-tip-text]');
+    if (node) {
+        // Restore title attribute
+        node.setAttribute('title', node.dataset.tipText);
+        delete node.dataset.tipText;
+    }
+    mermaidTip.classList.remove('show');
+});
 
 function render() {
     mdvTaskIdx = 0;
@@ -6887,15 +7235,25 @@ function saveActiveTabState() {
     saveFileScroll(tab.path, tab.scrollTop, tab.viewTab);
 }
 
+let dragTabId = null;
+const dropIndicator = $('tab-drop-indicator');
+const tabCtxMenu = $('tab-ctx-menu');
+let tabCtxTargetId = null;
+
 function renderFileTabs() {
-    fileTabsBar.innerHTML = '';
+    // Remove old tab elements but keep the drop indicator
+    fileTabsBar.querySelectorAll('.ftab').forEach(el => el.remove());
     if (!openTabs.length) { fileTabsBar.classList.remove('show'); return; }
     fileTabsBar.classList.add('show');
+
     openTabs.forEach(tab => {
         const el = document.createElement('div');
-        el.className = 'ftab' + (tab.id === activeTabId ? ' active' : '') + (tab.isDirty ? ' dirty' : '');
+        el.className = 'ftab' + (tab.id === activeTabId ? ' active' : '') + (tab.isDirty ? ' dirty' : '') + (tab.pinned ? ' pinned' : '');
         el.dataset.tabId = tab.id;
-        el.innerHTML = `<span class="ftab-name">${esc(tab.name)}</span><button class="ftab-close">\u2715</button>`;
+        el.draggable = true;
+        el.innerHTML = `${tab.pinned ? '<span class="ftab-pin-icon">\uD83D\uDCCC</span>' : ''}<span class="ftab-name">${esc(tab.name)}</span><button class="ftab-close">\u2715</button>`;
+
+        // Click to switch
         el.addEventListener('click', e => {
             if (e.target.closest('.ftab-close')) return;
             switchToTab(tab.id);
@@ -6903,12 +7261,90 @@ function renderFileTabs() {
         // Middle-click to close
         el.addEventListener('mousedown', e => { if (e.button === 1) { e.preventDefault(); closeTab(tab.id); } });
         el.querySelector('.ftab-close').addEventListener('click', e => { e.stopPropagation(); closeTab(tab.id); });
+
+        // Right-click → context menu
+        el.addEventListener('contextmenu', e => {
+            e.preventDefault();
+            e.stopPropagation();
+            tabCtxTargetId = tab.id;
+            $('tab-ctx-pin').textContent = (tab.pinned ? '\uD83D\uDCCC Unpin tab' : '\uD83D\uDCCC Pin tab');
+            tabCtxMenu.style.left = e.clientX + 'px';
+            tabCtxMenu.style.top = e.clientY + 'px';
+            tabCtxMenu.classList.add('show');
+        });
+
+        // Drag to reorder
+        el.addEventListener('dragstart', e => {
+            dragTabId = tab.id;
+            el.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+        });
+        el.addEventListener('dragend', () => {
+            dragTabId = null;
+            el.classList.remove('dragging');
+            dropIndicator.classList.remove('show');
+        });
+        el.addEventListener('dragover', e => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            if (dragTabId === tab.id) { dropIndicator.classList.remove('show'); return; }
+            const rect = el.getBoundingClientRect();
+            const barRect = fileTabsBar.getBoundingClientRect();
+            const mid = rect.left + rect.width / 2;
+            const x = (e.clientX < mid ? rect.left : rect.right) - barRect.left + fileTabsBar.scrollLeft;
+            dropIndicator.style.left = x + 'px';
+            dropIndicator.classList.add('show');
+        });
+        el.addEventListener('dragleave', () => {});
+        el.addEventListener('drop', e => {
+            e.preventDefault();
+            dropIndicator.classList.remove('show');
+            if (!dragTabId || dragTabId === tab.id) return;
+            const fromIdx = openTabs.findIndex(t => t.id === dragTabId);
+            const toIdx = openTabs.findIndex(t => t.id === tab.id);
+            if (fromIdx === -1 || toIdx === -1) return;
+            const rect = el.getBoundingClientRect();
+            const mid = rect.left + rect.width / 2;
+            const insertBefore = e.clientX < mid;
+            const [moved] = openTabs.splice(fromIdx, 1);
+            let newIdx = openTabs.findIndex(t => t.id === tab.id);
+            if (!insertBefore) newIdx++;
+            openTabs.splice(newIdx, 0, moved);
+            renderFileTabs();
+        });
+
         fileTabsBar.appendChild(el);
     });
     // Scroll active tab into view
     const activeEl = fileTabsBar.querySelector('.ftab.active');
     if (activeEl) activeEl.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
+
+// Tab context menu actions
+document.addEventListener('click', () => tabCtxMenu.classList.remove('show'));
+window.addEventListener('blur', () => tabCtxMenu.classList.remove('show'));
+
+$('tab-ctx-pin').addEventListener('click', () => {
+    tabCtxMenu.classList.remove('show');
+    const tab = openTabs.find(t => t.id === tabCtxTargetId);
+    if (tab) { tab.pinned = !tab.pinned; renderFileTabs(); }
+});
+$('tab-ctx-close').addEventListener('click', () => {
+    tabCtxMenu.classList.remove('show');
+    if (tabCtxTargetId) closeTab(tabCtxTargetId);
+});
+$('tab-ctx-close-others').addEventListener('click', () => {
+    tabCtxMenu.classList.remove('show');
+    const keep = openTabs.filter(t => t.id === tabCtxTargetId || t.pinned);
+    openTabs.length = 0;
+    openTabs.push(...keep);
+    if (!openTabs.find(t => t.id === activeTabId) && openTabs.length) {
+        activeTabId = openTabs[0].id;
+        loadTabIntoEditor(openTabs[0]);
+    }
+    renderFileTabs();
+    renderFileList();
+});
 
 function switchToTab(tabId) {
     if (tabId === activeTabId) return;
@@ -8166,7 +8602,7 @@ This sentence has a footnote[^1] and another one[^2].
 
 ## Mermaid Diagrams
 
-### Flowchart
+### Flowchart (with tooltips — hover nodes!)
 
 ```mermaid
 graph TD
@@ -8177,6 +8613,12 @@ graph TD
     E --> F[Click file]
     F --> G[Open in tab]
     G --> H[Preview markdown]
+    click A callback "Entry point — createWindow() in main.js"
+    click B callback "Checks localStorage for mdv_last_dir"
+    click C callback "scanDir() — recursive, skips dotfiles + node_modules"
+    click E callback "renderFileList() — tree with branch lines"
+    click G callback "openInTab() — creates new tab or switches to existing"
+    click H callback "marked.parse() + hljs + mermaid + footnotes + math"
 ```
 
 ### Sequence Diagram
