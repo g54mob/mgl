@@ -1403,7 +1403,7 @@ $('logo').addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === 
 // ── Parser ─────────────────────────────────────────────────────
 function parsePacked(text) {
     const files = {};
-    const lines = text.split('\n');
+    const lines = text.replace(/\r\n?/g, '\n').split('\n');
     let currentPath = null;
     let currentLines = [];
 
